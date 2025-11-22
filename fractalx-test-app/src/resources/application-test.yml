@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: fractalx-test-app-test
+
+server:
+  port: 0  # Random port for tests
