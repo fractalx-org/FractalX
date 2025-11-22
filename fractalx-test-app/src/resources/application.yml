@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: fractalx-test-app
+
+server:
+  port: 8080
+
+fractalx:
+  enabled: true
+  observability:
+    tracing: true
+    metrics: true
+
+logging:
+  level:
+    com.fractalx: DEBUG
