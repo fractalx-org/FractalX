@@ -1,0 +1,100 @@
+package com.fractalx.core.generator;
+
+import com.fractalx.core.FractalModule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+/**
+ * Generates Spring Boot Application class for each microservice
+ */
+public class ApplicationGenerator {
+
+    private static final Logger log = LoggerFactory.getLogger(ApplicationGenerator.class);
+
+    public void generateApplicationClass(FractalModule module, Path srcMainJava) throws IOException {
+        log.debug("Generating Application class for {}", module.getServiceName());
+
+        // Create package directory
+        String basePackage = "com.fractalx.generated." + module.getServiceName().replace("-", "");
+        Path packagePath = createPackagePath(srcMainJava, basePackage);
+
+        // Generate Application.java
+        String applicationContent = generateApplicationContent(module, basePackage);
+        Path applicationPath = packagePath.resolve("Application.java");
+        Files.writeString(applicationPath, applicationContent);
+    }
+
+    private Path createPackagePath(Path srcMainJava, String packageName) throws IOException {
+        String[] parts = packageName.split("\\.");
+        Path packagePath = srcMainJava;
+        for (String part : parts) {
+            packagePath = packagePath.resolve(part);
+        }
+        Files.createDirectories(packagePath);
+        return packagePath;
+    }
+
+    private String generateApplicationContent(FractalModule module, String basePackage) {
+        String className = toPascalCase(module.getServiceName()) + "Application";
+
+        return """
+            package %s;
+            
+            import org.springframework.boot.SpringApplication;
+            import org.springframework.boot.autoconfigure.SpringBootApplication;
+            import org.springframework.cloud.openfeign.EnableFeignClients;
+            import org.springframework.context.annotation.ComponentScan;
+            
+            @SpringBootApplication
+            @EnableFeignClients
+            @ComponentScan(basePackages = {"%s", "%s"})
+            public class %s {
+                
+                public static void main(String[] args) {
+                    SpringApplication.run(%s.class, args);
+                }
+            }
+            """.formatted(
+                basePackage,
+                basePackage,
+                extractOriginalPackage(module),
+                className,
+                className
+        );
+    }
+
+    private String extractOriginalPackage(FractalModule module) {
+        // Extract base package from the module's package name
+        // e.g., "com.fractalx.testapp.order" -> "com.fractalx.testapp"
+        String packageName = module.getPackageName();
+        if (packageName != null) {
+            int lastDot = packageName.lastIndexOf('.');
+            if (lastDot > 0) {
+                return packageName.substring(0, lastDot);
+            }
+        }
+        return "com.fractalx.testapp";
+    }
+
+    private String toPascalCase(String kebabCase) {
+        StringBuilder result = new StringBuilder();
+        boolean capitalizeNext = true;
+
+        for (char c : kebabCase.toCharArray()) {
+            if (c == '-') {
+                capitalizeNext = true;
+            } else if (capitalizeNext) {
+                result.append(Character.toUpperCase(c));
+                capitalizeNext = false;
+            } else {
+                result.append(c);
+            }
+        }
+
+        return result.toString();
+    }
+}
