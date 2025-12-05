@@ -3,7 +3,7 @@ package com.fractalx.core;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
-import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MemberValuePair;
 import com.github.javaparser.ast.expr.NormalAnnotationExpr;
@@ -53,25 +53,24 @@ public class ModuleAnalyzer {
         cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
             Optional<AnnotationExpr> annotation = classDecl.getAnnotationByName("DecomposableModule");
             if (annotation.isPresent()) {
-                FractalModule module = extractModuleDescriptor(classDecl, annotation.get());
+                FractalModule module = extractModuleDescriptor(classDecl, annotation.get(), cu);
                 modules.add(module);
-                log.info("Found decomposable module: " + module.getServiceName());
+                log.info("Found decomposable module: {}", module.getServiceName());
             }
         });
     }
 
     private FractalModule extractModuleDescriptor(
             ClassOrInterfaceDeclaration classDecl,
-            AnnotationExpr annotation) {
+            AnnotationExpr annotation,
+            CompilationUnit cu) {
 
         FractalModule descriptor = new FractalModule();
         descriptor.setClassName(classDecl.getFullyQualifiedName().orElse(classDecl.getNameAsString()));
 
         // Extract package name
-        classDecl.findCompilationUnit().ifPresent(cu -> {
-            cu.getPackageDeclaration().ifPresent(pd -> {
-                descriptor.setPackageName(pd.getNameAsString());
-            });
+        cu.getPackageDeclaration().ifPresent(pd -> {
+            descriptor.setPackageName(pd.getNameAsString());
         });
 
         // Extract annotation properties
@@ -99,32 +98,44 @@ public class ModuleAnalyzer {
             }
         }
 
-        // Analyze method calls to detect cross-module dependencies
-        List<String> dependencies = findCrossModuleDependencies(classDecl);
+        // Analyze dependencies - Look at field types
+        List<String> dependencies = findDependencies(classDecl);
         descriptor.setDependencies(dependencies);
+
+        if (!dependencies.isEmpty()) {
+            log.info("Detected dependencies for {}: {}", descriptor.getServiceName(), dependencies);
+        }
 
         return descriptor;
     }
 
-    private List<String> findCrossModuleDependencies(ClassOrInterfaceDeclaration classDecl) {
+    /**
+     * Find dependencies by analyzing field declarations
+     */
+    private List<String> findDependencies(ClassOrInterfaceDeclaration classDecl) {
         Set<String> dependencies = new HashSet<>();
 
-        classDecl.findAll(MethodDeclaration.class).forEach(method -> {
-            method.findAll(com.github.javaparser.ast.expr.MethodCallExpr.class)
-                    .forEach(methodCall -> {
-                        // Detect calls to other services
-                        methodCall.getScope().ifPresent(scope -> {
-                            try {
-                                String scopeType = scope.calculateResolvedType().describe();
-                                if (scopeType.contains("Client") || scopeType.contains("Service")) {
-                                    dependencies.add(scopeType);
-                                }
-                            } catch (Exception e) {
-                                // Type resolution might fail for uncompiled code
-                                log.debug("Could not resolve type for: " + scope);
-                            }
-                        });
-                    });
+        // Analyze field declarations (injected dependencies)
+        classDecl.findAll(FieldDeclaration.class).forEach(field -> {
+            String fieldType = field.getCommonType().asString();
+
+            // Check if it's a client or service interface
+            if (fieldType.endsWith("Client") || fieldType.endsWith("Service")) {
+                dependencies.add(fieldType);
+                log.debug("Found dependency: {} in field declaration", fieldType);
+            }
+        });
+
+        // Also check constructor parameters
+        classDecl.getConstructors().forEach(constructor -> {
+            constructor.getParameters().forEach(param -> {
+                String paramType = param.getType().asString();
+
+                if (paramType.endsWith("Client") || paramType.endsWith("Service")) {
+                    dependencies.add(paramType);
+                    log.debug("Found dependency: {} in constructor parameter", paramType);
+                }
+            });
         });
 
         return new ArrayList<>(dependencies);

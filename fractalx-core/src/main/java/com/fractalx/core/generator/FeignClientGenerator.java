@@ -17,21 +17,32 @@ public class FeignClientGenerator {
     private static final Logger log = LoggerFactory.getLogger(FeignClientGenerator.class);
 
     public void generateFeignClients(FractalModule module, Path srcMainJava, List<FractalModule> allModules) throws IOException {
-        log.debug("Generating Feign clients for {}", module.getServiceName());
+        log.info("=== FeignClientGenerator START ===");
+        log.info("Module: {}", module.getServiceName());
+        log.info("Package: {}", module.getPackageName());
+        log.info("Dependencies: {}", module.getDependencies());
+        log.info("srcMainJava path: {}", srcMainJava.toAbsolutePath());
 
         // Check if this module has dependencies
         if (module.getDependencies() == null || module.getDependencies().isEmpty()) {
-            log.debug("No dependencies found for {}", module.getServiceName());
+            log.warn("No dependencies found for {} - skipping Feign client generation", module.getServiceName());
             return;
         }
 
         // For order-service, generate PaymentClient as Feign client
         if (module.getServiceName().equals("order-service")) {
+            log.info("This is order-service - generating Payment Feign client");
             generatePaymentFeignClient(module, srcMainJava, allModules);
+        } else {
+            log.info("Not order-service - skipping Payment client generation");
         }
+
+        log.info("=== FeignClientGenerator END ===");
     }
 
     private void generatePaymentFeignClient(FractalModule module, Path srcMainJava, List<FractalModule> allModules) throws IOException {
+        log.info(">>> Generating Payment Feign client...");
+
         // Find payment service
         FractalModule paymentModule = allModules.stream()
                 .filter(m -> m.getServiceName().equals("payment-service"))
@@ -39,19 +50,47 @@ public class FeignClientGenerator {
                 .orElse(null);
 
         if (paymentModule == null) {
-            log.warn("Payment service not found for Feign client generation");
+            log.error("CRITICAL: Payment service not found in allModules!");
+            log.info("Available modules: {}", allModules.stream()
+                    .map(FractalModule::getServiceName)
+                    .toList());
             return;
         }
 
-        String packageName = module.getPackageName();
+        log.info("Found payment service on port: {}", paymentModule.getPort());
+
+        // Determine the package path for the order module
+        String packageName = module.getPackageName(); // e.g., "com.fractalx.testapp.order"
+        log.info("Target package: {}", packageName);
+
+        // Create the full path: srcMainJava/com/fractalx/testapp/order/
         Path packagePath = srcMainJava;
         for (String part : packageName.split("\\.")) {
             packagePath = packagePath.resolve(part);
         }
+
+        log.info("Creating package directory: {}", packagePath.toAbsolutePath());
         Files.createDirectories(packagePath);
 
-        // Generate NEW PaymentClient as Feign interface (replaces old one)
-        String feignClientContent = """
+        if (!Files.exists(packagePath)) {
+            log.error("FAILED to create package directory!");
+            return;
+        }
+
+        // Delete old PaymentClient.java if it exists
+        Path oldClientPath = packagePath.resolve("PaymentClient.java");
+        if (Files.exists(oldClientPath)) {
+            log.info("Found old PaymentClient.java - deleting...");
+            Files.delete(oldClientPath);
+            log.info("Deleted old PaymentClient.java");
+        } else {
+            log.info("No old PaymentClient.java found");
+        }
+
+        // Generate NEW PaymentClient as Feign interface
+        log.info("Generating new PaymentClient with @FeignClient...");
+
+        String feignClientContent = String.format("""
             package %s;
             
             import org.springframework.cloud.openfeign.FeignClient;
@@ -69,7 +108,7 @@ public class FeignClientGenerator {
                 PaymentResponse processPayment(@RequestBody PaymentRequest request);
                 
                 /**
-                 * Convenience method for backward compatibility
+                 * Convenience method for backward compatibility with monolith signature
                  */
                 default boolean processPayment(String customerId, Double amount) {
                     PaymentRequest request = new PaymentRequest(customerId, amount);
@@ -77,14 +116,22 @@ public class FeignClientGenerator {
                     return response.success();
                 }
             }
-            """.formatted(packageName, paymentModule.getPort());
+            """, packageName, paymentModule.getPort());
 
         Path clientPath = packagePath.resolve("PaymentClient.java");
+        log.info("Writing PaymentClient to: {}", clientPath.toAbsolutePath());
         Files.writeString(clientPath, feignClientContent);
-        log.info("✓ Generated Feign client: PaymentClient (replaced old interface)");
+
+        if (Files.exists(clientPath)) {
+            log.info("✓✓✓ SUCCESS: PaymentClient.java created!");
+            log.info("File size: {} bytes", Files.size(clientPath));
+        } else {
+            log.error("✗✗✗ FAILED: PaymentClient.java was NOT created!");
+        }
 
         // Generate PaymentRequest DTO
-        String requestContent = """
+        log.info("Generating PaymentRequest DTO...");
+        String requestContent = String.format("""
             package %s;
             
             /**
@@ -95,14 +142,15 @@ public class FeignClientGenerator {
                 String customerId,
                 Double amount
             ) {}
-            """.formatted(packageName);
+            """, packageName);
 
         Path requestPath = packagePath.resolve("PaymentRequest.java");
         Files.writeString(requestPath, requestContent);
-        log.debug("Generated PaymentRequest DTO");
+        log.info("✓ Generated: {}", requestPath.toAbsolutePath());
 
         // Generate PaymentResponse DTO
-        String responseContent = """
+        log.info("Generating PaymentResponse DTO...");
+        String responseContent = String.format("""
             package %s;
             
             /**
@@ -113,10 +161,12 @@ public class FeignClientGenerator {
                 boolean success,
                 String message
             ) {}
-            """.formatted(packageName);
+            """, packageName);
 
         Path responsePath = packagePath.resolve("PaymentResponse.java");
         Files.writeString(responsePath, responseContent);
-        log.debug("Generated PaymentResponse DTO");
+        log.info("✓ Generated: {}", responsePath.toAbsolutePath());
+
+        log.info(">>> Payment Feign client generation COMPLETE");
     }
 }
