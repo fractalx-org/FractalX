@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 @Service
 @DecomposableModule(
         serviceName = "order-service",
-        port = 8080,
+        port = 8081,
         ownedSchemas = {"orders"}
 )
 @ServiceBoundary(allowedCallers = {"payment", "inventory"})
