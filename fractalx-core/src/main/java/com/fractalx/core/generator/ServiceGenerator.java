@@ -43,6 +43,10 @@ public class ServiceGenerator {
             generateApiGateway(modules);
         }
 
+        // Generate Admin Service
+        AdminServiceGenerator adminGenerator = new AdminServiceGenerator();
+        adminGenerator.generateAdminService(modules, outputRoot);
+
         // Generate start scripts
         generateStartScripts(modules);
 

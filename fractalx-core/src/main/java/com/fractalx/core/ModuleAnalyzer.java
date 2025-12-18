@@ -140,4 +140,13 @@ public class ModuleAnalyzer {
 
         return new ArrayList<>(dependencies);
     }
+
+    /**
+     * Check if admin service should be generated
+     */
+    public boolean shouldGenerateAdminService(Path sourceRoot) throws IOException {
+        // For now, always generate admin if there are 2+ services
+        // Later we can check for @AdminEnabled annotation
+        return true;
+    }
 }
