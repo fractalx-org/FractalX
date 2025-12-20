@@ -2,6 +2,7 @@ package com.fractalx.core.generator;
 
 import com.fractalx.core.FractalModule;
 import com.fractalx.core.gateway.GatewayGenerator;
+import com.fractalx.core.datamanagement.DistributedServiceHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,9 +21,12 @@ public class ServiceGenerator {
     private final Path sourceRoot;
     private final Path outputRoot;
 
+    private final DistributedServiceHelper distributedGen;
+
     public ServiceGenerator(Path sourceRoot, Path outputRoot) {
         this.sourceRoot = sourceRoot;
         this.outputRoot = outputRoot;
+        this.distributedGen = new DistributedServiceHelper();
     }
 
     /**
@@ -92,6 +96,9 @@ public class ServiceGenerator {
         // Step 6: Generate Feign clients for cross-service communication
         FeignClientGenerator feignGen = new FeignClientGenerator();
         feignGen.generateFeignClients(module, srcMainJava, allModules);
+
+        // Step 7: Injecting Database and State Management for Distributed Systems
+        distributedGen.upgradeService(module, sourceRoot, serviceRoot);
 
         log.info("✓ Generated: {}", module.getServiceName());
     }
