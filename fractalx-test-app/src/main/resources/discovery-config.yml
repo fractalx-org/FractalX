@@ -1,0 +1,18 @@
+fractalx:
+  discovery:
+    enabled: true
+    mode: HYBRID
+
+# Service instances configuration
+instances:
+  order-service:
+    - host: localhost
+      port: 8081
+  payment-service:
+    - host: localhost
+      port: 8080
+
+# Service dependencies
+dependencies:
+  order-service:
+    - payment-service

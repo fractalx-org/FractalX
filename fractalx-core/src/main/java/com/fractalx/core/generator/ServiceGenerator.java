@@ -38,6 +38,9 @@ public class ServiceGenerator {
             generateService(module, modules);
         }
 
+        DiscoveryConfigGenerator discoveryGen = new DiscoveryConfigGenerator();
+        discoveryGen.generateDiscoveryConfig(modules, outputRoot);
+
         // Generate API Gateway if we have multiple services
         if (modules.size() > 1) {
             generateApiGateway(modules);
