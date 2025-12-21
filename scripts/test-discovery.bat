@@ -3,8 +3,20 @@ echo =========================================
 echo Testing FractalX Discovery System
 echo =========================================
 
-REM Set test environment variables
-set DISCOVERY_SERVICES=order-service:localhost:8081,payment-service:localhost:8080,inventory-service:localhost:8082
+REM Set correct port mapping
+set DISCOVERY_PORT=9998
+set DISCOVERY_URL=http://localhost:%DISCOVERY_PORT%
+set DISCOVERY_SERVICES=payment-service:localhost:8080,order-service:localhost:8081
+
+echo.
+echo =========================================
+echo PORT MAPPING:
+echo =========================================
+echo Discovery Service:   localhost:%DISCOVERY_PORT%
+echo API Gateway:         localhost:9999
+echo Payment Service:     localhost:8080
+echo Order Service:       localhost:8081
+echo =========================================
 
 echo.
 echo 1. Running unit tests...
@@ -16,28 +28,47 @@ echo 2. Running integration tests...
 mvn test -Dtest=DiscoveryIntegrationTest
 
 echo.
-echo 3. Running all discovery tests...
-mvn test -Dtest="*Discovery*Test"
+echo 3. Testing Discovery Service on port %DISCOVERY_PORT%...
+echo.
+echo   3.1 Health check:
+curl %DISCOVERY_URL%/health
+echo.
+echo   3.2 Discovery info:
+curl %DISCOVERY_URL%/discovery/info
+echo.
+echo   3.3 Register test services:
+curl -X POST %DISCOVERY_URL%/discovery/register ^
+  -H "Content-Type: application/json" ^
+  -d "{\"instanceId\":\"payment-service-8080\",\"serviceName\":\"payment-service\",\"host\":\"localhost\",\"port\":8080}"
+echo.
+curl -X POST %DISCOVERY_URL%/discovery/register ^
+  -H "Content-Type: application/json" ^
+  -d "{\"instanceId\":\"order-service-8081\",\"serviceName\":\"order-service\",\"host\":\"localhost\",\"port\":8081}"
+echo.
+echo   3.4 View registered services:
+curl %DISCOVERY_URL%/discovery/services
+echo.
 
 echo.
 echo =========================================
-echo Test Results Summary:
+echo Manual Testing Instructions:
 echo =========================================
-echo - Unit Tests: DiscoveryRegistry, DiscoveryClient, StaticDiscoveryConfig
-echo - Integration Tests: Full discovery lifecycle
-echo - Configuration: YAML config + environment variables
 echo.
-echo To test manually:
 echo 1. Start services on different terminals:
-echo    Terminal 1: mvn spring-boot:run -Dserver.port=8081 -Dspring.application.name=order-service
-echo    Terminal 2: mvn spring-boot:run -Dserver.port=8080 -Dspring.application.name=payment-service
+echo    Terminal 1 (Discovery): mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=%DISCOVERY_PORT%
+echo    Terminal 2 (API Gateway): mvn spring-boot:run
+echo    Terminal 3 (Payment Service): mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8080
+echo    Terminal 4 (Order Service): mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
 echo.
-echo 2. Check discovery status:
-echo    curl http://localhost:8081/actuator/discovery
-echo    curl http://localhost:8080/actuator/discovery
+echo 2. Register services with discovery:
+echo    curl -X POST %DISCOVERY_URL%/discovery/register -H "Content-Type: application/json" -d "{\"instanceId\":\"payment-1\",\"serviceName\":\"payment-service\",\"host\":\"localhost\",\"port\":8080}"
+echo    curl -X POST %DISCOVERY_URL%/discovery/register -H "Content-Type: application/json" -d "{\"instanceId\":\"order-1\",\"serviceName\":\"order-service\",\"host\":\"localhost\",\"port\":8081}"
 echo.
-echo 3. Test service calls:
-echo    curl http://localhost:8081/api/test
-echo    curl http://localhost:8080/api/test
+echo 3. Test endpoints:
+echo    Discovery:   curl %DISCOVERY_URL%/health
+echo    Payment:     curl http://localhost:8080/api/payments/health
+echo    Order:       curl http://localhost:8081/api/orders/health
+echo    Gateway:     curl http://localhost:9999/actuator/health
+echo.
 
 pause

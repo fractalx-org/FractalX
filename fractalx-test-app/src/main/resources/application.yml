@@ -1,0 +1,36 @@
+#spring:
+#  application:
+#    name: fractalx-test-app
+#
+#server:
+#  port: 8761
+#
+#fractalx:
+#  enabled: true
+#  observability:
+#    tracing: true
+#    metrics: true
+#
+#logging:
+#  level:
+#    com.fractalx: DEBUG
+
+spring:
+  application:
+    name: fractalx-discovery-service
+
+server:
+  port: 9998
+
+fractalx:
+  discovery:
+    enabled: true
+    mode: HYBRID
+    host: localhost
+    heartbeat-interval: 30000
+    instance-ttl: 90000
+
+logging:
+  level:
+    com.fractalx: DEBUG
+    org.springframework.cloud: INFO

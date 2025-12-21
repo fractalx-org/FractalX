@@ -8,15 +8,6 @@ instances:
   order-service: localhost:9091
   payment-service: localhost:9090
   inventory-service: localhost:9092
-#  order-service:
-#    - host: localhost
-#      port: 9091
-#  payment-service:
-#    - host: localhost
-#      port: 9090
-#  inventory-service:
-#    - host: localhost
-#      port: 9092
 
 # Service dependencies
 dependencies:
