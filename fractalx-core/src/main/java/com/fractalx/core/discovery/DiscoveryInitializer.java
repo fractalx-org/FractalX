@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.PreDestroy;
-
 import java.util.Map;
 
 /**
@@ -22,16 +21,21 @@ public class DiscoveryInitializer {
     private String selfHost;
     private int selfPort;
 
+    // ADDED: Heartbeat scheduler
+    private java.util.concurrent.ScheduledExecutorService heartbeatScheduler;
+
     public DiscoveryInitializer() {
         this.registry = new DiscoveryRegistry();
         this.staticConfig = new StaticDiscoveryConfig();
         this.client = new DiscoveryClient(registry, staticConfig);
+        this.heartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
     }
 
     public DiscoveryInitializer(long heartbeatInterval, long instanceTtl) {
         this.registry = new DiscoveryRegistry(heartbeatInterval, instanceTtl);
         this.staticConfig = new StaticDiscoveryConfig();
         this.client = new DiscoveryClient(registry, staticConfig);
+        this.heartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
     }
 
     /**
@@ -56,6 +60,9 @@ public class DiscoveryInitializer {
         // Register static instances
         registerStaticInstances();
 
+        // Start heartbeat scheduler
+        startHeartbeatScheduler();
+
         initialized = true;
         log.info("Discovery initialized for service: {} at {}:{}",
                 serviceName, host, port);
@@ -64,7 +71,9 @@ public class DiscoveryInitializer {
     private void registerSelf() {
         ServiceInstance selfInstance = new ServiceInstance(selfServiceName, selfHost, selfPort);
         selfInstance.getMetadata().put("self", "true");
+        selfInstance.getMetadata().put("startTime", String.valueOf(System.currentTimeMillis()));
         registry.register(selfInstance);
+        log.info("Self-registered: {} at {}:{}", selfServiceName, selfHost, selfPort);
     }
 
     private void registerStaticInstances() {
@@ -75,6 +84,8 @@ public class DiscoveryInitializer {
                         instance.getHost().equals(selfHost) &&
                         instance.getPort() == selfPort)) {
                     registry.register(instance);
+                    log.debug("Registered static instance: {} -> {}:{}",
+                            instance.getServiceName(), instance.getHost(), instance.getPort());
                 }
             }
         }
@@ -87,6 +98,21 @@ public class DiscoveryInitializer {
         String instanceId = generateInstanceId(selfServiceName, selfHost, selfPort);
         registry.heartbeat(instanceId);
         log.trace("Heartbeat sent for instance: {}", instanceId);
+    }
+
+    /**
+     * Start automatic heartbeat scheduler
+     */
+    private void startHeartbeatScheduler() {
+        long heartbeatInterval = registry.getHeartbeatInterval();
+        heartbeatScheduler.scheduleAtFixedRate(() -> {
+            try {
+                sendHeartbeat();
+            } catch (Exception e) {
+                log.error("Error sending heartbeat", e);
+            }
+        }, heartbeatInterval, heartbeatInterval, java.util.concurrent.TimeUnit.MILLISECONDS);
+        log.info("Started heartbeat scheduler with interval: {}ms", heartbeatInterval);
     }
 
     private String generateInstanceId(String serviceName, String host, int port) {
@@ -131,6 +157,15 @@ public class DiscoveryInitializer {
     public void cleanup() {
         deregisterSelf();
         registry.shutdown();
+        heartbeatScheduler.shutdown();
+        try {
+            if (!heartbeatScheduler.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                heartbeatScheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            heartbeatScheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
         log.info("Discovery system cleaned up");
     }
 
@@ -141,5 +176,13 @@ public class DiscoveryInitializer {
         return initialized &&
                 registry.getInstances(selfServiceName).stream()
                         .anyMatch(instance -> instance.getStatus().equals("UP"));
+    }
+
+    /**
+     * Get service info for current instance
+     */
+    public ServiceInstance getSelfInstance() {
+        String instanceId = generateInstanceId(selfServiceName, selfHost, selfPort);
+        return registry.getInstance(instanceId);
     }
 }

@@ -1,26 +1,9 @@
-#spring:
-#  application:
-#    name: fractalx-test-app
-#
-#server:
-#  port: 8761
-#
-#fractalx:
-#  enabled: true
-#  observability:
-#    tracing: true
-#    metrics: true
-#
-#logging:
-#  level:
-#    com.fractalx: DEBUG
-
 spring:
   application:
-    name: fractalx-discovery-service
+    name: fractalx-test-app
 
 server:
-  port: 9998
+  port: 8080
 
 fractalx:
   discovery:

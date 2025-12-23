@@ -2,6 +2,7 @@ fractalx:
   discovery:
     enabled: true
     mode: HYBRID
+    registry-url: http://localhost:8761
 
 # Service instances configuration
 instances:

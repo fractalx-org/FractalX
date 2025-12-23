@@ -47,19 +47,50 @@ public class ConfigurationGenerator {
             server:
               port: %d
             
+            # FractalX Discovery Configuration
             fractalx:
               enabled: true
+              discovery:
+                enabled: true
+                mode: HYBRID
+                host: localhost
+                port: %d
+                heartbeat-interval: 30000
+                instance-ttl: 90000
+                config-file: classpath:discovery-config.yml
+                auto-register: true
               observability:
                 tracing: true
                 metrics: true
+            
+            # Service Registry Configuration
+            service:
+              registry:
+                url: http://localhost:8761
+                enabled: true
+                health-check-interval: 30000
+            
+            # Actuator endpoints for service discovery
+            management:
+              endpoints:
+                web:
+                  exposure:
+                    include: health,info,metrics,discovery
+              endpoint:
+                health:
+                  show-details: always
+                discovery:
+                  enabled: true
             
             logging:
               level:
                 com.fractalx: DEBUG
                 org.springframework.cloud.openfeign: DEBUG
+                com.fractalx.core.discovery: INFO
             """.formatted(
                 module.getServiceName(),
                 module.getServiceName().replace("-", "_"),
+                module.getPort(),
                 module.getPort()
         );
     }

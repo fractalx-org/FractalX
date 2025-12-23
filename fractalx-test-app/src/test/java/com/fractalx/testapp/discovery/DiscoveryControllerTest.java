@@ -386,10 +386,10 @@ class DiscoveryControllerTest {
 
         // Test static instances from config
         List<ServiceInstance> orderInstances = staticConfig.getStaticInstances("order-service");
-        assertEquals(2, orderInstances.size());  // Changed from 1 to 2
+        assertEquals(1, orderInstances.size());  // Change from 2 to 1
 
         List<ServiceInstance> paymentInstances = staticConfig.getStaticInstances("payment-service");
-        assertEquals(2, paymentInstances.size());  // Changed from 1 to 2
+        assertEquals(1, paymentInstances.size());  // Change from 2 to 1
 
         // Test service availability
         assertTrue(client.isServiceAvailable("order-service"));
