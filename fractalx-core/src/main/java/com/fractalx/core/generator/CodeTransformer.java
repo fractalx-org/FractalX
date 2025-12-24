@@ -16,11 +16,13 @@ public class CodeTransformer {
     private final AnnotationRemover annotationRemover;
     private final ImportCleaner importCleaner;
     private final ImportPreserver importPreserver;
+    private final EntityToIdTransformer entityToIdTransformer;
 
     public CodeTransformer() {
         this.annotationRemover = new AnnotationRemover();
         this.importCleaner = new ImportCleaner();
         this.importPreserver = new ImportPreserver();
+        this.entityToIdTransformer = new EntityToIdTransformer();
     }
 
     /**
@@ -33,6 +35,7 @@ public class CodeTransformer {
         annotationRemover.processServiceDirectory(serviceRoot);
 
         // Step 2: Ensure Spring imports are present
+        entityToIdTransformer.transform(serviceRoot, module);
         importPreserver.ensureImports(serviceRoot);
 
         // Step 3: Clean up unused imports

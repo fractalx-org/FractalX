@@ -5,6 +5,7 @@ import com.fractalx.annotations.ServiceBoundary;
 import com.fractalx.testapp.payment.PaymentClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.fractalx.testapp.customer.Customer;
 
 @Service
 @DecomposableModule(serviceName = "order-service", port = 8081, ownedSchemas = {"orders"})
@@ -23,7 +24,11 @@ public class OrderService {
     public OrderResponse createOrder(OrderRequest request) {
         // 1. Create Order (PENDING)
         Order order = new Order();
-        order.setCustomerId(request.customerId());
+
+        Customer customer = new Customer();
+        customer.setId(request.customerId());
+        order.setCustomer(customer);
+
         order.setAmount(request.amount());
         order.setStatus("PENDING");
         orderRepository.save(order); // Save to DB
