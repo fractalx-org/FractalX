@@ -81,36 +81,64 @@ public class DbConfigurationGenerator {
     private String reconstructYaml(FractalModule module, Map<String, Object> userConfig) {
         Yaml yaml = new Yaml();
 
-        // 1. Get the Datasource Map
+        // 1. Get the Datasource Map & Apply MySQL Fix
         Map<String, Object> datasource = (Map<String, Object>) userConfig.get("datasource");
 
-        // 2. SMART FIX: Automatically append 'createDatabaseIfNotExist' for MySQL
         if (datasource != null) {
             String driver = (String) datasource.get("driver-class-name");
             String url = (String) datasource.get("url");
 
             if (driver != null && driver.contains("mysql") && url != null) {
                 if (!url.contains("createDatabaseIfNotExist=true")) {
-                    // Check if URL already has other parameters (?)
                     String separator = url.contains("?") ? "&" : "?";
                     String newUrl = url + separator + "createDatabaseIfNotExist=true";
-
-                    // Update the map
                     datasource.put("url", newUrl);
                     log.info("   ✨ Auto-appended 'createDatabaseIfNotExist=true' to JDBC URL");
                 }
             }
         }
 
-        // Extract the user's specific blocks
-        String datasourceBlock = yaml.dump(userConfig.get("datasource"));
-        String jpaBlock = yaml.dump(userConfig.get("jpa"));
+        // 2. Handle JPA Block (The UX Fix)
+        Map<String, Object> jpaConfig = (Map<String, Object>) userConfig.get("jpa");
+        String jpaBlock = yaml.dump(jpaConfig);
 
-        // Build the final YAML string
+        boolean modified = false;
+
+        // INTERCEPT: If dev asked for 'update', force 'validate' so schema.sql works safely
+        if (jpaBlock.contains("ddl-auto: update")) {
+            jpaBlock = jpaBlock.replace("ddl-auto: update", "ddl-auto: validate");
+            modified = true;
+        } else if (jpaBlock.contains("ddl-auto: create-drop")) {
+            jpaBlock = jpaBlock.replace("ddl-auto: create-drop", "ddl-auto: validate");
+            modified = true;
+        }
+
+        // PREPARE COMMENT: Be transparent with the user
+        String jpaSection;
+        if (modified) {
+            String comment = """
+                # [FRACTALX AUTO-CONFIG]
+                    # Original setting was 'update'.
+                    # Changed to 'validate' because FractalX generated a schema.sql script.
+                    # This ensures the DB matches the script exactly.""";
+            jpaSection = comment + "\n" + indent(jpaBlock, 4);
+        } else {
+            jpaSection = indent(jpaBlock, 4);
+        }
+
+        String datasourceBlock = yaml.dump(datasource);
+
         return """
             spring:
               application:
                 name: %s
+              
+              # FRACTALX: Run the generated schema.sql script on startup
+              sql:
+                init:
+                  mode: always
+                  platform: mysql
+                  
               datasource:
             %s
               jpa:
@@ -132,7 +160,7 @@ public class DbConfigurationGenerator {
             """.formatted(
                 module.getServiceName(),
                 indent(datasourceBlock, 4),
-                indent(jpaBlock, 4),
+                jpaSection,
                 module.getPort() > 0 ? module.getPort() : 8080
         );
     }
