@@ -9,6 +9,10 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Stream;
 
+/**
+ * Generates the 'schema.sql' script for database initialization.
+ * Automatically handles table creation, constraints, and cleanup.
+ */
 public class SqlScriptGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(SqlScriptGenerator.class);
@@ -18,6 +22,9 @@ public class SqlScriptGenerator {
 
         StringBuilder tableSql = new StringBuilder();
         StringBuilder constraintSql = new StringBuilder();
+
+        // Disable Foreign Key checks to prevent errors when dropping tables in any order
+        tableSql.append("SET FOREIGN_KEY_CHECKS = 0;\n\n");
 
         tableSql.append("-- Auto-Generated Schema by FractalX\n");
         tableSql.append("-- Service: ").append(module.getServiceName()).append("\n\n");
@@ -40,7 +47,7 @@ public class SqlScriptGenerator {
             log.error("Failed to scan for local entities", e);
         }
 
-        // 2. Generate Tables
+        // 2. Generate SQL for Tables
         try (Stream<Path> paths = Files.walk(srcMainJava)) {
             paths.filter(p -> p.toString().endsWith(".java"))
                     .forEach(path -> {
@@ -57,6 +64,9 @@ public class SqlScriptGenerator {
                 tableSql.append(constraintSql);
             }
 
+            // Re-enable Foreign Key checks for data integrity
+            tableSql.append("\n\nSET FOREIGN_KEY_CHECKS = 1;");
+
             Path schemaPath = srcMainResources.resolve("schema.sql");
             Files.writeString(schemaPath, tableSql.toString());
             log.info("   ✓ Created schema.sql");
@@ -72,8 +82,7 @@ public class SqlScriptGenerator {
 
         StringBuilder tempSb = new StringBuilder();
 
-        // --- FIX 1: Add DROP TABLE ---
-        // This prevents "Duplicate Constraint" errors when restarting the service
+        // Drop existing table to ensure clean state
         tempSb.append("DROP TABLE IF EXISTS ").append(tableName).append(";\n");
         tempSb.append("CREATE TABLE ").append(tableName).append(" (\n");
 
@@ -161,7 +170,6 @@ public class SqlScriptGenerator {
                 if (localEntityMap.containsKey(type)) {
                     String targetTableName = localEntityMap.get(type);
 
-                    // --- FIX 2: Correct Constraint Logic ---
                     String constraint = String.format("ALTER TABLE %s ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%s) REFERENCES %s(id);\n",
                             tableName, tableName, name, camelToSnake(name), targetTableName);
 
@@ -185,8 +193,6 @@ public class SqlScriptGenerator {
             mainBuilder.append(tempSb).append("\n\n");
         }
     }
-
-    // ... (Keep your existing helper methods: mapToSqlType, extractClassName, extractTableName, camelToSnake, readFile) ...
 
     private String mapToSqlType(String javaType, boolean isRelation) {
         if (isRelation) return "VARCHAR(255)";

@@ -1,4 +1,4 @@
-package com.fractalx.core.generator;
+package com.fractalx.core.datamanagement;
 
 import com.fractalx.core.FractalModule;
 import org.slf4j.Logger;
@@ -13,12 +13,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-public class EntityToIdTransformer {
+/**
+ * Detects dependencies on entities that do not exist in the local module
+ * and replaces those object references with ID fields (Decoupling).
+ */
+public class RelationshipDecoupler {
 
-    private static final Logger log = LoggerFactory.getLogger(EntityToIdTransformer.class);
+    private static final Logger log = LoggerFactory.getLogger(RelationshipDecoupler.class);
 
     public void transform(Path serviceRoot, FractalModule module) {
-        // 1. DYNAMIC DETECTION: No more hardcoding!
+        // 1. Detect entities that are referenced but not present locally
         Set<String> remoteEntities = detectRemoteEntities(serviceRoot);
 
         if (remoteEntities.isEmpty()) {
@@ -28,7 +32,7 @@ public class EntityToIdTransformer {
 
         log.info("🔍 Detected Remote Entities: {}", remoteEntities);
 
-        // 2. Scan and Transform Files
+        // 2. Scan files and apply transformations
         try (Stream<Path> paths = Files.walk(serviceRoot)) {
             paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                 try {
@@ -59,10 +63,8 @@ public class EntityToIdTransformer {
     }
 
     /**
-     * INTELLIGENT DETECTION 🧠
-     * 1. Lists all @Entity classes present in this folder (Local).
-     * 2. Finds all classes referenced by @ManyToOne/@OneToOne (Candidates).
-     * 3. Any Candidate that is NOT Local is considered Remote.
+     * Identifies "Remote" entities by comparing all referenced entities
+     * against the list of entities actually defined in this service.
      */
     private Set<String> detectRemoteEntities(Path root) {
         Set<String> localEntities = new HashSet<>();
@@ -73,20 +75,18 @@ public class EntityToIdTransformer {
                 try {
                     String content = Files.readString(path);
 
-                    // A. Register Local Entities
+                    // Register Local Entities
                     if (content.contains("@Entity")) {
                         String className = path.getFileName().toString().replace(".java", "");
                         localEntities.add(className);
 
-                        // B. Find dependencies inside this Entity
-                        // Regex looks for: @ManyToOne ... private ClassName fieldName;
-                        // We capture "ClassName" (Group 3)
+                        // Find dependencies inside this Entity
                         String regex = "(?s)(@ManyToOne|@OneToOne|@JoinColumn)[\\s\\S]*?private\\s+(\\w+)\\s+\\w+;";
                         Matcher matcher = Pattern.compile(regex).matcher(content);
 
                         while (matcher.find()) {
-                            String type = matcher.group(2); // The Class Name (e.g., Customer)
-                            // Ignore basic Java types just in case
+                            String type = matcher.group(2);
+                            // Ignore basic Java types
                             if (!type.equals("String") && !type.equals("Long") && !type.equals("Integer")) {
                                 referencedEntities.add(type);
                             }
@@ -100,7 +100,7 @@ public class EntityToIdTransformer {
             log.error("Error walking files", e);
         }
 
-        // The Magic: Remote = Referenced - Local
+        // Remote = Referenced - Local
         referencedEntities.removeAll(localEntities);
         return referencedEntities;
     }
@@ -112,7 +112,7 @@ public class EntityToIdTransformer {
     private String transformEntityField(String content, String entityName) {
         String fieldName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1);
 
-        // --- STEP 1: BLIND RENAME ---
+        // 1. Rename field (Entity -> String ID)
         String oldFieldRegex = "private\\s+" + entityName + "\\s+" + fieldName + ";";
         String newFieldStr = "private String " + fieldName + "Id;";
 
@@ -122,7 +122,7 @@ public class EntityToIdTransformer {
             content = content.replaceAll("private\\s+" + entityName + "\\s+" + fieldName + "\\s*;", newFieldStr);
         }
 
-        // --- STEP 2: CLEANUP ANNOTATIONS ---
+        // 2. Remove JPA annotations for the relationship
         String manyToOneRegex = "@ManyToOne[\\s\\S]*?" + newFieldStr;
         content = content.replaceAll(manyToOneRegex, newFieldStr);
 
@@ -132,7 +132,7 @@ public class EntityToIdTransformer {
         String oneToOneRegex = "@OneToOne[\\s\\S]*?" + newFieldStr;
         content = content.replaceAll(oneToOneRegex, newFieldStr);
 
-        // --- STEP 3: FIX METHODS ---
+        // 3. Update Getters and Setters
         content = content.replace("public " + entityName + " get" + entityName + "()",
                 "public String get" + entityName + "Id()");
         content = content.replace("return " + fieldName + ";",

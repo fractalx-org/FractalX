@@ -13,35 +13,34 @@ import java.util.Map;
 
 /**
  * Generates application.yml for microservices.
- * INTELLIGENT: Checks the Monolith's config for overrides (e.g. MySQL) first.
- * FALLBACK: If no config found, it leaves the default H2 file alone.
+ * Reads configuration from the Monolith first; falls back to default H2 if missing.
  */
 public class DbConfigurationGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(DbConfigurationGenerator.class);
 
     public String generateDbConfig(FractalModule module, Path sourceRoot, Path serviceResourcesPath) {
-        // 1. Try to read the Monolith's application.yml
+        // 1. Read config from Monolith
         Map<String, Object> customConfig = readConfigFromMonolith(module.getServiceName(), sourceRoot);
 
         if (customConfig != null) {
-            log.info("⚙️ [SmartConfig] Found Custom Database Config for '{}'. Overwriting default...", module.getServiceName());
+            log.info("⚙️ [Config] Found Custom Database Config for '{}'. Overwriting default...", module.getServiceName());
 
-            // 2. Generate the new content (MySQL/Postgres/etc)
+            // 2. Generate new YAML content
             String newContent = reconstructYaml(module, customConfig);
 
-            // 3. Overwrite the existing H2 file
+            // 3. Write to application.yml
             try {
                 Path ymlPath = serviceResourcesPath.resolve("application.yml");
                 Files.writeString(ymlPath, newContent);
                 log.info("   ✓ Updated application.yml with custom configuration.");
 
-                // EXTRACT DRIVER CLASS to decide which dependency to inject
+                // Return driver class name for dependency injection
                 Map<String, Object> datasource = (Map<String, Object>) customConfig.get("datasource");
                 return (String) datasource.get("driver-class-name");
 
             } catch (IOException e) {
-                log.error("Failed to write smart config", e);
+                log.error("Failed to write config", e);
             }
         } else {
             log.debug("   ℹ No custom config found for '{}'. Keeping default H2.", module.getServiceName());
@@ -51,7 +50,6 @@ public class DbConfigurationGenerator {
 
     private Map<String, Object> readConfigFromMonolith(String serviceName, Path sourceRoot) {
         try {
-            // Path to monolith's src/main/resources/application.yml
             Path resourcesDir = sourceRoot.getParent().resolve("resources");
             Path yamlPath = resourcesDir.resolve("application.yml");
 
@@ -61,7 +59,6 @@ public class DbConfigurationGenerator {
             try (FileInputStream inputStream = new FileInputStream(yamlPath.toFile())) {
                 Map<String, Object> root = yaml.load(inputStream);
 
-                // Navigate: fractalx -> modules -> [serviceName]
                 if (root == null || !root.containsKey("fractalx")) return null;
 
                 Map<String, Object> fractalx = (Map<String, Object>) root.get("fractalx");
@@ -81,13 +78,14 @@ public class DbConfigurationGenerator {
     private String reconstructYaml(FractalModule module, Map<String, Object> userConfig) {
         Yaml yaml = new Yaml();
 
-        // 1. Get the Datasource Map & Apply MySQL Fix
+        // 1. Process Datasource
         Map<String, Object> datasource = (Map<String, Object>) userConfig.get("datasource");
 
         if (datasource != null) {
             String driver = (String) datasource.get("driver-class-name");
             String url = (String) datasource.get("url");
 
+            // Auto-append createDatabaseIfNotExist for MySQL to prevent startup errors
             if (driver != null && driver.contains("mysql") && url != null) {
                 if (!url.contains("createDatabaseIfNotExist=true")) {
                     String separator = url.contains("?") ? "&" : "?";
@@ -98,13 +96,13 @@ public class DbConfigurationGenerator {
             }
         }
 
-        // 2. Handle JPA Block (The UX Fix)
+        // 2. Process JPA Configuration
         Map<String, Object> jpaConfig = (Map<String, Object>) userConfig.get("jpa");
         String jpaBlock = yaml.dump(jpaConfig);
 
         boolean modified = false;
 
-        // INTERCEPT: If dev asked for 'update', force 'validate' so schema.sql works safely
+        // Force 'validate' mode to ensure DB matches generated schema.sql script
         if (jpaBlock.contains("ddl-auto: update")) {
             jpaBlock = jpaBlock.replace("ddl-auto: update", "ddl-auto: validate");
             modified = true;
@@ -113,14 +111,10 @@ public class DbConfigurationGenerator {
             modified = true;
         }
 
-        // PREPARE COMMENT: Be transparent with the user
         String jpaSection;
         if (modified) {
             String comment = """
-                # [FRACTALX AUTO-CONFIG]
-                    # Original setting was 'update'.
-                    # Changed to 'validate' because FractalX generated a schema.sql script.
-                    # This ensures the DB matches the script exactly.""";
+                # [FRACTALX] Forced 'validate' mode to respect generated schema.sql.""";
             jpaSection = comment + "\n" + indent(jpaBlock, 4);
         } else {
             jpaSection = indent(jpaBlock, 4);
@@ -133,7 +127,6 @@ public class DbConfigurationGenerator {
               application:
                 name: %s
               
-              # FRACTALX: Run the generated schema.sql script on startup
               sql:
                 init:
                   mode: always
