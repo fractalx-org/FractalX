@@ -9,17 +9,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * RENAMED: DependencyManager
- * Research Area: Dependency Management (Task 2)
- * Purpose: Provisions required infrastructure libraries (Redis, MySQL)
- * by integrating them into the build definition (pom.xml).
+ * Provisions required infrastructure libraries (Redis, MySQL)
+ * by injecting dependencies directly into the service's pom.xml.
  */
 public class DependencyManager {
 
     private static final Logger log = LoggerFactory.getLogger(DependencyManager.class);
 
     public void provisionRedis(FractalModule module, Path serviceRoot) {
-        // 8 spaces for parent, 12 spaces for children (Standard Maven Formatting)
         String dependency = """
         <dependency>
                     <groupId>org.springframework.boot</groupId>
@@ -46,22 +43,23 @@ public class DependencyManager {
             if (!Files.exists(pomPath)) return;
 
             String content = Files.readString(pomPath);
+            // Prevent duplicate entries
             if (content.contains(checkString)) return;
 
-            // Find the closing tag
+            // Locate the end of the dependencies block
             int lastIndex = content.lastIndexOf("</dependencies>");
             if (lastIndex == -1) return;
 
-            // Clean up trailing whitespace to ensure clean insertion
+            // Prepare the clean insertion point
             String start = content.substring(0, lastIndex).stripTrailing();
             String end = content.substring(lastIndex);
 
-            // Construct the clean block
+            // Insert the new dependency block
             String formattedBlock = "\n\n        " + rawXml;
             String newContent = start + formattedBlock + "\n    " + end;
 
             Files.writeString(pomPath, newContent);
-            log.info("➕ [DependencyManager] Provisioned {} for {}", checkString, module.getServiceName());
+            log.info("➕ [Dependency] Provisioned {} for {}", checkString, module.getServiceName());
 
         } catch (IOException e) {
             log.error("Failed to update pom.xml for " + module.getServiceName(), e);
