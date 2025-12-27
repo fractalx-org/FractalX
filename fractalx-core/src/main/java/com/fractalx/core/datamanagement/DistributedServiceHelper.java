@@ -9,7 +9,8 @@ import java.nio.file.Path;
 
 /**
  * Central orchestrator for applying distributed systems capabilities.
- * Coordinates data isolation, state management, dependency injection, and database configuration.
+ * Coordinates data isolation, state management, dependency injection, database configuration,
+ * and schema script generation.
  */
 public class DistributedServiceHelper {
 
@@ -19,12 +20,14 @@ public class DistributedServiceHelper {
     private final StateStoreGenerator stateGen;
     private final DependencyManager dependencyManager;
     private final DbConfigurationGenerator dbConfigGen;
+    private final SqlScriptGenerator sqlScriptGen;
 
     public DistributedServiceHelper() {
         this.isolationGen = new DataIsolationGenerator();
         this.stateGen = new StateStoreGenerator();
         this.dependencyManager = new DependencyManager();
         this.dbConfigGen = new DbConfigurationGenerator();
+        this.sqlScriptGen = new SqlScriptGenerator();
     }
 
     /**
@@ -47,10 +50,18 @@ public class DistributedServiceHelper {
         dependencyManager.provisionRedis(module, serviceRoot);
 
         // 4. Generate Database Configuration & Provision Drivers
+        // We capture the driver class name here to determine the DB dialect (MySQL/H2/Postgres)
         String driverClass = dbConfigGen.generateDbConfig(module, sourceRoot, srcMainResources);
 
-        if (driverClass != null && driverClass.contains("mysql")) {
-            dependencyManager.provisionMySQL(module, serviceRoot);
+        if (driverClass != null) {
+            if (driverClass.contains("mysql")) {
+                dependencyManager.provisionMySQL(module, serviceRoot);
+            } else if (driverClass.contains("postgresql")) {
+                dependencyManager.provisionPostgreSQL(module, serviceRoot);
+            }
         }
+
+        // 5. Generate Schema Initialization Script
+        sqlScriptGen.generateSchemaScript(module, srcMainJava, srcMainResources, driverClass);
     }
 }

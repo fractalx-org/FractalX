@@ -37,6 +37,16 @@ public class DependencyManager {
         injectDependency(module, serviceRoot, "mysql-connector-j", dependency);
     }
 
+    public void provisionPostgreSQL(FractalModule module, Path serviceRoot) {
+        String dependency = """
+        <dependency>
+                    <groupId>org.postgresql</groupId>
+                    <artifactId>postgresql</artifactId>
+                    <scope>runtime</scope>
+                </dependency>""";
+        injectDependency(module, serviceRoot, "postgresql", dependency);
+    }
+
     private void injectDependency(FractalModule module, Path serviceRoot, String checkString, String rawXml) {
         try {
             Path pomPath = serviceRoot.resolve("pom.xml");
