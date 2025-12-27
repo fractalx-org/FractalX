@@ -11,27 +11,20 @@ import java.util.stream.Stream;
 
 /**
  * Generates the 'schema.sql' script for database initialization.
- * Automatically handles table creation, constraints, and cleanup.
+ * INTELLIGENT: Detects the database dialect (MySQL, H2, Postgres) from the driver class
+ * and adapts the SQL syntax accordingly.
  */
 public class SqlScriptGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(SqlScriptGenerator.class);
 
-    public void generateSchemaScript(FractalModule module, Path srcMainJava, Path srcMainResources) {
+    // UPDATED: Accepts 'driverClassName' to determine the correct SQL syntax
+    public void generateSchemaScript(FractalModule module, Path srcMainJava, Path srcMainResources, String driverClassName) {
         log.info("🗄️ [Data] Generating Schema Script for '{}'...", module.getServiceName());
-
-        StringBuilder tableSql = new StringBuilder();
-        StringBuilder constraintSql = new StringBuilder();
-
-        // Disable Foreign Key checks to prevent errors when dropping tables in any order
-        tableSql.append("SET FOREIGN_KEY_CHECKS = 0;\n\n");
-
-        tableSql.append("-- Auto-Generated Schema by FractalX\n");
-        tableSql.append("-- Service: ").append(module.getServiceName()).append("\n\n");
 
         Map<String, String> localEntityMap = new HashMap<>();
 
-        // 1. Scan for Local Entities
+        // 1. Scan for Local Entities FIRST
         try (Stream<Path> paths = Files.walk(srcMainJava)) {
             paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                 String content = readFile(path);
@@ -47,7 +40,30 @@ public class SqlScriptGenerator {
             log.error("Failed to scan for local entities", e);
         }
 
-        // 2. Generate SQL for Tables
+        // --- SAFETY CHECK: Skip if no entities found ---
+        // This prevents "H2 Syntax Error" or "MySQL Error" when running empty scripts.
+        // This fixes the error in your Leader's POC.
+        if (localEntityMap.isEmpty()) {
+            log.warn("   ⚠️ No @Entity classes found in {}. Skipping schema.sql generation.", module.getServiceName());
+            writeSafeEmptyScript(srcMainResources);
+            return;
+        }
+
+        StringBuilder tableSql = new StringBuilder();
+        StringBuilder constraintSql = new StringBuilder();
+
+        // --- INTELLIGENT DIALECT DETECTION ---
+        DbDialect dialect = detectDialect(driverClassName);
+        log.info("   🔍 Detected Database Dialect: {}", dialect.name());
+
+        // Disable Foreign Key Checks using the correct syntax for the DB
+        tableSql.append(dialect.disableFkChecks()).append("\n\n");
+
+        tableSql.append("-- Auto-Generated Schema by FractalX\n");
+        tableSql.append("-- Service: ").append(module.getServiceName()).append("\n");
+        tableSql.append("-- Database: ").append(dialect.name()).append("\n\n");
+
+        // 2. Generate Tables
         try (Stream<Path> paths = Files.walk(srcMainJava)) {
             paths.filter(p -> p.toString().endsWith(".java"))
                     .forEach(path -> {
@@ -64,8 +80,8 @@ public class SqlScriptGenerator {
                 tableSql.append(constraintSql);
             }
 
-            // Re-enable Foreign Key checks for data integrity
-            tableSql.append("\n\nSET FOREIGN_KEY_CHECKS = 1;");
+            // Re-enable Foreign Key Checks
+            tableSql.append("\n\n").append(dialect.enableFkChecks());
 
             Path schemaPath = srcMainResources.resolve("schema.sql");
             Files.writeString(schemaPath, tableSql.toString());
@@ -76,13 +92,49 @@ public class SqlScriptGenerator {
         }
     }
 
+    private void writeSafeEmptyScript(Path srcMainResources) {
+        try {
+            Path schemaPath = srcMainResources.resolve("schema.sql");
+            // Writing a comment ensures the file exists but does nothing
+            Files.writeString(schemaPath, "-- No entities found. Schema generation skipped to prevent errors.");
+        } catch (IOException e) {
+            log.error("Could not write empty schema file", e);
+        }
+    }
+
+    // --- Helper: Database Dialect Logic ---
+
+    private enum DbDialect {
+        MYSQL("SET FOREIGN_KEY_CHECKS = 0;", "SET FOREIGN_KEY_CHECKS = 1;"),
+        H2("SET REFERENTIAL_INTEGRITY FALSE;", "SET REFERENTIAL_INTEGRITY TRUE;"),
+        POSTGRES("SET session_replication_role = 'replica';", "SET session_replication_role = 'origin';");
+
+        private final String disableCmd;
+        private final String enableCmd;
+
+        DbDialect(String disableCmd, String enableCmd) {
+            this.disableCmd = disableCmd;
+            this.enableCmd = enableCmd;
+        }
+
+        public String disableFkChecks() { return disableCmd; }
+        public String enableFkChecks() { return enableCmd; }
+    }
+
+    private DbDialect detectDialect(String driverClassName) {
+        if (driverClassName == null) return DbDialect.H2; // Default fallback to H2
+        if (driverClassName.contains("mysql")) return DbDialect.MYSQL;
+        if (driverClassName.contains("h2")) return DbDialect.H2;
+        if (driverClassName.contains("postgresql")) return DbDialect.POSTGRES;
+        return DbDialect.H2; // Fallback for unknown drivers
+    }
+
     private void generateTableSQL(String javaContent, Map<String, String> localEntityMap, StringBuilder mainBuilder, StringBuilder constraintBuilder) {
         String tableName = extractTableName(javaContent);
         if (tableName == null) return;
 
         StringBuilder tempSb = new StringBuilder();
 
-        // Drop existing table to ensure clean state
         tempSb.append("DROP TABLE IF EXISTS ").append(tableName).append(";\n");
         tempSb.append("CREATE TABLE ").append(tableName).append(" (\n");
 
@@ -169,10 +221,8 @@ public class SqlScriptGenerator {
 
                 if (localEntityMap.containsKey(type)) {
                     String targetTableName = localEntityMap.get(type);
-
                     String constraint = String.format("ALTER TABLE %s ADD CONSTRAINT fk_%s_%s FOREIGN KEY (%s) REFERENCES %s(id);\n",
                             tableName, tableName, name, camelToSnake(name), targetTableName);
-
                     constraintBuilder.append(constraint);
                 }
             }

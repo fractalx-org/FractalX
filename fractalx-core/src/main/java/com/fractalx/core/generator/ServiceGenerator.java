@@ -3,7 +3,6 @@ package com.fractalx.core.generator;
 import com.fractalx.core.FractalModule;
 import com.fractalx.core.gateway.GatewayGenerator;
 import com.fractalx.core.datamanagement.DistributedServiceHelper;
-import com.fractalx.core.datamanagement.SqlScriptGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,13 +22,11 @@ public class ServiceGenerator {
     private final Path outputRoot;
 
     private final DistributedServiceHelper distributedGen;
-    private final SqlScriptGenerator sqlGen;
 
     public ServiceGenerator(Path sourceRoot, Path outputRoot) {
         this.sourceRoot = sourceRoot;
         this.outputRoot = outputRoot;
         this.distributedGen = new DistributedServiceHelper();
-        this.sqlGen = new SqlScriptGenerator();
     }
 
     /**
@@ -102,8 +99,6 @@ public class ServiceGenerator {
 
         // Step 7: Injecting Database and State Management for Distributed Systems
         distributedGen.upgradeService(module, sourceRoot, serviceRoot);
-        // Step 7.1: Generate SQL schema script
-        sqlGen.generateSchemaScript(module, srcMainJava, srcMainResources);
 
         log.info("✓ Generated: {}", module.getServiceName());
     }
