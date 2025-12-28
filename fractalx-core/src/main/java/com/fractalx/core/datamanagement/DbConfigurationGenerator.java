@@ -16,7 +16,9 @@ import java.util.Map;
 /**
  * Generates/Updates application.yml for microservices.
  * INTELLIGENT MERGE: Reads the existing config (Service Discovery/Actuator)
- * and only updates the Database/JPA sections to avoid overwriting other settings.
+ * and only updates the Database/JPA sections.
+ * * STRATEGY: Uses 'ddl-auto: update' because RelationshipDecoupler handles
+ * the entity isolation in Java, allowing Hibernate to safely generate tables.
  */
 public class DbConfigurationGenerator {
 
@@ -78,10 +80,12 @@ public class DbConfigurationGenerator {
         processDatasourceUrl(sourceDs); // Handle MySQL param injection
         spring.put("datasource", sourceDs);
 
-        // 2. Inject JPA (Force Validate)
+        // 2. Inject JPA (Enable Update Mode)
         Map<String, Object> sourceJpa = (Map<String, Object>) source.get("jpa");
         if (sourceJpa == null) sourceJpa = new HashMap<>();
-        forceValidateMode(sourceJpa);
+
+        // CHANGED: We now enforce 'update' so Hibernate generates the schema
+        configureUpdateMode(sourceJpa);
         spring.put("jpa", sourceJpa);
 
         // 3. Inject SQL Init (Platform detection)
@@ -117,15 +121,14 @@ public class DbConfigurationGenerator {
 
         // JPA
         Map<String, Object> jpa = new HashMap<>();
-        // Note: In your sample, you didn't have 'database-platform', but it's good practice.
-        // I will stick to your sample structure closely.
         jpa.put("show-sql", true);
 
         Map<String, Object> hibernate = new HashMap<>();
-        hibernate.put("ddl-auto", "validate"); // Force validate
+        // CHANGED: 'update' allows Hibernate to create tables automatically
+        hibernate.put("ddl-auto", "update");
         jpa.put("hibernate", hibernate);
 
-        // Add formatting property from your sample
+        // Add formatting property
         Map<String, Object> properties = new HashMap<>();
         Map<String, Object> hibProps = new HashMap<>();
         hibProps.put("format_sql", true);
@@ -134,7 +137,7 @@ public class DbConfigurationGenerator {
 
         spring.put("jpa", jpa);
 
-        // H2 Console (from your sample)
+        // H2 Console
         Map<String, Object> h2 = new HashMap<>();
         Map<String, Object> console = new HashMap<>();
         console.put("enabled", true);
@@ -157,15 +160,16 @@ public class DbConfigurationGenerator {
         }
     }
 
-    private void forceValidateMode(Map<String, Object> jpaConfig) {
+    // RENAMED: This used to be 'forceValidateMode'
+    private void configureUpdateMode(Map<String, Object> jpaConfig) {
         // We check if 'hibernate' block exists, create if not
         Map<String, Object> hibernate = (Map<String, Object>) jpaConfig.get("hibernate");
         if (hibernate == null) {
             hibernate = new HashMap<>();
             jpaConfig.put("hibernate", hibernate);
         }
-        // Force validate to ensure schema.sql is respected
-        hibernate.put("ddl-auto", "validate");
+        // Force 'update' so Hibernate generates the schema based on your decoupled entities
+        hibernate.put("ddl-auto", "update");
     }
 
     private String detectPlatform(String driver) {

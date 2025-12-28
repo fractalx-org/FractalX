@@ -50,7 +50,6 @@ public class DistributedServiceHelper {
         dependencyManager.provisionRedis(module, serviceRoot);
 
         // 4. Generate Database Configuration & Provision Drivers
-        // We capture the driver class name here to determine the DB dialect (MySQL/H2/Postgres)
         String driverClass = dbConfigGen.generateDbConfig(module, sourceRoot, srcMainResources);
 
         if (driverClass != null) {
@@ -60,8 +59,5 @@ public class DistributedServiceHelper {
                 dependencyManager.provisionPostgreSQL(module, serviceRoot);
             }
         }
-
-        // 5. Generate Schema Initialization Script
-        sqlScriptGen.generateSchemaScript(module, srcMainJava, srcMainResources, driverClass);
     }
 }
