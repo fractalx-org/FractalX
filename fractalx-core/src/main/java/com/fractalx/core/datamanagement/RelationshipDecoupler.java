@@ -15,26 +15,25 @@ import java.util.stream.Stream;
 
 /**
  * Transforms Java Entities to enforce Microservice Data Isolation.
- * - Local Relationships: Kept as-is (Hibernate creates FKs).
- * - Remote Relationships: Converted to IDs (Hibernate creates simple columns).
- * - Smart Logic: Detects Java Records to use correct accessor methods.
+ * Converts relationships to remote entities into simple ID fields.
+ * Handles both Java Classes and Records for accessor methods.
  */
 public class RelationshipDecoupler {
 
     private static final Logger log = LoggerFactory.getLogger(RelationshipDecoupler.class);
 
     public void transform(Path serviceRoot, FractalModule module) {
-        // 1. Detect entities that are referenced but not present locally
+        // Detect entities that are referenced but not present locally
         Set<String> remoteEntities = detectRemoteEntities(serviceRoot);
 
         if (remoteEntities.isEmpty()) {
-            log.info("   ✅ No remote entity references found. Data is fully local.");
+            log.info("No remote entity references found. Data is fully local.");
             return;
         }
 
-        log.info("   ✂️ Decoupling Remote Entities: {}", remoteEntities);
+        log.info("Decoupling Remote Entities: {}", remoteEntities);
 
-        // 2. Scan files and apply transformations
+        // Scan files and apply transformations
         try (Stream<Path> paths = Files.walk(serviceRoot)) {
             paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                 try {
@@ -42,26 +41,21 @@ public class RelationshipDecoupler {
                     String original = content;
 
                     for (String remoteEntity : remoteEntities) {
-                        // A. Remove Imports
                         content = removeImports(content, remoteEntity);
-
-                        // B. Transform Fields (Entity -> ID)
                         content = transformEntityField(content, remoteEntity);
 
-                        // Clean up List<> for remote entities if present
+                        // Clean up List collections for remote entities
                         if (content.contains("@Entity")) {
                             content = removeOneToManyCollections(content, remoteEntity);
                         }
 
-                        // C. Fix Service Logic / Methods
                         content = transformMethodSignatures(content, remoteEntity);
-                        // Pass serviceRoot to help detect if DTOs are Records
                         content = transformServiceLogic(content, remoteEntity, serviceRoot);
                     }
 
                     if (!content.equals(original)) {
                         Files.writeString(path, content);
-                        log.info("      ✓ Refactored: {}", path.getFileName());
+                        log.info("Refactored: {}", path.getFileName());
                     }
                 } catch (IOException e) {
                     log.error("Failed to transform file: " + path, e);
@@ -84,6 +78,7 @@ public class RelationshipDecoupler {
                         String className = path.getFileName().toString().replace(".java", "");
                         localEntities.add(className);
 
+                        // Find dependencies inside this Entity
                         String regex = "(?s)(@ManyToOne|@OneToOne|@JoinColumn)[\\s\\S]*?private\\s+(\\w+)\\s+\\w+;";
                         Matcher matcher = Pattern.compile(regex).matcher(content);
 
@@ -112,6 +107,7 @@ public class RelationshipDecoupler {
     private String transformEntityField(String content, String entityName) {
         String fieldName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1);
 
+        // Rename field from Object to ID
         String oldFieldRegex = "private\\s+" + entityName + "\\s+" + fieldName + "\\s*;";
         String newFieldStr = "private String " + fieldName + "Id;";
 
@@ -121,6 +117,7 @@ public class RelationshipDecoupler {
             content = content.replaceAll(oldFieldRegex, newFieldStr);
         }
 
+        // Remove JPA annotations
         String manyToOneRegex = "@ManyToOne[\\s\\S]*?" + newFieldStr;
         content = content.replaceAll(manyToOneRegex, newFieldStr);
 
@@ -141,11 +138,13 @@ public class RelationshipDecoupler {
     private String transformMethodSignatures(String content, String entityName) {
         String fieldName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1);
 
+        // Update Getter
         content = content.replace("public " + entityName + " get" + entityName + "()",
                 "public String get" + entityName + "Id()");
         content = content.replace("return " + fieldName + ";",
                 "return " + fieldName + "Id;");
 
+        // Update Setter
         content = content.replace("public void set" + entityName + "(" + entityName + " " + fieldName + ")",
                 "public void set" + entityName + "Id(String " + fieldName + "Id)");
         content = content.replace("this." + fieldName + " = " + fieldName + ";",
@@ -157,19 +156,19 @@ public class RelationshipDecoupler {
     private String transformServiceLogic(String content, String entityName, Path serviceRoot) {
         String fieldName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1);
 
-        // Remove constructor calls: new Customer()
+        // Remove constructor calls
         content = content.replaceAll(entityName + "\\s+" + fieldName + "\\s*=\\s*new\\s+" + entityName + "\\(\\);", "");
 
-        // Remove setter calls on the object: customer.setId(...)
+        // Remove setter calls on the object itself
         content = content.replaceAll(fieldName + "\\.setId\\(.*?\\);", "");
 
-        // FIX: Detect if we are using a Record or a POJO for 'request'
+        // Update set methods to use IDs, checking if Request object is a Record or POJO
         if (content.contains("set" + entityName + "(")) {
             boolean isRecord = checkIfRequestIsRecord(serviceRoot);
 
             String accessor = isRecord
-                    ? "request." + fieldName + "Id()"       // Record style: request.customerId()
-                    : "request.get" + entityName + "Id()";  // POJO style: request.getCustomerId()
+                    ? "request." + fieldName + "Id()"       // Record style
+                    : "request.get" + entityName + "Id()";  // POJO style
 
             content = content.replace("set" + entityName + "(" + fieldName + ")",
                     "set" + entityName + "Id(" + accessor + ")");
@@ -177,13 +176,11 @@ public class RelationshipDecoupler {
         return content;
     }
 
-    // NEW HELPER: Scans for *Request.java files to see if they are Records
     private boolean checkIfRequestIsRecord(Path serviceRoot) {
         try (Stream<Path> paths = Files.walk(serviceRoot)) {
-            return paths.filter(p -> p.toString().endsWith("Request.java")) // Look for DTOs
+            return paths.filter(p -> p.toString().endsWith("Request.java"))
                     .anyMatch(path -> {
                         try {
-                            // Check if file contains "public record"
                             return Files.readString(path).contains("public record");
                         } catch (IOException e) {
                             return false;
