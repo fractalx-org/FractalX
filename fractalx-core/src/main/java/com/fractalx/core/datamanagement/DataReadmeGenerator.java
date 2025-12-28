@@ -16,9 +16,8 @@ public class DataReadmeGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(DataReadmeGenerator.class);
 
-    // Kept simple: No 'dbUrl' parameter needed. We derive the pattern logic here.
     public void generateServiceDataReadme(FractalModule module, Path serviceRoot, String driverClassName) {
-        log.info("    Generating Data README for '{}'...", module.getServiceName());
+        log.info("   📝 Generating Data README for '{}'...", module.getServiceName());
 
         StringBuilder md = new StringBuilder();
 
@@ -26,7 +25,7 @@ public class DataReadmeGenerator {
         String dbUrlDisplay = detectDbUrlPattern(module, dbType);
 
         // 1. Header
-        md.append("# ️ Data Architecture: ").append(module.getServiceName()).append("\n\n");
+        md.append("# 🗄️ Data Architecture: ").append(module.getServiceName()).append("\n\n");
         md.append("This service has been upgraded by FractalX to support **Distributed Data Isolation**.\n\n");
 
         // 2. Database Configuration
@@ -39,11 +38,11 @@ public class DataReadmeGenerator {
         md.append("| **Schema Strategy** | `ddl-auto: update` (Hibernate managed) |\n\n");
 
         if (dbType.contains("H2")) {
-            md.append("> ** Note:** This service uses an **In-Memory H2 Database** (Default).\n");
+            md.append("> **⚠️ Note:** This service uses an **In-Memory H2 Database** (Default).\n");
             md.append("> - Data is lost when the service stops.\n");
             md.append("> - To use MySQL/Postgres, see the **Configuration Guide** below.\n\n");
         } else {
-            md.append("> ** Production Mode:** This service is configured to use an external database (").append(dbType).append(").\n\n");
+            md.append("> **✅ Production Mode:** This service is configured to use an external database (").append(dbType).append(").\n\n");
         }
 
         // 3. Decoupling Strategy
@@ -67,7 +66,7 @@ public class DataReadmeGenerator {
         }
         md.append("\n");
 
-        // 6. Configuration Guide (The Template you requested)
+        // 6. Configuration Guide
         md.append("## 5. Configuration Guide\n");
         md.append("To switch this service to a physical database (MySQL/PostgreSQL), add the following block to your **Monolith's** `application.yml` before decomposition:\n\n");
 
