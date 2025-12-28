@@ -20,14 +20,14 @@ public class DistributedServiceHelper {
     private final StateStoreGenerator stateGen;
     private final DependencyManager dependencyManager;
     private final DbConfigurationGenerator dbConfigGen;
-    private final SqlScriptGenerator sqlScriptGen;
+    private final DataReadmeGenerator dataReadmeGen;
 
     public DistributedServiceHelper() {
         this.isolationGen = new DataIsolationGenerator();
         this.stateGen = new StateStoreGenerator();
         this.dependencyManager = new DependencyManager();
         this.dbConfigGen = new DbConfigurationGenerator();
-        this.sqlScriptGen = new SqlScriptGenerator();
+        this.dataReadmeGen = new DataReadmeGenerator();
     }
 
     /**
@@ -59,5 +59,8 @@ public class DistributedServiceHelper {
                 dependencyManager.provisionPostgreSQL(module, serviceRoot);
             }
         }
+
+        // 5. Generate Data README
+        dataReadmeGen.generateServiceDataReadme(module, serviceRoot, driverClass);
     }
 }
