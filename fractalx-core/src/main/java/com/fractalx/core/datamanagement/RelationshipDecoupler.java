@@ -47,7 +47,7 @@ public class RelationshipDecoupler {
                         // B. Transform Fields (Entity -> ID)
                         if (content.contains("@Entity")) {
                             content = transformEntityField(content, remoteEntity);
-                            content = removeOneToManyCollections(content, remoteEntity); // NEW: Handle Lists
+                            content = removeOneToManyCollections(content, remoteEntity);
                         }
 
                         // C. Fix Service Logic / Methods
@@ -60,14 +60,18 @@ public class RelationshipDecoupler {
                         log.info("      ✓ Refactored: {}", path.getFileName());
                     }
                 } catch (IOException e) {
-                    log.error("Failed to transform " + path, e);
+                    log.error("Failed to transform file: " + path, e);
                 }
             });
         } catch (IOException e) {
-            log.error("Failed to walk source files", e);
+            log.error("Failed to walk source files during transformation", e);
         }
     }
 
+    /**
+     * Identifies "Remote" entities by comparing all referenced entities
+     * against the list of entities actually defined in this service.
+     */
     private Set<String> detectRemoteEntities(Path root) {
         Set<String> localEntities = new HashSet<>();
         Set<String> referencedEntities = new HashSet<>();
@@ -93,9 +97,13 @@ public class RelationshipDecoupler {
                             }
                         }
                     }
-                } catch (IOException e) { /* ignore */ }
+                } catch (IOException e) {
+                    log.error("Failed to read file during entity detection: " + path, e);
+                }
             });
-        } catch (IOException e) { /* ignore */ }
+        } catch (IOException e) {
+            log.error("Failed to walk source files during entity detection", e);
+        }
 
         // Remote = Referenced - Local
         referencedEntities.removeAll(localEntities);
@@ -111,20 +119,16 @@ public class RelationshipDecoupler {
         String fieldName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1);
 
         // 1. Rename field: private Customer customer; -> private String customerId;
-        // We use regex to ensure we match whole words and spacing
         String oldFieldRegex = "private\\s+" + entityName + "\\s+" + fieldName + "\\s*;";
         String newFieldStr = "private String " + fieldName + "Id;";
 
         if (content.contains("private " + entityName + " " + fieldName + ";")) {
-            // Simple string replace is safer if exact match exists
             content = content.replace("private " + entityName + " " + fieldName + ";", newFieldStr);
         } else {
-            // Fallback to regex for varied spacing
             content = content.replaceAll(oldFieldRegex, newFieldStr);
         }
 
         // 2. Remove JPA annotations attached to this field
-        // We look for annotations followed immediately by our NEW field string
         String manyToOneRegex = "@ManyToOne[\\s\\S]*?" + newFieldStr;
         content = content.replaceAll(manyToOneRegex, newFieldStr);
 
@@ -137,15 +141,13 @@ public class RelationshipDecoupler {
         return content;
     }
 
-    // NEW: Handles @OneToMany(mappedBy="...") private List<RemoteEntity> items;
-    // If the other side is remote, this list is useless and breaks compilation. Remove it.
+    // Handles @OneToMany(mappedBy="...") private List<RemoteEntity> items;
     private String removeOneToManyCollections(String content, String entityName) {
-        // Regex: @OneToMany... List<EntityName> ... ;
         String listRegex = "(?s)@OneToMany[\\s\\S]*?List<" + entityName + ">.*?;";
         return content.replaceAll(listRegex, "// Removed remote relationship list: " + entityName);
     }
 
-    // NEW: Updates methods like public void setCustomer(Customer c) -> setCustomerId(String id)
+    // Updates methods like public void setCustomer(Customer c) -> setCustomerId(String id)
     private String transformMethodSignatures(String content, String entityName) {
         String fieldName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1);
 
@@ -167,10 +169,10 @@ public class RelationshipDecoupler {
     private String transformServiceLogic(String content, String entityName) {
         String fieldName = Character.toLowerCase(entityName.charAt(0)) + entityName.substring(1);
 
-        // Remove constructor calls: new Customer()
+        // Remove constructor calls
         content = content.replaceAll(entityName + "\\s+" + fieldName + "\\s*=\\s*new\\s+" + entityName + "\\(\\);", "");
 
-        // Remove setter calls on the object: customer.setId(...)
+        // Remove setter calls on the object
         content = content.replaceAll(fieldName + "\\.setId\\(.*?\\);", "");
 
         // Fix logic where we set the relationship
