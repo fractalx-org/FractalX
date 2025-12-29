@@ -17,14 +17,14 @@ public class DistributedServiceHelper {
     private static final Logger log = LoggerFactory.getLogger(DistributedServiceHelper.class);
 
     private final DataIsolationGenerator isolationGen;
-    private final StateStoreGenerator stateGen;
+//    private final StateStoreGenerator stateGen;
     private final DependencyManager dependencyManager;
     private final DbConfigurationGenerator dbConfigGen;
     private final DataReadmeGenerator dataReadmeGen;
 
     public DistributedServiceHelper() {
         this.isolationGen = new DataIsolationGenerator();
-        this.stateGen = new StateStoreGenerator();
+//        this.stateGen = new StateStoreGenerator();
         this.dependencyManager = new DependencyManager();
         this.dbConfigGen = new DbConfigurationGenerator();
         this.dataReadmeGen = new DataReadmeGenerator();
@@ -44,10 +44,10 @@ public class DistributedServiceHelper {
         isolationGen.generateIsolationConfig(module, srcMainJava);
 
         // 2. Configure State Management (Redis)
-        stateGen.generateStateStoreConfig(module, srcMainJava);
+//        stateGen.generateStateStoreConfig(module, srcMainJava);
 
         // 3. Provision Infrastructure Dependencies
-        dependencyManager.provisionRedis(module, serviceRoot);
+//        dependencyManager.provisionRedis(module, serviceRoot);
 
         // 4. Generate Database Configuration & Provision Drivers
         String driverClass = dbConfigGen.generateDbConfig(module, sourceRoot, srcMainResources);

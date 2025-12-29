@@ -16,15 +16,15 @@ public class DependencyManager {
 
     private static final Logger log = LoggerFactory.getLogger(DependencyManager.class);
 
-    public void provisionRedis(FractalModule module, Path serviceRoot) {
-        String dependency = """
-        <dependency>
-                    <groupId>org.springframework.boot</groupId>
-                    <artifactId>spring-boot-starter-data-redis</artifactId>
-                </dependency>""";
-
-        injectDependency(module, serviceRoot, "spring-boot-starter-data-redis", dependency);
-    }
+//    public void provisionRedis(FractalModule module, Path serviceRoot) {
+//        String dependency = """
+//        <dependency>
+//                    <groupId>org.springframework.boot</groupId>
+//                    <artifactId>spring-boot-starter-data-redis</artifactId>
+//                </dependency>""";
+//
+//        injectDependency(module, serviceRoot, "spring-boot-starter-data-redis", dependency);
+//    }
 
     public void provisionMySQL(FractalModule module, Path serviceRoot) {
         String dependency = """
