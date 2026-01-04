@@ -15,6 +15,11 @@
     <artifactId>fractalx-core</artifactId>
     <name>FractalX Core</name>
 
+    <properties>
+        <spring-boot.version>3.2.0</spring-boot.version>
+        <spring.version>6.1.1</spring.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.fractalx</groupId>
@@ -47,6 +52,7 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>
+<!--            <version>5.3.23</version>-->
         </dependency>
 
         <dependency>

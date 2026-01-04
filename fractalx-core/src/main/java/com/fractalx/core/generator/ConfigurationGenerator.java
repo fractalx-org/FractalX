@@ -55,6 +55,7 @@ public class ConfigurationGenerator {
                 mode: HYBRID
                 host: localhost
                 port: %d
+                registry-url: http://localhost:8761
                 heartbeat-interval: 30000
                 instance-ttl: 90000
                 config-file: classpath:discovery-config.yml

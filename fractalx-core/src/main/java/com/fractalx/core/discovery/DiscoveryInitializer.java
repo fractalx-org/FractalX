@@ -2,8 +2,14 @@ package com.fractalx.core.discovery;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.HttpEntity;
 
 import javax.annotation.PreDestroy;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -20,8 +26,10 @@ public class DiscoveryInitializer {
     private String selfServiceName;
     private String selfHost;
     private int selfPort;
+    private boolean registered = false;
+    private String registryUrl = "http://localhost:8761";
 
-    // ADDED: Heartbeat scheduler
+    // Heartbeat scheduler
     private java.util.concurrent.ScheduledExecutorService heartbeatScheduler;
 
     public DiscoveryInitializer() {
@@ -36,6 +44,13 @@ public class DiscoveryInitializer {
         this.staticConfig = new StaticDiscoveryConfig();
         this.client = new DiscoveryClient(registry, staticConfig);
         this.heartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+    }
+
+    /**
+     * Set registry URL
+     */
+    public void setRegistryUrl(String registryUrl) {
+        this.registryUrl = registryUrl;
     }
 
     /**
@@ -184,5 +199,58 @@ public class DiscoveryInitializer {
     public ServiceInstance getSelfInstance() {
         String instanceId = generateInstanceId(selfServiceName, selfHost, selfPort);
         return registry.getInstance(instanceId);
+    }
+
+    /**
+     * Register with central discovery service
+     */
+    public void registerWithDiscoveryService() {
+        try {
+            log.info("Attempting to register {} with discovery service at {}",
+                    selfServiceName, registryUrl);
+
+            // Create registration request with proper headers
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("serviceName", selfServiceName);
+            payload.put("host", selfHost);
+            payload.put("port", selfPort);
+            payload.put("status", "UP");
+
+            // Make HTTP POST to discovery service
+            String fullRegistryUrl = registryUrl + "/api/discovery/register";
+            RestTemplate restTemplate = new RestTemplate();
+
+            // Create proper headers
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+
+            ResponseEntity<String> response = restTemplate.postForEntity(
+                    fullRegistryUrl,
+                    request,
+                    String.class
+            );
+
+            // Use the is2xxSuccessful() method which works in both Spring 5 and 6
+            if (response.getStatusCode().is2xxSuccessful()) {
+                log.info("Successfully registered {} with discovery service at {}",
+                        selfServiceName, registryUrl);
+                registered = true;
+            } else {
+                log.warn("Failed to register {}: HTTP {}",
+                        selfServiceName, response.getStatusCode().value());
+            }
+        } catch (Exception e) {
+            log.error("Error registering with discovery service: {}", e.getMessage());
+            log.debug("Registration error details:", e);
+        }
+    }
+
+    /**
+     * Check if registered with discovery service
+     */
+    public boolean isRegistered() {
+        return registered;
     }
 }

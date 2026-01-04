@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 /**
@@ -136,6 +137,129 @@ public class ServiceGenerator {
         log.info("✓ Generated: {}", module.getServiceName());
     }
 
+//    private void generateService(FractalModule module, List<FractalModule> allModules) throws IOException {
+//        log.info("Generating service: {}", module.getServiceName());
+//
+//        // Create service directory structure
+//        Path serviceRoot = outputRoot.resolve(module.getServiceName());
+//        Path srcMainJava = serviceRoot.resolve("src/main/java");
+//        Path srcMainResources = serviceRoot.resolve("src/main/resources");
+//        Path srcTestJava = serviceRoot.resolve("src/test/java");
+//
+//        Files.createDirectories(srcMainJava);
+//        Files.createDirectories(srcMainResources);
+//        Files.createDirectories(srcTestJava);
+//
+//        // Step 1: Generate POM
+//        PomGenerator pomGen = new PomGenerator();
+//        pomGen.generatePom(module, serviceRoot);
+//
+//        // Step 2: Generate Application class
+//        ApplicationGenerator appGen = new ApplicationGenerator();
+//        appGen.generateApplicationClass(module, srcMainJava);
+//
+//        // Step 3: Generate configuration
+//        ConfigurationGenerator configGen = new ConfigurationGenerator();
+//        configGen.generateApplicationYml(module, srcMainResources);
+//
+//        // Step 4: Generate discovery configuration
+//        generateDiscoveryConfig(module, srcMainResources, allModules);
+//
+//        // Step 5: Generate discovery client
+//        DiscoveryClientGenerator discoveryGen = new DiscoveryClientGenerator();
+//        discoveryGen.generateDiscoveryClient(module, srcMainJava);
+//
+//        // Step 6: Copy module code - ENHANCED to ensure REST controllers are copied
+//        CodeCopier codeCopier = new CodeCopier(sourceRoot);
+//        codeCopier.copyModuleCode(module, srcMainJava);
+//
+//        // Additional copy for REST controllers if they're in specific locations
+//        copyRestControllers(module, srcMainJava);
+//
+//        // Step 7: Transform code using AST (remove annotations, clean imports)
+//        CodeTransformer transformer = new CodeTransformer();
+//        transformer.transformCode(serviceRoot, module);
+//
+//        // Step 8: Generate Feign clients for cross-service communication
+//        FeignClientGenerator feignGen = new FeignClientGenerator();
+//        feignGen.generateFeignClients(module, srcMainJava, allModules);
+//
+//        log.info("✓ Generated: {}", module.getServiceName());
+//    }
+
+    /**
+     * Ensure REST controllers are properly copied from original structure
+     */
+    private void copyRestControllers(FractalModule module, Path targetSrcMainJava) throws IOException {
+        // Look for REST controllers in common locations
+        String[] controllerPaths = {
+                "controller",
+                "controllers",
+                "rest",
+                "api",
+                "web"
+        };
+
+        Path sourcePackageDir = sourceRoot.resolve(module.getPackageName().replace('.', '/'));
+
+        for (String controllerPath : controllerPaths) {
+            Path controllerDir = sourcePackageDir.resolve(controllerPath);
+            if (Files.exists(controllerDir) && Files.isDirectory(controllerDir)) {
+                log.debug("Found controllers in: {}", controllerDir);
+                // Copy the controller directory
+                copyDirectoryRecursively(controllerDir,
+                        targetSrcMainJava.resolve(module.getPackageName().replace('.', '/')).resolve(controllerPath));
+            }
+        }
+    }
+
+    private void copyDirectoryRecursively(Path source, Path target) throws IOException {
+        if (!Files.exists(source)) {
+            return;
+        }
+
+        Files.walk(source)
+                .forEach(sourcePath -> {
+                    try {
+                        Path targetPath = target.resolve(source.relativize(sourcePath));
+                        if (Files.isDirectory(sourcePath)) {
+                            Files.createDirectories(targetPath);
+                        } else {
+                            // Only copy Java files for controllers
+                            if (sourcePath.toString().endsWith(".java")) {
+                                Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                                log.trace("Copied controller: {}", sourcePath.getFileName());
+                            }
+                        }
+                    } catch (IOException e) {
+                        log.error("Failed to copy controller: {}", sourcePath, e);
+                    }
+                });
+    }
+//    private void copyDirectoryRecursively(Path source, Path target) throws IOException {
+//        if (!Files.exists(source)) {
+//            return;
+//        }
+//
+//        Files.walk(source)
+//            .forEach(sourcePath -> {
+//                try {
+//                    Path targetPath = target.resolve(source.relativize(sourcePath));
+//                    if (Files.isDirectory(sourcePath)) {
+//                        Files.createDirectories(targetPath);
+//                    } else {
+//                        // Only copy Java files for controllers
+//                        if (sourcePath.toString().endsWith(".java")) {
+//                            Files.copy(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+//                            log.trace("Copied controller: {}", sourcePath.getFileName());
+//                        }
+//                    }
+//                } catch (IOException e) {
+//                    log.error("Failed to copy controller: {}", sourcePath, e);
+//                }
+//            });
+//    }
+
     private void generateDiscoveryConfig(FractalModule module, Path srcMainResources,
                                          List<FractalModule> allModules) throws IOException {
         log.debug("Generating discovery config for: {}", module.getServiceName());
@@ -197,7 +321,7 @@ public class ServiceGenerator {
                 discovery:
                   enabled: true
                   service-id: %s
-                  
+
             # Initial service registry
             service:
               registry:
@@ -545,14 +669,14 @@ public class ServiceGenerator {
 
         String appContent = """
         package com.fractalx.discovery;
-        
+
         import com.fractalx.core.discovery.DiscoveryServiceApplication;
         import org.springframework.boot.SpringApplication;
         import org.springframework.boot.autoconfigure.SpringBootApplication;
-        
+
         @SpringBootApplication
         public class DiscoveryApplication {
-            
+
             public static void main(String[] args) {
                 SpringApplication.run(DiscoveryServiceApplication.class, args);
             }
@@ -655,7 +779,7 @@ public class ServiceGenerator {
         // Generate start.sh (Unix/Linux/Mac)
         String startSh = """
         #!/bin/bash
-        
+
         echo "=========================================="
         echo "Starting FractalX Discovery Service"
         echo "=========================================="
@@ -663,7 +787,7 @@ public class ServiceGenerator {
         echo "Health Check: http://localhost:8761/api/discovery/health"
         echo "Services Endpoint: http://localhost:8761/api/discovery/services"
         echo ""
-        
+
         mvn spring-boot:run \
           -Dspring-boot.run.jvmArguments="-Dserver.port=8761" \
           -Dspring-boot.run.arguments="--server.port=8761"
@@ -682,7 +806,7 @@ public class ServiceGenerator {
         echo Health Check: http://localhost:8761/api/discovery/health
         echo Services Endpoint: http://localhost:8761/api/discovery/services
         echo.
-        
+
         mvn spring-boot:run ^
           -Dspring-boot.run.jvmArguments="-Dserver.port=8761" ^
           -Dspring-boot.run.arguments="--server.port=8761"
@@ -692,3 +816,4 @@ public class ServiceGenerator {
     }
 
 }
+

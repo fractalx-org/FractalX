@@ -47,6 +47,13 @@ public class FractalDiscoveryAutoConfiguration {
 
         discoveryInitializer.initialize(serviceName, serviceHost, serverPort);
 
+        // Register with discovery service
+        if (properties.isAutoRegister()) {
+            log.info("Auto-registering service {} with discovery at {}",
+                    serviceName, properties.getRegistryUrl());
+            discoveryInitializer.registerWithDiscoveryService();
+        }
+
         return discoveryInitializer;
     }
 
