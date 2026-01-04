@@ -11,6 +11,7 @@
 //import javax.annotation.PreDestroy;
 //import java.util.HashMap;
 //import java.util.Map;
+//import java.util.concurrent.TimeUnit;
 //
 ///**
 // * Initializes and manages the discovery system
@@ -32,11 +33,15 @@
 //    // Heartbeat scheduler
 //    private java.util.concurrent.ScheduledExecutorService heartbeatScheduler;
 //
+//    // Heartbeat sending scheduler (for sending to discovery service)
+//    private java.util.concurrent.ScheduledExecutorService discoveryHeartbeatScheduler;
+//
 //    public DiscoveryInitializer() {
 //        this.registry = new DiscoveryRegistry();
 //        this.staticConfig = new StaticDiscoveryConfig();
 //        this.client = new DiscoveryClient(registry, staticConfig);
 //        this.heartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+//        this.discoveryHeartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
 //    }
 //
 //    public DiscoveryInitializer(long heartbeatInterval, long instanceTtl) {
@@ -44,6 +49,7 @@
 //        this.staticConfig = new StaticDiscoveryConfig();
 //        this.client = new DiscoveryClient(registry, staticConfig);
 //        this.heartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+//        this.discoveryHeartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
 //    }
 //
 //    /**
@@ -72,11 +78,17 @@
 //        // Self-register
 //        registerSelf();
 //
-//        // Register static instances
+//        // Register static instances with updated heartbeat
 //        registerStaticInstances();
 //
-//        // Start heartbeat scheduler
+//        // Start heartbeat scheduler (for local registry)
 //        startHeartbeatScheduler();
+//
+//        // Register with central discovery service
+//        registerWithDiscoveryService();
+//
+//        // Start discovery heartbeat scheduler (for sending to discovery service)
+//        startDiscoveryHeartbeatScheduler();
 //
 //        initialized = true;
 //        log.info("Discovery initialized for service: {} at {}:{}",
@@ -98,6 +110,8 @@
 //                if (!(instance.getServiceName().equals(selfServiceName) &&
 //                        instance.getHost().equals(selfHost) &&
 //                        instance.getPort() == selfPort)) {
+//                    // Update heartbeat timestamp for static instances
+//                    instance.updateHeartbeat();
 //                    registry.register(instance);
 //                    log.debug("Registered static instance: {} -> {}:{}",
 //                            instance.getServiceName(), instance.getHost(), instance.getPort());
@@ -107,7 +121,7 @@
 //    }
 //
 //    /**
-//     * Send heartbeat to keep registration alive
+//     * Send heartbeat to local registry
 //     */
 //    public void sendHeartbeat() {
 //        String instanceId = generateInstanceId(selfServiceName, selfHost, selfPort);
@@ -116,7 +130,55 @@
 //    }
 //
 //    /**
-//     * Start automatic heartbeat scheduler
+//     * Send heartbeat to discovery service
+//     */
+//    public void sendHeartbeatToDiscoveryService() {
+//        if (!registered) {
+//            log.debug("Not registered with discovery service, skipping heartbeat");
+//            return;
+//        }
+//
+//        try {
+//            log.trace("Sending heartbeat to discovery service for {}", selfServiceName);
+//
+//            // Create heartbeat request
+//            Map<String, Object> payload = new HashMap<>();
+//            payload.put("serviceName", selfServiceName);
+//            payload.put("host", selfHost);
+//            payload.put("port", selfPort);
+//            payload.put("instanceId", generateInstanceId(selfServiceName, selfHost, selfPort));
+//            payload.put("timestamp", System.currentTimeMillis());
+//
+//            // Make HTTP POST to discovery service
+//            String fullRegistryUrl = registryUrl + "/api/discovery/heartbeat";
+//            RestTemplate restTemplate = new RestTemplate();
+//
+//            // Create proper headers
+//            HttpHeaders headers = new HttpHeaders();
+//            headers.setContentType(MediaType.APPLICATION_JSON);
+//
+//            HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+//
+//            ResponseEntity<String> response = restTemplate.postForEntity(
+//                    fullRegistryUrl,
+//                    request,
+//                    String.class
+//            );
+//
+//            if (response.getStatusCode().is2xxSuccessful()) {
+//                log.trace("Heartbeat successful for {}", selfServiceName);
+//            } else {
+//                log.warn("Heartbeat failed for {}: HTTP {}",
+//                        selfServiceName, response.getStatusCode().value());
+//            }
+//        } catch (Exception e) {
+//            log.error("Error sending heartbeat to discovery service: {}", e.getMessage());
+//            log.debug("Heartbeat error details:", e);
+//        }
+//    }
+//
+//    /**
+//     * Start automatic heartbeat scheduler for local registry
 //     */
 //    private void startHeartbeatScheduler() {
 //        long heartbeatInterval = registry.getHeartbeatInterval();
@@ -128,6 +190,23 @@
 //            }
 //        }, heartbeatInterval, heartbeatInterval, java.util.concurrent.TimeUnit.MILLISECONDS);
 //        log.info("Started heartbeat scheduler with interval: {}ms", heartbeatInterval);
+//    }
+//
+//    /**
+//     * Start automatic heartbeat scheduler for discovery service
+//     */
+//    private void startDiscoveryHeartbeatScheduler() {
+//        // Send heartbeats to discovery service every 15 seconds (half of TTL)
+//        long discoveryHeartbeatInterval = 15000; // 15 seconds
+//        discoveryHeartbeatScheduler.scheduleAtFixedRate(() -> {
+//                    try {
+//                        sendHeartbeatToDiscoveryService();
+//                    } catch (Exception e) {
+//                        log.error("Error sending heartbeat to discovery service", e);
+//                    }
+//                }, discoveryHeartbeatInterval, discoveryHeartbeatInterval,
+//                java.util.concurrent.TimeUnit.MILLISECONDS);
+//        log.info("Started discovery heartbeat scheduler with interval: {}ms", discoveryHeartbeatInterval);
 //    }
 //
 //    private String generateInstanceId(String serviceName, String host, int port) {
@@ -142,6 +221,46 @@
 //        registry.deregister(instanceId);
 //        log.info("Deregistered self: {} -> {}:{}",
 //                selfServiceName, selfHost, selfPort);
+//    }
+//
+//    /**
+//     * Deregister from discovery service
+//     */
+//    public void deregisterFromDiscoveryService() {
+//        if (!registered) {
+//            return;
+//        }
+//
+//        try {
+//            log.info("Deregistering {} from discovery service", selfServiceName);
+//
+//            Map<String, Object> payload = new HashMap<>();
+//            payload.put("serviceName", selfServiceName);
+//            payload.put("host", selfHost);
+//            payload.put("port", selfPort);
+//            payload.put("instanceId", generateInstanceId(selfServiceName, selfHost, selfPort));
+//
+//            String fullRegistryUrl = registryUrl + "/api/discovery/deregister";
+//            RestTemplate restTemplate = new RestTemplate();
+//
+//            HttpHeaders headers = new HttpHeaders();
+//            headers.setContentType(MediaType.APPLICATION_JSON);
+//
+//            HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+//
+//            ResponseEntity<String> response = restTemplate.postForEntity(
+//                    fullRegistryUrl,
+//                    request,
+//                    String.class
+//            );
+//
+//            if (response.getStatusCode().is2xxSuccessful()) {
+//                log.info("Successfully deregistered {} from discovery service", selfServiceName);
+//                registered = false;
+//            }
+//        } catch (Exception e) {
+//            log.error("Error deregistering from discovery service: {}", e.getMessage());
+//        }
 //    }
 //
 //    /**
@@ -170,15 +289,27 @@
 //     */
 //    @PreDestroy
 //    public void cleanup() {
+//        // Deregister from discovery service
+//        deregisterFromDiscoveryService();
+//
+//        // Deregister from local registry
 //        deregisterSelf();
+//
+//        // Shutdown schedulers
 //        registry.shutdown();
 //        heartbeatScheduler.shutdown();
+//        discoveryHeartbeatScheduler.shutdown();
+//
 //        try {
-//            if (!heartbeatScheduler.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+//            if (!heartbeatScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
 //                heartbeatScheduler.shutdownNow();
+//            }
+//            if (!discoveryHeartbeatScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+//                discoveryHeartbeatScheduler.shutdownNow();
 //            }
 //        } catch (InterruptedException e) {
 //            heartbeatScheduler.shutdownNow();
+//            discoveryHeartbeatScheduler.shutdownNow();
 //            Thread.currentThread().interrupt();
 //        }
 //        log.info("Discovery system cleaned up");
@@ -215,6 +346,8 @@
 //            payload.put("host", selfHost);
 //            payload.put("port", selfPort);
 //            payload.put("status", "UP");
+//            payload.put("instanceId", generateInstanceId(selfServiceName, selfHost, selfPort));
+//            payload.put("timestamp", System.currentTimeMillis());
 //
 //            // Make HTTP POST to discovery service
 //            String fullRegistryUrl = registryUrl + "/api/discovery/register";
@@ -268,6 +401,7 @@ import org.springframework.http.HttpEntity;
 import javax.annotation.PreDestroy;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Initializes and manages the discovery system
@@ -289,11 +423,15 @@ public class DiscoveryInitializer {
     // Heartbeat scheduler
     private java.util.concurrent.ScheduledExecutorService heartbeatScheduler;
 
+    // Heartbeat sending scheduler (for sending to discovery service)
+    private java.util.concurrent.ScheduledExecutorService discoveryHeartbeatScheduler;
+
     public DiscoveryInitializer() {
         this.registry = new DiscoveryRegistry();
         this.staticConfig = new StaticDiscoveryConfig();
         this.client = new DiscoveryClient(registry, staticConfig);
         this.heartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        this.discoveryHeartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
     }
 
     public DiscoveryInitializer(long heartbeatInterval, long instanceTtl) {
@@ -301,6 +439,7 @@ public class DiscoveryInitializer {
         this.staticConfig = new StaticDiscoveryConfig();
         this.client = new DiscoveryClient(registry, staticConfig);
         this.heartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        this.discoveryHeartbeatScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
     }
 
     /**
@@ -329,14 +468,24 @@ public class DiscoveryInitializer {
         // Self-register
         registerSelf();
 
-        // Register static instances
+        // Register static instances with updated heartbeat
         registerStaticInstances();
 
-        // Start heartbeat scheduler
+        // Start heartbeat scheduler (for local registry)
         startHeartbeatScheduler();
 
-        // Register with central discovery service
-        registerWithDiscoveryService();
+        // Skip HTTP registration for discovery service (it can't call itself)
+        if (!"discovery-service".equals(serviceName)) {
+            // Register with central discovery service
+            registerWithDiscoveryService();
+            // Start discovery heartbeat scheduler (for sending to discovery service)
+            startDiscoveryHeartbeatScheduler();
+        } else {
+            log.info("Skipping HTTP registration for discovery service (self)");
+            registered = true; // Mark as registered for heartbeat sending
+            // Still start discovery heartbeat scheduler but it will skip sending
+            startDiscoveryHeartbeatScheduler();
+        }
 
         initialized = true;
         log.info("Discovery initialized for service: {} at {}:{}",
@@ -358,6 +507,8 @@ public class DiscoveryInitializer {
                 if (!(instance.getServiceName().equals(selfServiceName) &&
                         instance.getHost().equals(selfHost) &&
                         instance.getPort() == selfPort)) {
+                    // Update heartbeat timestamp for static instances
+                    instance.updateHeartbeat();
                     registry.register(instance);
                     log.debug("Registered static instance: {} -> {}:{}",
                             instance.getServiceName(), instance.getHost(), instance.getPort());
@@ -367,7 +518,7 @@ public class DiscoveryInitializer {
     }
 
     /**
-     * Send heartbeat to keep registration alive
+     * Send heartbeat to local registry
      */
     public void sendHeartbeat() {
         String instanceId = generateInstanceId(selfServiceName, selfHost, selfPort);
@@ -376,7 +527,60 @@ public class DiscoveryInitializer {
     }
 
     /**
-     * Start automatic heartbeat scheduler
+     * Send heartbeat to discovery service
+     */
+    public void sendHeartbeatToDiscoveryService() {
+        // Skip for discovery service itself
+        if ("discovery-service".equals(selfServiceName)) {
+            return;
+        }
+
+        if (!registered) {
+            log.debug("Not registered with discovery service, skipping heartbeat");
+            return;
+        }
+
+        try {
+            log.trace("Sending heartbeat to discovery service for {}", selfServiceName);
+
+            // Create heartbeat request
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("serviceName", selfServiceName);
+            payload.put("host", selfHost);
+            payload.put("port", selfPort);
+            payload.put("instanceId", generateInstanceId(selfServiceName, selfHost, selfPort));
+            payload.put("timestamp", System.currentTimeMillis());
+
+            // Make HTTP POST to discovery service
+            String fullRegistryUrl = registryUrl + "/api/discovery/heartbeat";
+            RestTemplate restTemplate = new RestTemplate();
+
+            // Create proper headers
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+
+            ResponseEntity<Map> response = restTemplate.postForEntity(
+                    fullRegistryUrl,
+                    request,
+                    Map.class
+            );
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                log.trace("Heartbeat successful for {}", selfServiceName);
+            } else {
+                log.warn("Heartbeat failed for {}: HTTP {}",
+                        selfServiceName, response.getStatusCode().value());
+            }
+        } catch (Exception e) {
+            log.error("Error sending heartbeat to discovery service: {}", e.getMessage());
+            log.debug("Heartbeat error details:", e);
+        }
+    }
+
+    /**
+     * Start automatic heartbeat scheduler for local registry
      */
     private void startHeartbeatScheduler() {
         long heartbeatInterval = registry.getHeartbeatInterval();
@@ -388,6 +592,23 @@ public class DiscoveryInitializer {
             }
         }, heartbeatInterval, heartbeatInterval, java.util.concurrent.TimeUnit.MILLISECONDS);
         log.info("Started heartbeat scheduler with interval: {}ms", heartbeatInterval);
+    }
+
+    /**
+     * Start automatic heartbeat scheduler for discovery service
+     */
+    private void startDiscoveryHeartbeatScheduler() {
+        // Send heartbeats to discovery service every 15 seconds (half of TTL)
+        long discoveryHeartbeatInterval = 15000; // 15 seconds
+        discoveryHeartbeatScheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        sendHeartbeatToDiscoveryService();
+                    } catch (Exception e) {
+                        log.error("Error sending heartbeat to discovery service", e);
+                    }
+                }, discoveryHeartbeatInterval, discoveryHeartbeatInterval,
+                java.util.concurrent.TimeUnit.MILLISECONDS);
+        log.info("Started discovery heartbeat scheduler with interval: {}ms", discoveryHeartbeatInterval);
     }
 
     private String generateInstanceId(String serviceName, String host, int port) {
@@ -402,6 +623,51 @@ public class DiscoveryInitializer {
         registry.deregister(instanceId);
         log.info("Deregistered self: {} -> {}:{}",
                 selfServiceName, selfHost, selfPort);
+    }
+
+    /**
+     * Deregister from discovery service
+     */
+    public void deregisterFromDiscoveryService() {
+        if (!registered) {
+            return;
+        }
+
+        // Skip for discovery service itself
+        if ("discovery-service".equals(selfServiceName)) {
+            return;
+        }
+
+        try {
+            log.info("Deregistering {} from discovery service", selfServiceName);
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("serviceName", selfServiceName);
+            payload.put("host", selfHost);
+            payload.put("port", selfPort);
+            payload.put("instanceId", generateInstanceId(selfServiceName, selfHost, selfPort));
+
+            String fullRegistryUrl = registryUrl + "/api/discovery/deregister";
+            RestTemplate restTemplate = new RestTemplate();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+
+            ResponseEntity<String> response = restTemplate.postForEntity(
+                    fullRegistryUrl,
+                    request,
+                    String.class
+            );
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                log.info("Successfully deregistered {} from discovery service", selfServiceName);
+                registered = false;
+            }
+        } catch (Exception e) {
+            log.error("Error deregistering from discovery service: {}", e.getMessage());
+        }
     }
 
     /**
@@ -430,15 +696,27 @@ public class DiscoveryInitializer {
      */
     @PreDestroy
     public void cleanup() {
+        // Deregister from discovery service
+        deregisterFromDiscoveryService();
+
+        // Deregister from local registry
         deregisterSelf();
+
+        // Shutdown schedulers
         registry.shutdown();
         heartbeatScheduler.shutdown();
+        discoveryHeartbeatScheduler.shutdown();
+
         try {
-            if (!heartbeatScheduler.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+            if (!heartbeatScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
                 heartbeatScheduler.shutdownNow();
+            }
+            if (!discoveryHeartbeatScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                discoveryHeartbeatScheduler.shutdownNow();
             }
         } catch (InterruptedException e) {
             heartbeatScheduler.shutdownNow();
+            discoveryHeartbeatScheduler.shutdownNow();
             Thread.currentThread().interrupt();
         }
         log.info("Discovery system cleaned up");
@@ -475,6 +753,8 @@ public class DiscoveryInitializer {
             payload.put("host", selfHost);
             payload.put("port", selfPort);
             payload.put("status", "UP");
+            payload.put("instanceId", generateInstanceId(selfServiceName, selfHost, selfPort));
+            payload.put("timestamp", System.currentTimeMillis());
 
             // Make HTTP POST to discovery service
             String fullRegistryUrl = registryUrl + "/api/discovery/register";
