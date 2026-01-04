@@ -3,6 +3,7 @@ package com.fractalx.core.generator;
 import com.fractalx.core.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fractalx.core.observability.ObservabilityInjector;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -14,6 +15,7 @@ import java.nio.file.Path;
 public class PomGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(PomGenerator.class);
+    private final ObservabilityInjector observabilityInjector = new ObservabilityInjector();
 
     public void generatePom(FractalModule module, Path serviceRoot) throws IOException {
         log.debug("Generating pom.xml for {}", module.getServiceName());
@@ -88,6 +90,7 @@ public class PomGenerator {
                         <artifactId>h2</artifactId>
                         <scope>runtime</scope>
                     </dependency>
+                    %s
                 </dependencies>
             
                 <build>
@@ -109,7 +112,8 @@ public class PomGenerator {
             </project>
             """.formatted(
                 module.getServiceName(),
-                module.getServiceName()
+                module.getServiceName(),
+                observabilityInjector.getDependencies()
         );
     }
 }
