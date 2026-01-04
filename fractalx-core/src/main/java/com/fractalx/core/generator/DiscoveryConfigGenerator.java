@@ -53,11 +53,12 @@ public class DiscoveryConfigGenerator {
 
         for (FractalModule module : modules) {
             yaml.append("  ").append(module.getServiceName()).append(":\n");
-            yaml.append("    - host: localhost\n");
-            yaml.append("      port: ").append(module.getPort()).append("\n");
+            yaml.append("    instances:\n");
+            yaml.append("      - host: localhost\n");
+            yaml.append("        port: ").append(module.getPort()).append("\n");
 
             if (!module.getDependencies().isEmpty()) {
-                yaml.append("    dependencies:\n");
+                yaml.append("    dependencies:\n");  // At service level, not instance level
                 for (String dep : module.getDependencies()) {
                     yaml.append("      - ").append(dep).append("\n");
                 }

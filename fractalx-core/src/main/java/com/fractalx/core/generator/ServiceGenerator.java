@@ -20,9 +20,31 @@ public class ServiceGenerator {
     private final Path sourceRoot;
     private final Path outputRoot;
 
+    private boolean discoveryEnabled = true;
+    private int discoveryPort = 8761;
+    private int gatewayPort = 9999;
+    private int adminPort = 9090;
+
     public ServiceGenerator(Path sourceRoot, Path outputRoot) {
         this.sourceRoot = sourceRoot;
         this.outputRoot = outputRoot;
+    }
+
+    // Configuration setters
+    public void setDiscoveryEnabled(boolean discoveryEnabled) {
+        this.discoveryEnabled = discoveryEnabled;
+    }
+
+    public void setDiscoveryPort(int discoveryPort) {
+        this.discoveryPort = discoveryPort;
+    }
+
+    public void setGatewayPort(int gatewayPort) {
+        this.gatewayPort = gatewayPort;
+    }
+
+    public void setAdminPort(int adminPort) {
+        this.adminPort = adminPort;
     }
 
     /**
@@ -34,23 +56,31 @@ public class ServiceGenerator {
         // Create output directory
         Files.createDirectories(outputRoot);
 
+        // Step 1: Generate the standalone discovery service (if enabled)
+        if (discoveryEnabled) {
+            generateDiscoveryService(modules);
+        }
+
+        // Step 2: Generate all regular services
         for (FractalModule module : modules) {
             generateService(module, modules);
         }
 
+        // Step 3: Generate discovery configuration for services
         DiscoveryConfigGenerator discoveryGen = new DiscoveryConfigGenerator();
         discoveryGen.generateDiscoveryConfig(modules, outputRoot);
 
-        // Generate API Gateway if we have multiple services
+        // Step 4: Generate API Gateway if we have multiple services
         if (modules.size() > 1) {
             generateApiGateway(modules);
         }
 
-        // Generate Admin Service
+        // Step 5: Generate Admin Service
         AdminServiceGenerator adminGenerator = new AdminServiceGenerator();
+        adminGenerator.setAdminPort(adminPort);
         adminGenerator.generateAdminService(modules, outputRoot);
 
-        // Generate start scripts
+        // Step 6: Generate start scripts
         generateStartScripts(modules);
 
         log.info("Code generation complete!");
@@ -143,11 +173,12 @@ public class ServiceGenerator {
             yml.append("    - host: localhost\n");
             yml.append("      port: ").append(m.getPort()).append("\n");
 
-            // Add dependencies if any
+            // FIX: Add dependencies as metadata
             if (!m.getDependencies().isEmpty()) {
-                yml.append("    dependencies:\n");
+                yml.append("      metadata:\n");
+                yml.append("        dependencies:\n");
                 for (String dep : m.getDependencies()) {
-                    yml.append("      - ").append(dep).append("\n");
+                    yml.append("          - ").append(dep).append("\n");
                 }
             }
             yml.append("\n");
@@ -397,4 +428,267 @@ public class ServiceGenerator {
 
         log.info("✓ Generated README.md");
     }
+
+    //-----------------------------------------------------------------
+
+    /**
+     * Generate standalone discovery service
+     */
+    private void generateDiscoveryService(List<FractalModule> modules) throws IOException {
+        log.info("Generating Discovery Service on port {}...", discoveryPort);
+
+        // Create discovery service directory
+        Path discoveryRoot = outputRoot.resolve("discovery-service");
+        Path srcMainJava = discoveryRoot.resolve("src/main/java");
+        Path srcMainResources = discoveryRoot.resolve("src/main/resources");
+
+        Files.createDirectories(srcMainJava);
+        Files.createDirectories(srcMainResources);
+
+        // Generate POM for discovery service
+        generateDiscoveryPom(discoveryRoot, modules);
+
+        // Generate Application class
+        generateDiscoveryApplication(srcMainJava);
+
+        // Generate configuration
+        generateDiscoveryConfig(srcMainResources, modules);
+
+        // Generate start scripts (cross-platform)
+        generateDiscoveryStartScripts(discoveryRoot, modules);
+
+        log.info("✓ Generated Discovery Service on port 8761");
+    }
+
+    private void generateDiscoveryPom(Path discoveryRoot, List<FractalModule> modules) throws IOException {
+        String pomContent = generateDiscoveryPomContent(modules);
+        Files.writeString(discoveryRoot.resolve("pom.xml"), pomContent);
+    }
+
+    private String generateDiscoveryPomContent(List<FractalModule> modules) {
+        StringBuilder pom = new StringBuilder();
+        pom.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        pom.append("<project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n");
+        pom.append("         xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n");
+        pom.append("         xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd\">\n");
+        pom.append("    <modelVersion>4.0.0</modelVersion>\n");
+        pom.append("\n");
+        pom.append("    <groupId>com.fractalx.generated</groupId>\n");
+        pom.append("    <artifactId>discovery-service</artifactId>\n");
+        pom.append("    <version>1.0.0-SNAPSHOT</version>\n");
+        pom.append("    <packaging>jar</packaging>\n");
+        pom.append("\n");
+        pom.append("    <name>FractalX Discovery Service</name>\n");
+        pom.append("    <description>Service discovery for FractalX microservices</description>\n");
+        pom.append("\n");
+        pom.append("    <properties>\n");
+        pom.append("        <java.version>17</java.version>\n");
+        pom.append("        <spring-boot.version>3.2.0</spring-boot.version>\n");
+        pom.append("        <maven.compiler.source>17</maven.compiler.source>\n");
+        pom.append("        <maven.compiler.target>17</maven.compiler.target>\n");
+        pom.append("        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>\n");
+        pom.append("    </properties>\n");
+        pom.append("\n");
+        pom.append("    <dependencyManagement>\n");
+        pom.append("        <dependencies>\n");
+        pom.append("            <dependency>\n");
+        pom.append("                <groupId>org.springframework.boot</groupId>\n");
+        pom.append("                <artifactId>spring-boot-dependencies</artifactId>\n");
+        pom.append("                <version>${spring-boot.version}</version>\n");
+        pom.append("                <type>pom</type>\n");
+        pom.append("                <scope>import</scope>\n");
+        pom.append("            </dependency>\n");
+        pom.append("        </dependencies>\n");
+        pom.append("    </dependencyManagement>\n");
+        pom.append("\n");
+        pom.append("    <dependencies>\n");
+        pom.append("        <dependency>\n");
+        pom.append("            <groupId>org.springframework.boot</groupId>\n");
+        pom.append("            <artifactId>spring-boot-starter-web</artifactId>\n");
+        pom.append("        </dependency>\n");
+        pom.append("\n");
+        pom.append("        <dependency>\n");
+        pom.append("            <groupId>com.fractalx</groupId>\n");
+        pom.append("            <artifactId>fractalx-core</artifactId>\n");
+        pom.append("            <version>0.1.0-SNAPSHOT</version>\n");
+        pom.append("        </dependency>\n");
+        pom.append("\n");
+        pom.append("        <dependency>\n");
+        pom.append("            <groupId>org.springframework.boot</groupId>\n");
+        pom.append("            <artifactId>spring-boot-starter-actuator</artifactId>\n");
+        pom.append("        </dependency>\n");
+        pom.append("\n");
+        pom.append("        <dependency>\n");
+        pom.append("            <groupId>org.yaml</groupId>\n");
+        pom.append("            <artifactId>snakeyaml</artifactId>\n");
+        pom.append("            <version>2.2</version>\n");
+        pom.append("        </dependency>\n");
+        pom.append("    </dependencies>\n");
+        pom.append("\n");
+        pom.append("    <build>\n");
+        pom.append("        <plugins>\n");
+        pom.append("            <plugin>\n");
+        pom.append("                <groupId>org.springframework.boot</groupId>\n");
+        pom.append("                <artifactId>spring-boot-maven-plugin</artifactId>\n");
+        pom.append("                <version>${spring-boot.version}</version>\n");
+        pom.append("            </plugin>\n");
+        pom.append("        </plugins>\n");
+        pom.append("    </build>\n");
+        pom.append("</project>\n");
+
+        return pom.toString();
+    }
+
+    private void generateDiscoveryApplication(Path srcMainJava) throws IOException {
+        Path packagePath = srcMainJava.resolve("com/fractalx/discovery");
+        Files.createDirectories(packagePath);
+
+        String appContent = """
+        package com.fractalx.discovery;
+        
+        import com.fractalx.core.discovery.DiscoveryServiceApplication;
+        import org.springframework.boot.SpringApplication;
+        import org.springframework.boot.autoconfigure.SpringBootApplication;
+        
+        @SpringBootApplication
+        public class DiscoveryApplication {
+            
+            public static void main(String[] args) {
+                SpringApplication.run(DiscoveryServiceApplication.class, args);
+            }
+        }
+        """;
+
+        Files.writeString(packagePath.resolve("DiscoveryApplication.java"), appContent);
+    }
+
+    private void generateDiscoveryConfig(Path srcMainResources, List<FractalModule> modules) throws IOException {
+        // Generate application.yml
+        String appYml = generateDiscoveryAppYml(modules);
+        Files.writeString(srcMainResources.resolve("application.yml"), appYml);
+
+        // Generate static-services.yml
+        String staticServices = generateStaticServicesYml(modules);
+        Files.writeString(srcMainResources.resolve("static-services.yml"), staticServices);
+    }
+
+    private String generateDiscoveryAppYml(List<FractalModule> modules) {
+        StringBuilder yml = new StringBuilder();
+        yml.append("spring:\n");
+        yml.append("  application:\n");
+        yml.append("    name: discovery-service\n");
+        yml.append("\n");
+        yml.append("server:\n");
+        yml.append("  port: 8761\n");
+        yml.append("\n");
+        yml.append("fractalx:\n");
+        yml.append("  discovery:\n");
+        yml.append("    enabled: true\n");
+        yml.append("    mode: DYNAMIC\n");
+        yml.append("    host: localhost\n");
+        yml.append("    port: 8761\n");
+        yml.append("    heartbeat-interval: 30000\n");
+        yml.append("    instance-ttl: 90000\n");
+        yml.append("    auto-cleanup: true\n");
+        yml.append("    auto-register: true\n");
+        yml.append("\n");
+        yml.append("# Static configuration for initial bootstrap\n");
+        yml.append("discovery:\n");
+        yml.append("  static-config:\n");
+        yml.append("    enabled: true\n");
+        yml.append("    file: classpath:static-services.yml\n");
+        yml.append("\n");
+        yml.append("management:\n");
+        yml.append("  endpoints:\n");
+        yml.append("    web:\n");
+        yml.append("      exposure:\n");
+        yml.append("        include: health,info,metrics,discovery\n");
+        yml.append("  endpoint:\n");
+        yml.append("    health:\n");
+        yml.append("      show-details: always\n");
+        yml.append("\n");
+        yml.append("logging:\n");
+        yml.append("  level:\n");
+        yml.append("    com.fractalx.core.discovery: DEBUG\n");
+        yml.append("    com.fractalx.discovery: INFO\n");
+
+        return yml.toString();
+    }
+
+    private String generateStaticServicesYml(List<FractalModule> modules) {
+        StringBuilder yml = new StringBuilder();
+        yml.append("# Static Services Configuration\n");
+        yml.append("# Used for initial discovery service bootstrap\n");
+        yml.append("\n");
+        yml.append("instances:\n");
+        yml.append("  discovery-service:\n");
+        yml.append("    - host: localhost\n");
+        yml.append("      port: 8761\n");
+        yml.append("      metadata:\n");
+        yml.append("        role: registry\n");
+        yml.append("        version: \"1.0\"\n");
+        yml.append("\n");
+
+        // Add all generated services
+        for (FractalModule module : modules) {
+            yml.append("  ").append(module.getServiceName()).append(":\n");
+            yml.append("    - host: localhost\n");
+            yml.append("      port: ").append(module.getPort()).append("\n");
+            yml.append("      metadata:\n");
+            yml.append("        generated: true\n");
+            yml.append("        framework: fractalx\n");
+            yml.append("\n");
+        }
+
+        // Add gateway if it will be generated
+        yml.append("  fractalx-gateway:\n");
+        yml.append("    - host: localhost\n");
+        yml.append("      port: 9999\n");
+        yml.append("      metadata:\n");
+        yml.append("        role: gateway\n");
+        yml.append("        version: \"1.0\"\n");
+
+        return yml.toString();
+    }
+
+    private void generateDiscoveryStartScripts(Path discoveryRoot, List<FractalModule> modules) throws IOException {
+        // Generate start.sh (Unix/Linux/Mac)
+        String startSh = """
+        #!/bin/bash
+        
+        echo "=========================================="
+        echo "Starting FractalX Discovery Service"
+        echo "=========================================="
+        echo "Port: 8761"
+        echo "Health Check: http://localhost:8761/api/discovery/health"
+        echo "Services Endpoint: http://localhost:8761/api/discovery/services"
+        echo ""
+        
+        mvn spring-boot:run \
+          -Dspring-boot.run.jvmArguments="-Dserver.port=8761" \
+          -Dspring-boot.run.arguments="--server.port=8761"
+        """;
+
+        Files.writeString(discoveryRoot.resolve("start.sh"), startSh);
+        discoveryRoot.resolve("start.sh").toFile().setExecutable(true);
+
+        // Generate start.bat (Windows)
+        String startBat = """
+        @echo off
+        echo ==========================================
+        echo Starting FractalX Discovery Service
+        echo ==========================================
+        echo Port: 8761
+        echo Health Check: http://localhost:8761/api/discovery/health
+        echo Services Endpoint: http://localhost:8761/api/discovery/services
+        echo.
+        
+        mvn spring-boot:run ^
+          -Dspring-boot.run.jvmArguments="-Dserver.port=8761" ^
+          -Dspring-boot.run.arguments="--server.port=8761"
+        """;
+
+        Files.writeString(discoveryRoot.resolve("start.bat"), startBat);
+    }
+
 }

@@ -1,0 +1,6 @@
+{
+  "serviceName": "order-service",
+  "host": "localhost",
+  "port": 8081,
+  "status": "UP"
+}

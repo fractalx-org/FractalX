@@ -20,6 +20,12 @@ public class AdminServiceGenerator {
     private static final String ADMIN_SERVICE_NAME = "admin-service";
     private static final String BASE_PACKAGE = "com.fractalx.admin";
 
+    private int adminPort = 9090;
+
+    public void setAdminPort(int adminPort) {
+        this.adminPort = adminPort;
+    }
+
     public void generateAdminService(List<FractalModule> modules, Path outputRoot) throws IOException {
         log.info("Generating Admin Service...");
 

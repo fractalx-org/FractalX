@@ -37,6 +37,26 @@ public class DecomposeMojo extends AbstractMojo {
     @Parameter(property = "fractalx.generate", defaultValue = "true")
     private boolean generate;
 
+    // NEW: Parameter to include discovery service
+    @Parameter(property = "fractalx.includeDiscoveryService",
+            defaultValue = "true")
+    private boolean includeDiscoveryService;
+
+    // NEW: Parameter for discovery service port
+    @Parameter(property = "fractalx.discoveryPort",
+            defaultValue = "8761")
+    private int discoveryPort;
+
+    // NEW: Parameter for API Gateway port
+    @Parameter(property = "fractalx.gatewayPort",
+            defaultValue = "9999")
+    private int gatewayPort;
+
+    // NEW: Parameter for admin service port
+    @Parameter(property = "fractalx.adminPort",
+            defaultValue = "9090")
+    private int adminPort;
+
     public void execute() throws MojoExecutionException {
         if (skip) {
             getLog().info("FractalX decomposition skipped");
@@ -48,6 +68,7 @@ public class DecomposeMojo extends AbstractMojo {
         getLog().info("=".repeat(60));
         getLog().info("Source directory: " + sourceDirectory.getAbsolutePath());
         getLog().info("Output directory: " + outputDirectory.getAbsolutePath());
+        getLog().info("Discovery Service: " + (includeDiscoveryService ? "Enabled (port: " + discoveryPort + ")" : "Disabled"));
         getLog().info("");
 
         try {
@@ -85,10 +106,17 @@ public class DecomposeMojo extends AbstractMojo {
                 getLog().info("Starting Code Generation...");
                 getLog().info("=".repeat(60));
 
+                // Create generator with configuration
                 ServiceGenerator generator = new ServiceGenerator(
                         sourcePath,
                         outputDirectory.toPath()
                 );
+
+                // Pass configuration to generator
+                generator.setDiscoveryEnabled(includeDiscoveryService);
+                generator.setDiscoveryPort(discoveryPort);
+                generator.setGatewayPort(gatewayPort);
+                generator.setAdminPort(adminPort);
 
                 generator.generateServices(modules);
 
@@ -98,10 +126,27 @@ public class DecomposeMojo extends AbstractMojo {
                 getLog().info("=".repeat(60));
                 getLog().info("Generated services location: " + outputDirectory.getAbsolutePath());
                 getLog().info("");
+
+                // Show service information
+                getLog().info("Services Generated:");
+                if (includeDiscoveryService) {
+                    getLog().info("  🔍 Discovery Service: http://localhost:" + discoveryPort);
+                }
+                for (FractalModule module : modules) {
+                    getLog().info("  📦 " + module.getServiceName() + ": http://localhost:" + module.getPort());
+                }
+                getLog().info("  🌐 API Gateway: http://localhost:" + gatewayPort);
+                getLog().info("  👨‍💼 Admin Service: http://localhost:" + adminPort);
+                getLog().info("");
+
                 getLog().info("Next steps:");
                 getLog().info("  1. cd " + outputDirectory.getAbsolutePath());
-                getLog().info("  2. cd <service-name>");
-                getLog().info("  3. mvn spring-boot:run");
+                getLog().info("  2. Start services in order:");
+                if (includeDiscoveryService) {
+                    getLog().info("     a. cd discovery-service && mvn spring-boot:run");
+                }
+                getLog().info("     b. cd <service-name> && mvn spring-boot:run");
+                getLog().info("     c. cd fractalx-gateway && mvn spring-boot:run");
             } else {
                 getLog().info("=".repeat(60));
                 getLog().info("Code generation skipped (fractalx.generate=false)");
