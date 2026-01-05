@@ -3,38 +3,38 @@ spring:
     name: fractalx-test-app
 
   # Database Configuration (Monolith Mode = One DB) for h2
-#  datasource:
-#    url: jdbc:h2:mem:fractalx_monolith_db;DB_CLOSE_DELAY=-1
-#    username: sa
-#    password: password
-#    driver-class-name: org.h2.Driver
   datasource:
-    url: jdbc:mysql://localhost:3306/monolith_db?createDatabaseIfNotExist=true
-    username: root
-    password: 1234
-    driver-class-name: com.mysql.cj.jdbc.Driver
-
-  sql:
-    init:
-      mode: always           # Required for MySQL/Postgres
-      continue-on-error: true
-
-  jpa:
-    defer-datasource-initialization: true
-    hibernate:
-      ddl-auto: update
-    show-sql: true
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.MySQLDialect
-
-  # JPA / Hibernate Config for h2
+    url: jdbc:h2:mem:fractalx_monolith_db;DB_CLOSE_DELAY=-1
+    username: sa
+    password: password
+    driver-class-name: org.h2.Driver
+#  datasource:
+#    url: jdbc:mysql://localhost:3306/monolith_db?createDatabaseIfNotExist=true
+#    username: root
+#    password: 1234
+#    driver-class-name: com.mysql.cj.jdbc.Driver
+#
+#  sql:
+#    init:
+#      mode: always           # Required for MySQL/Postgres
+#      continue-on-error: true
+#
 #  jpa:
 #    defer-datasource-initialization: true
-#    database-platform: org.hibernate.dialect.H2Dialect
 #    hibernate:
-#      ddl-auto: update # Automatically creates Tables from your @Entity classes
-#    show-sql: true     # Shows the SQL in console (Good for debugging)
+#      ddl-auto: update
+#    show-sql: true
+#    properties:
+#      hibernate:
+#        dialect: org.hibernate.dialect.MySQLDialect
+
+  # JPA / Hibernate Config for h2
+  jpa:
+    defer-datasource-initialization: true
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update # Automatically creates Tables from your @Entity classes
+    show-sql: true     # Shows the SQL in console (Good for debugging)
 
   # Redis Configuration (For your Task 3 - State Management)
 #  data:
@@ -43,10 +43,10 @@ spring:
 #      port: 6379
 
   # Enable H2 Console so you can see the tables in your browser
-#  h2:
-#    console:
-#      enabled: true
-#      path: /h2-console
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
 
 server:
   port: 8080
@@ -58,36 +58,36 @@ fractalx:
     metrics: true
 
   # 2. FUTURE MICROSERVICES DB (What your framework will read)
-  modules:
-    order-service:
-      datasource:
-        url: jdbc:mysql://localhost:3306/order_db # <--- SEPARATE DB
-        username: root
-        password: 1234
-        driver-class-name: com.mysql.cj.jdbc.Driver
-      jpa:
-        hibernate:
-          ddl-auto: update # In prod, use 'validate'
-
-    payment-service:
-      datasource:
-        url: jdbc:mysql://localhost:3306/payment_db # <--- SEPARATE DB
-        username: root
-        password: 1234
-        driver-class-name: com.mysql.cj.jdbc.Driver
-      jpa:
-        hibernate:
-          ddl-auto: update # In prod, use 'validate'
-
-    customer-service:
-      datasource:
-        url: jdbc:mysql://localhost:3306/customer_db # <--- SEPARATE DB
-        username: root
-        password: 1234
-        driver-class-name: com.mysql.cj.jdbc.Driver
-      jpa:
-        hibernate:
-          ddl-auto: update # In prod, use 'validate'
+#  modules:
+#    order-service:
+#      datasource:
+#        url: jdbc:mysql://localhost:3306/order_db # <--- SEPARATE DB
+#        username: root
+#        password: 1234
+#        driver-class-name: com.mysql.cj.jdbc.Driver
+#      jpa:
+#        hibernate:
+#          ddl-auto: update # In prod, use 'validate'
+#
+#    payment-service:
+#      datasource:
+#        url: jdbc:mysql://localhost:3306/payment_db # <--- SEPARATE DB
+#        username: root
+#        password: 1234
+#        driver-class-name: com.mysql.cj.jdbc.Driver
+#      jpa:
+#        hibernate:
+#          ddl-auto: update # In prod, use 'validate'
+#
+#    customer-service:
+#      datasource:
+#        url: jdbc:mysql://localhost:3306/customer_db # <--- SEPARATE DB
+#        username: root
+#        password: 1234
+#        driver-class-name: com.mysql.cj.jdbc.Driver
+#      jpa:
+#        hibernate:
+#          ddl-auto: update # In prod, use 'validate'
 
 logging:
   level:
