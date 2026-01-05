@@ -3,6 +3,7 @@ package com.fractalx.core.generator;
 import com.fractalx.core.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fractalx.core.datamanagement.RelationshipDecoupler;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -16,11 +17,13 @@ public class CodeTransformer {
     private final AnnotationRemover annotationRemover;
     private final ImportCleaner importCleaner;
     private final ImportPreserver importPreserver;
+    private final RelationshipDecoupler relationshipDecoupler;
 
     public CodeTransformer() {
         this.annotationRemover = new AnnotationRemover();
         this.importCleaner = new ImportCleaner();
         this.importPreserver = new ImportPreserver();
+        this.relationshipDecoupler = new RelationshipDecoupler();
     }
 
     /**
@@ -33,6 +36,7 @@ public class CodeTransformer {
         annotationRemover.processServiceDirectory(serviceRoot);
 
         // Step 2: Ensure Spring imports are present
+        relationshipDecoupler.transform(serviceRoot, module);
         importPreserver.ensureImports(serviceRoot);
 
         // Step 3: Clean up unused imports
