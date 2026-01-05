@@ -25,15 +25,9 @@ import java.util.*;
 import java.util.stream.Stream;
 
 /**
- * AST-based Relationship Decoupler (JavaParser)
- *
- * Converts cross-service JPA relationships into simple ID fields.
- * - @ManyToOne/@OneToOne/@JoinColumn fields (remote types) -> String <fieldName>Id
- * - @OneToMany List<Remote> -> removed (replaced with comment)
- * Also rewrites some service-layer logic:
- * - Remote x = new Remote(); -> String xId = null;
- * - x.setId(expr); -> xId = expr;
- * - entity.setRemote(x); -> entity.setRemoteId(xId) OR request accessor if available.
+ * Performs AST-based decoupling of cross-service relationships.
+ * Converts JPA relationship fields to String ID fields and updates associated service logic.
+ * Handles both POJO and Record request DTOs.
  */
 public class RelationshipDecoupler {
 
@@ -41,16 +35,19 @@ public class RelationshipDecoupler {
 
     private final JavaParser javaParser = new JavaParser();
 
-    // Relationship annotations we treat as "coupling points"
     private static final Set<String> REL_ANNOS = Set.of("ManyToOne", "OneToOne", "JoinColumn");
     private static final String ONE_TO_MANY = "OneToMany";
 
+    /**
+     * Orchestrates the transformation process: identifies local/remote entities,
+     * indexes request DTOs, and applies AST modifications to source files.
+     */
     public void transform(Path serviceRoot, FractalModule module) {
         try {
-            // 1) Build local entity set (what exists in this service)
+            // Identify entities defined within this service
             Set<String> localEntities = findLocalEntityNames(serviceRoot);
 
-            // 2) Build remote entity set (what this service references in relationships but doesn't own)
+            // Identify entities referenced but not defined locally
             Set<String> remoteEntities = findRemoteEntities(serviceRoot, localEntities);
 
             if (remoteEntities.isEmpty()) {
@@ -60,10 +57,10 @@ public class RelationshipDecoupler {
 
             log.info("🧩 [Data] Remote entity types to decouple for {}: {}", module.getServiceName(), remoteEntities);
 
-            // 3) Pre-scan Request DTOs (record vs POJO + available id accessors)
+            // Build index of Request objects to determine accessor style (Record vs Class)
             RequestInfoIndex requestIndex = buildRequestIndex(serviceRoot);
 
-            // 4) Walk all Java files and apply AST transformations
+            // Process all Java files
             try (Stream<Path> paths = Files.walk(serviceRoot)) {
                 paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                     try {
@@ -79,10 +76,9 @@ public class RelationshipDecoupler {
         }
     }
 
-    // ------------------------------------------------------------
-    // Phase 1: Detect local entities
-    // ------------------------------------------------------------
-
+    /**
+     * Scans source files to identify @Entity classes defined locally.
+     */
     private Set<String> findLocalEntityNames(Path root) throws IOException {
         Set<String> local = new HashSet<>();
 
@@ -99,17 +95,15 @@ public class RelationshipDecoupler {
                         }
                     }
                 } catch (Exception ignored) {
-                    // keep robust; a parse failure shouldn't kill whole pipeline
                 }
             });
         }
         return local;
     }
 
-    // ------------------------------------------------------------
-    // Phase 2: Detect remote entities referenced by relationships
-    // ------------------------------------------------------------
-
+    /**
+     * Identifies entity types used in relationships that are not present in the local entity set.
+     */
     private Set<String> findRemoteEntities(Path root, Set<String> localEntities) throws IOException {
         Set<String> referenced = new HashSet<>();
 
@@ -123,11 +117,10 @@ public class RelationshipDecoupler {
                     for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
                         if (!hasAnnotation(c, "Entity")) continue;
 
-                        // Find relationship fields and collect their types
                         for (FieldDeclaration field : c.getFields()) {
                             if (!hasAnyAnnotation(field, REL_ANNOS) && !hasAnnotation(field, ONE_TO_MANY)) continue;
 
-                            // @OneToMany List<X>
+                            // Collect types from @OneToMany List<T>
                             if (hasAnnotation(field, ONE_TO_MANY)) {
                                 field.getVariables().forEach(v -> {
                                     Optional<String> generic = extractGenericTypeName(v.getType());
@@ -136,7 +129,7 @@ public class RelationshipDecoupler {
                                 continue;
                             }
 
-                            // @ManyToOne/@OneToOne/@JoinColumn private X something;
+                            // Collect types from single relationships
                             field.getVariables().forEach(v -> {
                                 String typeName = simpleTypeName(v.getType());
                                 if (typeName != null) referenced.add(typeName);
@@ -148,31 +141,31 @@ public class RelationshipDecoupler {
             });
         }
 
-        // Remote = referenced - local - primitives/common
+        // Filter out local entities and standard Java types
         referenced.removeAll(localEntities);
         referenced.removeAll(Set.of("String", "Long", "Integer", "UUID", "Double", "Float", "Boolean"));
         return referenced;
     }
 
-    // ------------------------------------------------------------
-    // Request Index: record vs POJO, available id accessors
-    // ------------------------------------------------------------
-
+    // Stores structure of Request objects to support correct code generation
     private static class RequestInfoIndex {
-        // requestTypeName -> info
         final Map<String, RequestInfo> requestInfo = new HashMap<>();
     }
 
     private static class RequestInfo {
         final boolean isRecord;
-        final Set<String> recordComponents = new HashSet<>(); // e.g., customerId
-        final Set<String> pojoGetters = new HashSet<>();      // e.g., getCustomerId
+        final Set<String> recordComponents = new HashSet<>();
+        final Set<String> pojoGetters = new HashSet<>();
 
         RequestInfo(boolean isRecord) {
             this.isRecord = isRecord;
         }
     }
 
+    /**
+     * Builds an index of Request classes to determine if they are Records or POJOs
+     * and capture available fields/getters.
+     */
     private RequestInfoIndex buildRequestIndex(Path serviceRoot) throws IOException {
         RequestInfoIndex idx = new RequestInfoIndex();
 
@@ -185,7 +178,7 @@ public class RelationshipDecoupler {
                             if (cuOpt.isEmpty()) return;
                             CompilationUnit cu = cuOpt.get();
 
-                            // Record
+                            // Process Records
                             for (RecordDeclaration rd : cu.findAll(RecordDeclaration.class)) {
                                 String name = rd.getNameAsString();
                                 RequestInfo info = new RequestInfo(true);
@@ -193,7 +186,7 @@ public class RelationshipDecoupler {
                                 idx.requestInfo.put(name, info);
                             }
 
-                            // POJO class
+                            // Process POJO Classes
                             for (ClassOrInterfaceDeclaration cd : cu.findAll(ClassOrInterfaceDeclaration.class)) {
                                 if (cd.isInterface()) continue;
                                 if (!cd.getNameAsString().endsWith("Request")) continue;
@@ -202,7 +195,6 @@ public class RelationshipDecoupler {
                                 String name = cd.getNameAsString();
                                 RequestInfo info = new RequestInfo(false);
 
-                                // getters: getXxxId
                                 for (MethodDeclaration m : cd.getMethods()) {
                                     if (m.getNameAsString().startsWith("get")) {
                                         info.pojoGetters.add(m.getNameAsString());
@@ -218,10 +210,10 @@ public class RelationshipDecoupler {
         return idx;
     }
 
-    // ------------------------------------------------------------
-    // File Transformation (AST)
-    // ------------------------------------------------------------
-
+    /**
+     * Applies AST transformations to a single Java file: removes imports,
+     * transforms entities, and updates service logic.
+     */
     private void transformFile(Path javaFile,
                                Set<String> localEntities,
                                Set<String> remoteEntities,
@@ -233,17 +225,14 @@ public class RelationshipDecoupler {
         CompilationUnit cu = cuOpt.get();
         boolean modified = false;
 
-        // Remove imports that reference remote entity types (best-effort)
         modified |= removeRemoteImports(cu, remoteEntities);
 
-        // Transform entity classes
         for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
             if (hasAnnotation(c, "Entity")) {
                 modified |= transformEntityClass(c, remoteEntities);
             }
         }
 
-        // Transform service logic (non-entity code)
         modified |= transformServiceLogic(cu, remoteEntities, requestIndex);
 
         if (modified) {
@@ -252,20 +241,16 @@ public class RelationshipDecoupler {
         }
     }
 
-    // ------------------------------------------------------------
-    // Entity Transformations
-    // ------------------------------------------------------------
-
+    /**
+     * Modifies entity classes: converts relationship fields to ID fields and updates accessors.
+     */
     private boolean transformEntityClass(ClassOrInterfaceDeclaration entityClass, Set<String> remoteEntities) {
         boolean modified = false;
-
-        // Track field renames: oldName -> newName
         Map<String, String> fieldRenameMap = new HashMap<>();
 
-        // 1) Transform @ManyToOne/@OneToOne/@JoinColumn fields referencing remote entity types
         for (FieldDeclaration field : new ArrayList<>(entityClass.getFields())) {
 
-            // Handle OneToMany List<Remote>
+            // Remove OneToMany lists referencing remote entities
             if (hasAnnotation(field, ONE_TO_MANY)) {
                 boolean removedAny = removeRemoteOneToManyCollections(entityClass, field, remoteEntities);
                 modified |= removedAny;
@@ -274,6 +259,7 @@ public class RelationshipDecoupler {
 
             if (!hasAnyAnnotation(field, REL_ANNOS)) continue;
 
+            // Convert entity references to String ID fields
             for (VariableDeclarator var : field.getVariables()) {
                 String typeName = simpleTypeName(var.getType());
                 if (typeName == null || !remoteEntities.contains(typeName)) continue;
@@ -281,45 +267,39 @@ public class RelationshipDecoupler {
                 String oldFieldName = var.getNameAsString();
                 String newFieldName = oldFieldName.endsWith("Id") ? oldFieldName : oldFieldName + "Id";
 
-                // Change type to String
                 var.setType("String");
 
-                // Rename variable
                 if (!oldFieldName.equals(newFieldName)) {
                     var.setName(newFieldName);
                     fieldRenameMap.put(oldFieldName, newFieldName);
                 }
 
-                // Remove relationship annotations from THIS field
                 removeAnnotationsByName(field, REL_ANNOS);
-                removeAnnotationsByName(field, Set.of(ONE_TO_MANY)); // safety
-                // JoinColumn may appear; removed above via REL_ANNOS
+                removeAnnotationsByName(field, Set.of(ONE_TO_MANY));
 
                 modified = true;
             }
         }
 
-        // 2) Update getters/setters for renamed fields
         if (!fieldRenameMap.isEmpty()) {
             modified |= updateEntityAccessors(entityClass, fieldRenameMap);
-            // 3) Update internal references within entity class to renamed fields
             modified |= renameFieldReferences(entityClass, fieldRenameMap);
         }
 
         return modified;
     }
 
+    /**
+     * Removes list fields annotated with @OneToMany if they reference a remote entity.
+     */
     private boolean removeRemoteOneToManyCollections(ClassOrInterfaceDeclaration entityClass,
                                                      FieldDeclaration field,
                                                      Set<String> remoteEntities) {
         boolean modified = false;
 
-        // If any variable is List<Remote>, remove the field
         for (VariableDeclarator var : field.getVariables()) {
             Optional<String> generic = extractGenericTypeName(var.getType());
             if (generic.isPresent() && remoteEntities.contains(generic.get())) {
-                // Replace the field with a comment line
-                // JavaParser doesn't support "comment-only field", so we remove and attach comment near class body.
                 field.remove();
                 entityClass.addOrphanComment(new LineComment(" Removed remote relationship list: " + generic.get()));
                 modified = true;
@@ -328,30 +308,30 @@ public class RelationshipDecoupler {
         return modified;
     }
 
+    /**
+     * Updates getter and setter signatures and bodies to match renamed ID fields.
+     */
     private boolean updateEntityAccessors(ClassOrInterfaceDeclaration entityClass, Map<String, String> renameMap) {
         boolean modified = false;
 
         for (MethodDeclaration m : entityClass.getMethods()) {
-            // Getter: getX()
+            // Update Getter
             if (m.getParameters().isEmpty() && m.getNameAsString().startsWith("get")) {
-                String suffix = m.getNameAsString().substring(3); // X
+                String suffix = m.getNameAsString().substring(3);
                 if (suffix.isEmpty()) continue;
 
-                // e.g., getCustomer -> customer
                 String guessedField = lowerFirst(suffix);
                 if (renameMap.containsKey(guessedField)) {
                     String newField = renameMap.get(guessedField);
                     m.setType("String");
-                    m.setName("get" + upperFirst(newField)); // getCustomerId
+                    m.setName("get" + upperFirst(newField));
 
-                    // replace return statements referencing old field
                     m.findAll(ReturnStmt.class).forEach(r -> {
                         r.getExpression().ifPresent(expr -> {
                             if (expr.isNameExpr() && expr.asNameExpr().getNameAsString().equals(guessedField)) {
                                 r.setExpression(new NameExpr(newField));
                             }
                             if (expr.isFieldAccessExpr() && expr.asFieldAccessExpr().getNameAsString().equals(guessedField)) {
-                                // this.customer -> this.customerId
                                 expr.asFieldAccessExpr().setName(newField);
                             }
                         });
@@ -361,7 +341,7 @@ public class RelationshipDecoupler {
                 }
             }
 
-            // Setter: setX(...)
+            // Update Setter
             if (m.getNameAsString().startsWith("set") && m.getParameters().size() == 1) {
                 String suffix = m.getNameAsString().substring(3);
                 if (suffix.isEmpty()) continue;
@@ -370,13 +350,11 @@ public class RelationshipDecoupler {
                 if (renameMap.containsKey(guessedField)) {
                     String newField = renameMap.get(guessedField);
 
-                    m.setName("set" + upperFirst(newField)); // setCustomerId
+                    m.setName("set" + upperFirst(newField));
                     m.getParameter(0).setType("String");
-                    m.getParameter(0).setName(newField); // parameter named customerId
+                    m.getParameter(0).setName(newField);
 
-                    // update assignments inside setter: this.customer = customer -> this.customerId = customerId
                     m.findAll(AssignExpr.class).forEach(a -> {
-                        // left side
                         Expression target = a.getTarget();
                         if (target.isFieldAccessExpr()) {
                             FieldAccessExpr fa = target.asFieldAccessExpr();
@@ -389,7 +367,6 @@ public class RelationshipDecoupler {
                             }
                         }
 
-                        // right side
                         Expression value = a.getValue();
                         if (value.isNameExpr() && value.asNameExpr().getNameAsString().equals(guessedField)) {
                             a.setValue(new NameExpr(newField));
@@ -404,10 +381,12 @@ public class RelationshipDecoupler {
         return modified;
     }
 
+    /**
+     * Updates internal field references (this.field -> this.fieldId).
+     */
     private boolean renameFieldReferences(ClassOrInterfaceDeclaration entityClass, Map<String, String> renameMap) {
         boolean modified = false;
 
-        // NameExpr occurrences: customer -> customerId
         for (NameExpr ne : entityClass.findAll(NameExpr.class)) {
             String old = ne.getNameAsString();
             if (renameMap.containsKey(old)) {
@@ -416,7 +395,6 @@ public class RelationshipDecoupler {
             }
         }
 
-        // FieldAccessExpr occurrences: this.customer -> this.customerId
         for (FieldAccessExpr fa : entityClass.findAll(FieldAccessExpr.class)) {
             String old = fa.getNameAsString();
             if (renameMap.containsKey(old)) {
@@ -428,24 +406,22 @@ public class RelationshipDecoupler {
         return modified;
     }
 
-    // ------------------------------------------------------------
-    // Service Logic Transformations (Non-Entity)
-    // ------------------------------------------------------------
-
+    /**
+     * Updates service logic to handle ID fields instead of object references.
+     * Handles variable instantiation, setId calls, and setEntity calls.
+     */
     private boolean transformServiceLogic(CompilationUnit cu,
                                           Set<String> remoteEntities,
                                           RequestInfoIndex requestIndex) {
         boolean modified = false;
 
-        // Process each method independently so we can track local variables
         for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
             Set<String> localNames = new HashSet<>();
-            Map<String, String> remoteVarToIdVar = new HashMap<>(); // customer -> customerId
+            Map<String, String> remoteVarToIdVar = new HashMap<>();
 
-            // collect parameter names
             method.getParameters().forEach(p -> localNames.add(p.getNameAsString()));
 
-            // 1) Convert local variables of remote entity type to String <name>Id
+            // 1) Update local variable declarations (Entity e -> String eId)
             for (VariableDeclarator vd : method.findAll(VariableDeclarator.class)) {
                 String typeName = simpleTypeName(vd.getType());
                 if (typeName != null && remoteEntities.contains(typeName)) {
@@ -455,7 +431,6 @@ public class RelationshipDecoupler {
                     vd.setType("String");
                     vd.setName(newName);
 
-                    // Replace initializer: new Remote() -> null
                     if (vd.getInitializer().isPresent() && vd.getInitializer().get().isObjectCreationExpr()) {
                         ObjectCreationExpr oce = vd.getInitializer().get().asObjectCreationExpr();
                         String createdType = simpleTypeName(oce.getType());
@@ -471,7 +446,7 @@ public class RelationshipDecoupler {
                 }
             }
 
-            // 2) Transform: remoteVar.setId(expr) -> remoteVarId = expr
+            // 2) Update setId calls (e.setId(x) -> eId = x)
             for (MethodCallExpr call : method.findAll(MethodCallExpr.class)) {
                 if (call.getScope().isEmpty()) continue;
                 if (!call.getNameAsString().equals("setId")) continue;
@@ -486,7 +461,6 @@ public class RelationshipDecoupler {
                 String idVar = remoteVarToIdVar.get(varName);
                 AssignExpr assign = new AssignExpr(new NameExpr(idVar), call.getArgument(0), AssignExpr.Operator.ASSIGN);
 
-                // Replace the entire statement if it's in an ExpressionStmt
                 Optional<Statement> stmtOpt = call.findAncestor(Statement.class);
                 if (stmtOpt.isPresent() && stmtOpt.get().isExpressionStmt()) {
                     stmtOpt.get().asExpressionStmt().setExpression(assign);
@@ -494,23 +468,20 @@ public class RelationshipDecoupler {
                 }
             }
 
-            // 3) Transform: something.setRemote(remoteVar) -> something.setRemoteId(remoteVarId or request accessor)
+            // 3) Update setter calls (setEntity(e) -> setEntityId(eId) or setEntityId(request.getId()))
             for (MethodCallExpr call : method.findAll(MethodCallExpr.class)) {
                 if (!call.getNameAsString().startsWith("set")) continue;
                 if (call.getArguments().size() != 1) continue;
 
                 Expression arg = call.getArgument(0);
-
-                // only handle NameExpr argument: setCustomer(customer)
                 if (!arg.isNameExpr()) continue;
 
                 String argName = arg.asNameExpr().getNameAsString();
 
-                // If we transformed customer -> customerId var, then rewrite setter + arg
+                // Case A: Variable was renamed locally
                 if (remoteVarToIdVar.containsKey(argName)) {
                     String idVar = remoteVarToIdVar.get(argName);
 
-                    // Rename method: setX -> setXId (only if not already)
                     if (!call.getNameAsString().endsWith("Id")) {
                         call.setName(call.getNameAsString() + "Id");
                     }
@@ -520,8 +491,7 @@ public class RelationshipDecoupler {
                     continue;
                 }
 
-                // If argument is "customer" but we don't have customerId var,
-                // try request-based access: request.customerId() or request.getCustomerId()
+                // Case B: Try to resolve ID from Request object
                 Optional<Expression> requestAccessor = tryBuildRequestIdAccessor(method, call.getNameAsString(), requestIndex);
                 if (requestAccessor.isPresent()) {
                     if (!call.getNameAsString().endsWith("Id")) {
@@ -536,15 +506,16 @@ public class RelationshipDecoupler {
         return modified;
     }
 
+    /**
+     * Attempts to build an ID accessor (e.g. request.getCustomerId()) based on the setter name and request type.
+     */
     private Optional<Expression> tryBuildRequestIdAccessor(MethodDeclaration method,
                                                            String setterName,
                                                            RequestInfoIndex requestIndex) {
-        // setterName like setCustomer, setPayment, setSupplierWarranty... we build customerId
         if (!setterName.startsWith("set") || setterName.length() <= 3) return Optional.empty();
-        String base = lowerFirst(setterName.substring(3)); // customer
-        String idName = base.endsWith("Id") ? base : base + "Id"; // customerId
+        String base = lowerFirst(setterName.substring(3));
+        String idName = base.endsWith("Id") ? base : base + "Id";
 
-        // Look for a parameter named "request"
         Optional<Parameter> requestParamOpt = method.getParameters().stream()
                 .filter(p -> p.getNameAsString().equals("request"))
                 .findFirst();
@@ -558,12 +529,10 @@ public class RelationshipDecoupler {
         if (info == null) return Optional.empty();
 
         if (info.isRecord) {
-            // record accessor: request.customerId()
             if (info.recordComponents.contains(idName)) {
                 return Optional.of(new MethodCallExpr(new NameExpr("request"), idName));
             }
         } else {
-            // pojo getter: request.getCustomerId()
             String getter = "get" + upperFirst(idName);
             if (info.pojoGetters.contains(getter)) {
                 return Optional.of(new MethodCallExpr(new NameExpr("request"), getter));
@@ -573,10 +542,9 @@ public class RelationshipDecoupler {
         return Optional.empty();
     }
 
-    // ------------------------------------------------------------
-    // Imports
-    // ------------------------------------------------------------
-
+    /**
+     * Removes imports for remote entity types.
+     */
     private boolean removeRemoteImports(CompilationUnit cu, Set<String> remoteEntities) {
         boolean modified = false;
 
@@ -596,7 +564,7 @@ public class RelationshipDecoupler {
     }
 
     // ------------------------------------------------------------
-    // Helpers
+    // Utility Methods
     // ------------------------------------------------------------
 
     private boolean hasAnnotation(NodeWithAnnotations<?> node, String annoSimpleName) {
@@ -621,9 +589,9 @@ public class RelationshipDecoupler {
         if (t.isArrayType()) return simpleTypeName(t.asArrayType().getComponentType());
         if (t.isClassOrInterfaceType()) {
             ClassOrInterfaceType ct = t.asClassOrInterfaceType();
-            return ct.getName().getIdentifier(); // simple name
+            return ct.getName().getIdentifier();
         }
-        return t.asString(); // fallback
+        return t.asString();
     }
 
     private Optional<String> extractGenericTypeName(Type t) {
