@@ -81,7 +81,7 @@ public class PomGenerator {
                     <dependency>
                         <groupId>com.fractalx</groupId>
                         <artifactId>fractalx-runtime</artifactId>
-                        <version>0.1.0-SNAPSHOT</version>
+                        <version>0.2.0-SNAPSHOT</version>
                     </dependency>
                     
                     <dependency>

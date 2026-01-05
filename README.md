@@ -15,7 +15,7 @@ cd /Users/sathnindu/Develop/fractalx/FractalX/fractalx-test-app
 ```
 
 ```
-mvn com.fractalx:fractalx-maven-plugin:0.1.0-SNAPSHOT:decompose
+mvn com.fractalx:fractalx-maven-plugin:0.2.0-SNAPSHOT:decompose
 ```
 
 Proposed run command (after settings.xml configuration)
@@ -33,7 +33,7 @@ mvn clean install -DskipTests
 
 ```
 cd /Users/sathnindu/Develop/fractalx/FractalX/fractalx-test-app
-mvn com.fractalx:fractalx-maven-plugin:0.1.0-SNAPSHOT:decompose
+mvn com.fractalx:fractalx-maven-plugin:0.2.0-SNAPSHOT:decompose
 ```
 
 --
