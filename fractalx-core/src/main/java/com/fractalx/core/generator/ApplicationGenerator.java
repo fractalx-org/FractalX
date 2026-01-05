@@ -45,7 +45,7 @@ public class ApplicationGenerator {
         String originalPackage = extractOriginalPackage(module);
 
         // Build component scan packages
-        String componentScanPackages = String.format("\"%s\", \"%s\"", basePackage, originalPackage);
+        String componentScanPackages = String.format("\"%s\", \"%s\", \"com.fractalx.runtime\"", basePackage, originalPackage);
 
         // Generate complete Java class with imports
         StringBuilder content = new StringBuilder();

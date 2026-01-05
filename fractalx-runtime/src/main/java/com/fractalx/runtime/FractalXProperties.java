@@ -72,6 +72,11 @@ public class FractalXProperties {
         private boolean tracing = true;
         private boolean metrics = true;
         private String exporterUrl;
+        private String loggerUrl = "http://localhost:9099/api/logs";
+
+        public String getLoggerUrl() { return loggerUrl; }
+
+        public void setLoggerUrl(String url) { this.loggerUrl = url; }
 
         public boolean isTracing() {
             return tracing;
