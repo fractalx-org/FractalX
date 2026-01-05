@@ -2,6 +2,8 @@ package com.fractalx.core.generator;
 
 import com.fractalx.core.FractalModule;
 import com.fractalx.core.gateway.GatewayGenerator;
+import com.fractalx.core.observability.LoggerServiceGenerator;
+import com.fractalx.core.observability.ObservabilityInjector;
 import com.fractalx.core.datamanagement.DistributedServiceHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +23,7 @@ public class ServiceGenerator {
     private final Path sourceRoot;
     private final Path outputRoot;
 
+    private final ObservabilityInjector observabilityInjector = new ObservabilityInjector();
     private final DistributedServiceHelper distributedGen;
 
     public ServiceGenerator(Path sourceRoot, Path outputRoot) {
@@ -41,6 +44,9 @@ public class ServiceGenerator {
         for (FractalModule module : modules) {
             generateService(module, modules);
         }
+
+        LoggerServiceGenerator loggerGen = new LoggerServiceGenerator();
+        loggerGen.generate(outputRoot);
 
         // Generate API Gateway if we have multiple services
         if (modules.size() > 1) {
@@ -84,6 +90,7 @@ public class ServiceGenerator {
         // Step 3: Generate configuration
         ConfigurationGenerator configGen = new ConfigurationGenerator();
         configGen.generateApplicationYml(module, srcMainResources);
+        observabilityInjector.patchConfigurationFile(srcMainResources);
 
         // Step 4: Copy module code
         CodeCopier codeCopier = new CodeCopier(sourceRoot);
