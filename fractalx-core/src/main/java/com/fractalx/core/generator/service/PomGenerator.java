@@ -102,6 +102,11 @@ public class PomGenerator implements ServiceFileGenerator {
                             <artifactId>h2</artifactId>
                             <scope>runtime</scope>
                         </dependency>
+
+                        <dependency>
+                            <groupId>org.flywaydb</groupId>
+                            <artifactId>flyway-core</artifactId>
+                        </dependency>
                         %s
                     </dependencies>
 

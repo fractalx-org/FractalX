@@ -195,25 +195,73 @@ public class DbConfigurationGenerator {
         Files.writeString(path, output);
     }
 
+    /**
+     * Reads per-service database configuration from {@code fractalx-config.yml} in the
+     * monolith's resources directory.
+     *
+     * <p>Expected structure:
+     * <pre>
+     * fractalx:
+     *   services:
+     *     order-service:
+     *       datasource:
+     *         url: jdbc:mysql://localhost:3306/order_db
+     *         username: root
+     *         password: secret
+     *     payment-service:
+     *       datasource:
+     *         url: jdbc:postgresql://localhost:5432/payment_db
+     *         username: postgres
+     *         password: secret
+     * </pre>
+     *
+     * <p>Falls back to {@code application.yml} under the same directory for the legacy
+     * {@code fractalx.modules.<name>} layout, then returns {@code null} if neither is found.
+     */
+    @SuppressWarnings("unchecked")
     private Map<String, Object> readConfigFromMonolith(String serviceName, Path sourceRoot) {
-        try {
-            Path resourcesDir = sourceRoot.getParent().resolve("resources");
-            Path yamlPath = resourcesDir.resolve("application.yml");
-            if (!Files.exists(yamlPath)) return null;
+        Path resourcesDir = sourceRoot.getParent().resolve("resources");
 
-            Yaml yaml = new Yaml();
-            try (FileInputStream inputStream = new FileInputStream(yamlPath.toFile())) {
-                Map<String, Object> root = yaml.load(inputStream);
-                if (root == null || !root.containsKey("fractalx")) return null;
-                Map<String, Object> fractalx = (Map<String, Object>) root.get("fractalx");
-                if (fractalx == null || !fractalx.containsKey("modules")) return null;
-                Map<String, Object> modules = (Map<String, Object>) fractalx.get("modules");
-                if (modules == null) return null;
-                return (Map<String, Object>) modules.get(serviceName);
+        // Primary: fractalx-config.yml with fractalx.services.<name> layout
+        Path fractalxConfig = resourcesDir.resolve("fractalx-config.yml");
+        if (Files.exists(fractalxConfig)) {
+            try (FileInputStream fis = new FileInputStream(fractalxConfig.toFile())) {
+                Map<String, Object> root = new Yaml().load(fis);
+                if (root != null) {
+                    Map<String, Object> fractalx = (Map<String, Object>) root.get("fractalx");
+                    if (fractalx != null) {
+                        Map<String, Object> services = (Map<String, Object>) fractalx.get("services");
+                        if (services != null && services.containsKey(serviceName)) {
+                            log.info("⚙️ [Config] Found fractalx-config.yml entry for '{}'", serviceName);
+                            return (Map<String, Object>) services.get(serviceName);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Could not parse fractalx-config.yml: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Could not parse Monolith application.yml: {}", e.getMessage());
-            return null;
         }
+
+        // Legacy fallback: application.yml with fractalx.modules.<name> layout
+        Path legacyConfig = resourcesDir.resolve("application.yml");
+        if (Files.exists(legacyConfig)) {
+            try (FileInputStream fis = new FileInputStream(legacyConfig.toFile())) {
+                Map<String, Object> root = new Yaml().load(fis);
+                if (root != null) {
+                    Map<String, Object> fractalx = (Map<String, Object>) root.get("fractalx");
+                    if (fractalx != null) {
+                        Map<String, Object> modules = (Map<String, Object>) fractalx.get("modules");
+                        if (modules != null && modules.containsKey(serviceName)) {
+                            log.info("⚙️ [Config] Found legacy application.yml module config for '{}'", serviceName);
+                            return (Map<String, Object>) modules.get(serviceName);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Could not parse monolith application.yml: {}", e.getMessage());
+            }
+        }
+
+        return null;
     }
 }

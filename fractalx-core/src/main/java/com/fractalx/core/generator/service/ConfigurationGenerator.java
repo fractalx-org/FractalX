@@ -38,8 +38,15 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     driver-class-name: org.h2.Driver
                     username: sa
                     password:
+                    hikari:
+                      maximum-pool-size: 10
+                      minimum-idle: 5
+                      connection-timeout: 30000
+                      idle-timeout: 600000
                   jpa:
                     hibernate:
+                      # Use 'validate' in production when Flyway manages schema migrations.
+                      # Set to 'create-drop' for local testing without Flyway.
                       ddl-auto: update
                     show-sql: true
                     properties:
@@ -48,6 +55,9 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   h2:
                     console:
                       enabled: true
+                  flyway:
+                    enabled: true
+                    locations: classpath:db/migration
 
                 server:
                   port: %d

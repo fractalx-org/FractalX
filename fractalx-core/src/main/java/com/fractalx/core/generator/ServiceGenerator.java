@@ -1,6 +1,11 @@
 package com.fractalx.core.generator;
 
+import com.fractalx.core.datamanagement.DistributedServiceHelper;
+import com.fractalx.core.datamanagement.RepositoryAnalyzer;
+import com.fractalx.core.datamanagement.SagaAnalyzer;
+import com.fractalx.core.gateway.GatewayGenerator;
 import com.fractalx.core.generator.admin.AdminServiceGenerator;
+import com.fractalx.core.generator.saga.SagaOrchestratorGenerator;
 import com.fractalx.core.generator.service.ApplicationGenerator;
 import com.fractalx.core.generator.service.ConfigurationGenerator;
 import com.fractalx.core.generator.service.NetScopeClientGenerator;
@@ -13,9 +18,8 @@ import com.fractalx.core.generator.transformation.ImportCleaner;
 import com.fractalx.core.generator.transformation.ImportPreserver;
 import com.fractalx.core.generator.transformation.NetScopeClientWiringStep;
 import com.fractalx.core.generator.transformation.NetScopeServerAnnotationStep;
-import com.fractalx.core.datamanagement.DistributedServiceHelper;
-import com.fractalx.core.gateway.GatewayGenerator;
 import com.fractalx.core.model.FractalModule;
+import com.fractalx.core.model.SagaDefinition;
 import com.fractalx.core.observability.LoggerServiceGenerator;
 import com.fractalx.core.observability.ObservabilityInjector;
 import org.slf4j.Logger;
@@ -45,17 +49,23 @@ public class ServiceGenerator {
     // Ordered list of generation steps — open for extension, closed for modification
     private final List<ServiceFileGenerator> pipeline;
 
-    private final ObservabilityInjector observabilityInjector;
-    private final DistributedServiceHelper distributedServiceHelper;
-    private final AdminServiceGenerator adminServiceGenerator;
+    private final ObservabilityInjector     observabilityInjector;
+    private final DistributedServiceHelper  distributedServiceHelper;
+    private final AdminServiceGenerator     adminServiceGenerator;
+    private final SagaOrchestratorGenerator sagaOrchestratorGenerator;
+    private final SagaAnalyzer              sagaAnalyzer;
+    private final RepositoryAnalyzer        repositoryAnalyzer;
 
     public ServiceGenerator(Path sourceRoot, Path outputRoot) {
         this.sourceRoot = sourceRoot;
         this.outputRoot = outputRoot;
 
-        this.observabilityInjector    = new ObservabilityInjector();
-        this.distributedServiceHelper = new DistributedServiceHelper();
-        this.adminServiceGenerator    = new AdminServiceGenerator();
+        this.observabilityInjector     = new ObservabilityInjector();
+        this.distributedServiceHelper  = new DistributedServiceHelper();
+        this.adminServiceGenerator     = new AdminServiceGenerator();
+        this.sagaOrchestratorGenerator = new SagaOrchestratorGenerator();
+        this.sagaAnalyzer              = new SagaAnalyzer();
+        this.repositoryAnalyzer        = new RepositoryAnalyzer();
 
         this.pipeline = buildPipeline();
     }
@@ -92,6 +102,15 @@ public class ServiceGenerator {
         log.info("Starting code generation for {} modules", modules.size());
         Files.createDirectories(outputRoot);
 
+        // Run repository boundary analysis before generation (warnings only — never fails)
+        RepositoryAnalyzer.RepositoryReport repoReport = repositoryAnalyzer.analyze(sourceRoot, modules);
+        if (repoReport.hasViolations()) {
+            log.warn("Repository boundary violations detected — review DATA_README.md for guidance");
+        }
+
+        // Detect @DistributedSaga definitions across all modules
+        List<SagaDefinition> sagaDefinitions = sagaAnalyzer.analyzeSagas(sourceRoot, modules);
+
         for (FractalModule module : modules) {
             generateService(module, modules);
         }
@@ -103,7 +122,11 @@ public class ServiceGenerator {
         }
 
         adminServiceGenerator.generateAdminService(modules, outputRoot);
-        generateStartScripts(modules);
+
+        // Generate saga orchestrator service if any sagas were detected
+        sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
+
+        generateStartScripts(modules, sagaDefinitions);
 
         log.info("Code generation complete!");
     }
@@ -141,17 +164,19 @@ public class ServiceGenerator {
         }
     }
 
-    private void generateStartScripts(List<FractalModule> modules) throws IOException {
+    private void generateStartScripts(List<FractalModule> modules,
+                                       List<SagaDefinition> sagaDefinitions) throws IOException {
         Path gatewayPath = outputRoot.resolve(GATEWAY_DIR);
 
-        generateStartScript(modules, gatewayPath);
-        generateStopScript(gatewayPath);
-        generateReadme(modules);
+        generateStartScript(modules, gatewayPath, !sagaDefinitions.isEmpty());
+        generateStopScript(gatewayPath, !sagaDefinitions.isEmpty());
+        generateReadme(modules, !sagaDefinitions.isEmpty());
 
         log.info("Generated start scripts");
     }
 
-    private void generateStartScript(List<FractalModule> modules, Path gatewayPath) throws IOException {
+    private void generateStartScript(List<FractalModule> modules, Path gatewayPath,
+                                      boolean hasSagaOrchestrator) throws IOException {
         StringBuilder script = new StringBuilder();
         script.append("#!/bin/bash\n\n");
         script.append("echo \"Starting all FractalX microservices...\"\n\n");
@@ -162,6 +187,12 @@ public class ServiceGenerator {
                     module.getServiceName(), module.getPort()));
             script.append(String.format("cd %s && mvn spring-boot:run > ../%s.log 2>&1 &\n",
                     module.getServiceName(), module.getServiceName()));
+            script.append("cd ..\n\n");
+        }
+
+        if (hasSagaOrchestrator) {
+            script.append("echo \"Starting Saga Orchestrator...\"\n");
+            script.append("cd fractalx-saga-orchestrator && mvn spring-boot:run > ../fractalx-saga-orchestrator.log 2>&1 &\n");
             script.append("cd ..\n\n");
         }
 
@@ -178,13 +209,16 @@ public class ServiceGenerator {
             script.append(String.format("echo \"  %-20s http://localhost:%d\"\n",
                     module.getServiceName() + ":", module.getPort()));
         }
+        if (hasSagaOrchestrator) {
+            script.append(String.format("echo \"  %-20s http://localhost:8099\"\n", "saga-orchestrator:"));
+        }
 
         Path scriptPath = outputRoot.resolve("start-all.sh");
         Files.writeString(scriptPath, script.toString());
         scriptPath.toFile().setExecutable(true);
     }
 
-    private void generateStopScript(Path gatewayPath) throws IOException {
+    private void generateStopScript(Path gatewayPath, boolean hasSagaOrchestrator) throws IOException {
         StringBuilder script = new StringBuilder();
         script.append("#!/bin/bash\n\n");
         script.append("echo \"Stopping all FractalX microservices...\"\n\n");
@@ -193,6 +227,12 @@ public class ServiceGenerator {
             script.append("echo \"Stopping API Gateway...\"\n");
             script.append(String.format("pkill -f \"%s\"\n", GATEWAY_DIR));
             script.append("sleep 2\n\n");
+        }
+
+        if (hasSagaOrchestrator) {
+            script.append("echo \"Stopping Saga Orchestrator...\"\n");
+            script.append("pkill -f \"fractalx-saga-orchestrator\" || true\n");
+            script.append("sleep 1\n\n");
         }
 
         script.append("echo \"Stopping all services...\"\n");
@@ -204,7 +244,7 @@ public class ServiceGenerator {
         scriptPath.toFile().setExecutable(true);
     }
 
-    private void generateReadme(List<FractalModule> modules) throws IOException {
+    private void generateReadme(List<FractalModule> modules, boolean hasSagaOrchestrator) throws IOException {
         StringBuilder readme = new StringBuilder();
         readme.append("# FractalX Generated Microservices\n\n");
         readme.append("This directory contains microservices generated by FractalX.\n\n");
@@ -213,6 +253,9 @@ public class ServiceGenerator {
         for (FractalModule module : modules) {
             readme.append(String.format("- **%s**: http://localhost:%d\n",
                     module.getServiceName(), module.getPort()));
+        }
+        if (hasSagaOrchestrator) {
+            readme.append("- **fractalx-saga-orchestrator**: http://localhost:8099\n");
         }
 
         readme.append("\n## Quick Start\n\n```bash\n./start-all.sh\n```\n\n");
