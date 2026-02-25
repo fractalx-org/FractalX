@@ -18,7 +18,6 @@
         <module>../fractalx-core</module>
         <module>../fractalx-maven-plugin</module>
         <module>../fractalx-runtime</module>
-        <module>../fractalx-test-app</module>
     </modules>
 
     <properties>
