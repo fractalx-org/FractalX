@@ -11,6 +11,7 @@ import com.fractalx.core.generator.transformation.CodeTransformer;
 import com.fractalx.core.generator.transformation.FileCleanupStep;
 import com.fractalx.core.generator.transformation.ImportCleaner;
 import com.fractalx.core.generator.transformation.ImportPreserver;
+import com.fractalx.core.generator.transformation.NetScopeClientWiringStep;
 import com.fractalx.core.generator.transformation.NetScopeServerAnnotationStep;
 import com.fractalx.core.datamanagement.DistributedServiceHelper;
 import com.fractalx.core.gateway.GatewayGenerator;
@@ -77,6 +78,7 @@ public class ServiceGenerator {
                 new FileCleanupStep(List.of("PaymentClientImpl.java")),
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
+                new NetScopeClientWiringStep(),
                 context -> distributedServiceHelper.upgradeService(
                         context.getModule(), context.getSourceRoot(), context.getServiceRoot())
         );
