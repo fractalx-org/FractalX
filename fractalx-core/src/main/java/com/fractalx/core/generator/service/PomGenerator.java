@@ -80,9 +80,15 @@ public class PomGenerator implements ServiceFileGenerator {
                         </dependency>
 
                         <dependency>
-                            <groupId>org.springframework.cloud</groupId>
-                            <artifactId>spring-cloud-starter-openfeign</artifactId>
-                            <version>4.1.0</version>
+                            <groupId>org.fractalx</groupId>
+                            <artifactId>netscope-server</artifactId>
+                            <version>1.0.0</version>
+                        </dependency>
+
+                        <dependency>
+                            <groupId>org.fractalx</groupId>
+                            <artifactId>netscope-client</artifactId>
+                            <version>1.0.0</version>
                         </dependency>
 
                         <dependency>
