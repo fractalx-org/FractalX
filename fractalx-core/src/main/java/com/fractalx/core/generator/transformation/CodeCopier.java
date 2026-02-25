@@ -1,6 +1,8 @@
-package com.fractalx.core.generator;
+package com.fractalx.core.generator.transformation;
 
-import com.fractalx.core.FractalModule;
+import com.fractalx.core.generator.GenerationContext;
+import com.fractalx.core.generator.ServiceFileGenerator;
+import com.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,36 +13,34 @@ import java.nio.file.StandardCopyOption;
 import java.util.stream.Stream;
 
 /**
- * Copies module code from monolith to microservice project
+ * Copies the module's source package from the monolith into the generated service.
  */
-public class CodeCopier {
+public class CodeCopier implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(CodeCopier.class);
-    private final Path sourceRoot;
 
-    public CodeCopier(Path sourceRoot) {
-        this.sourceRoot = sourceRoot;
-    }
-
-    public void copyModuleCode(FractalModule module, Path targetSrcMainJava) throws IOException {
+    @Override
+    public void generate(GenerationContext context) throws IOException {
+        FractalModule module = context.getModule();
         log.debug("Copying code for module: {}", module.getServiceName());
 
-        if (module.getPackageName() == null || module.getPackageName().isEmpty()) {
+        if (module.getPackageName() == null || module.getPackageName().isBlank()) {
             log.warn("No package name found for module: {}", module.getServiceName());
             return;
         }
 
-        // Determine source package directory
-        Path sourcePackageDir = sourceRoot.resolve(module.getPackageName().replace('.', '/'));
+        Path sourcePackageDir = context.getSourceRoot()
+                .resolve(module.getPackageName().replace('.', '/'));
 
         if (!Files.exists(sourcePackageDir)) {
             log.warn("Source package directory does not exist: {}", sourcePackageDir);
             return;
         }
 
-        // Copy entire package
-        copyDirectory(sourcePackageDir, targetSrcMainJava.resolve(module.getPackageName().replace('.', '/')));
+        Path targetPackageDir = context.getSrcMainJava()
+                .resolve(module.getPackageName().replace('.', '/'));
 
+        copyDirectory(sourcePackageDir, targetPackageDir);
         log.info("Copied {} to generated service", module.getPackageName());
     }
 
@@ -55,7 +55,7 @@ public class CodeCopier {
                         Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
                     }
                 } catch (IOException e) {
-                    log.error("Failed to copy: " + sourcePath, e);
+                    log.error("Failed to copy: {}", sourcePath, e);
                 }
             });
         }

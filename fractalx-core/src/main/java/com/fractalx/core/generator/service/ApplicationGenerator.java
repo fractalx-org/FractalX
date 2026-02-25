@@ -1,6 +1,8 @@
-package com.fractalx.core.generator;
+package com.fractalx.core.generator.service;
 
-import com.fractalx.core.FractalModule;
+import com.fractalx.core.generator.GenerationContext;
+import com.fractalx.core.generator.ServiceFileGenerator;
+import com.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,41 +11,30 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Generates Spring Boot Application class for each microservice
+ * Generates the Spring Boot Application class for a microservice.
  */
-public class ApplicationGenerator {
+public class ApplicationGenerator implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ApplicationGenerator.class);
 
-    public void generateApplicationClass(FractalModule module, Path srcMainJava) throws IOException {
+    @Override
+    public void generate(GenerationContext context) throws IOException {
+        FractalModule module = context.getModule();
         log.debug("Generating Application class for {}", module.getServiceName());
 
-        // Create package directory
         String basePackage = "com.fractalx.generated." + module.getServiceName().replace("-", "");
-        Path packagePath = createPackagePath(srcMainJava, basePackage);
+        Path packagePath = createPackagePath(context.getSrcMainJava(), basePackage);
 
-        // Generate Application.java with correct class name
         String className = toPascalCase(module.getServiceName()) + "Application";
-        String applicationContent = generateApplicationContent(module, basePackage, className);
-        Path applicationPath = packagePath.resolve(className + ".java");
-        Files.writeString(applicationPath, applicationContent);
+        Files.writeString(packagePath.resolve(className + ".java"),
+                buildContent(module, basePackage, className));
 
-        log.info("✓ Generated Application class: {}", className);
+        log.info("Generated Application class: {}", className);
     }
 
-    private Path createPackagePath(Path srcMainJava, String packageName) throws IOException {
-        String[] parts = packageName.split("\\.");
-        Path packagePath = srcMainJava;
-        for (String part : parts) {
-            packagePath = packagePath.resolve(part);
-        }
-        Files.createDirectories(packagePath);
-        return packagePath;
-    }
-
-    private String generateApplicationContent(FractalModule module, String basePackage, String className) {
-        String originalPackage = extractOriginalPackage(module);
-        String scanPackages = String.format("\"%s\", \"%s\", \"com.fractalx.runtime\"", basePackage, originalPackage);
+    private String buildContent(FractalModule module, String basePackage, String className) {
+        String originalPackage = extractBasePackage(module.getPackageName());
+        String scanPackages = "\"%s\", \"%s\", \"com.fractalx.runtime\"".formatted(basePackage, originalPackage);
 
         return """
                 package %s;
@@ -69,24 +60,27 @@ public class ApplicationGenerator {
                 """.formatted(basePackage, module.getServiceName(), scanPackages, scanPackages, className, className);
     }
 
-    private String extractOriginalPackage(FractalModule module) {
-        // Extract base package from the module's package name
-        // e.g., "com.fractalx.testapp.order" -> "com.fractalx.testapp"
-        String packageName = module.getPackageName();
-        if (packageName != null && !packageName.isEmpty()) {
-            int lastDot = packageName.lastIndexOf('.');
-            if (lastDot > 0) {
-                return packageName.substring(0, lastDot);
-            }
-            return packageName;
+    /** Strips the last package segment: {@code com.example.order} → {@code com.example}. */
+    private String extractBasePackage(String packageName) {
+        if (packageName == null || packageName.isBlank()) {
+            return "com.fractalx.testapp";
         }
-        return "com.fractalx.testapp";
+        int lastDot = packageName.lastIndexOf('.');
+        return lastDot > 0 ? packageName.substring(0, lastDot) : packageName;
+    }
+
+    private Path createPackagePath(Path srcMainJava, String packageName) throws IOException {
+        Path path = srcMainJava;
+        for (String part : packageName.split("\\.")) {
+            path = path.resolve(part);
+        }
+        Files.createDirectories(path);
+        return path;
     }
 
     private String toPascalCase(String kebabCase) {
         StringBuilder result = new StringBuilder();
         boolean capitalizeNext = true;
-
         for (char c : kebabCase.toCharArray()) {
             if (c == '-') {
                 capitalizeNext = true;
@@ -97,7 +91,6 @@ public class ApplicationGenerator {
                 result.append(c);
             }
         }
-
         return result.toString();
     }
 }

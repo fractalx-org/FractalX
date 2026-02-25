@@ -1,6 +1,6 @@
 package com.fractalx.core.datamanagement;
 
-import com.fractalx.core.FractalModule;
+import com.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.DumperOptions;

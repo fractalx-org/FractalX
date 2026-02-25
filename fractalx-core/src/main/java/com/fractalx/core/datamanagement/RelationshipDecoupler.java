@@ -1,6 +1,6 @@
 package com.fractalx.core.datamanagement;
 
-import com.fractalx.core.FractalModule;
+import com.fractalx.core.model.FractalModule;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
