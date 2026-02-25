@@ -1,7 +1,7 @@
 package com.fractalx.maven;
 
 import com.fractalx.core.ModuleAnalyzer;
-import com.fractalx.core.FractalModule;
+import com.fractalx.core.model.FractalModule;
 import com.fractalx.core.generator.ServiceGenerator;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;

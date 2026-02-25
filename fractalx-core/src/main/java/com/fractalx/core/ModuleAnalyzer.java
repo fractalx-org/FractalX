@@ -1,5 +1,6 @@
 package com.fractalx.core;
 
+import com.fractalx.core.model.FractalModule;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -16,7 +17,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 /**
- * Analyzes source code to identify FractalX decomposable modules
+ * Analyzes source code to identify FractalX decomposable modules.
  */
 public class ModuleAnalyzer {
 
@@ -28,7 +29,7 @@ public class ModuleAnalyzer {
     }
 
     /**
-     * Analyzes a source directory and identifies decomposable modules
+     * Analyzes a source directory and returns all decomposable modules found.
      */
     public List<FractalModule> analyzeProject(Path sourceRoot) throws IOException {
         List<FractalModule> modules = new ArrayList<>();
@@ -65,15 +66,11 @@ public class ModuleAnalyzer {
             AnnotationExpr annotation,
             CompilationUnit cu) {
 
-        FractalModule descriptor = new FractalModule();
-        descriptor.setClassName(classDecl.getFullyQualifiedName().orElse(classDecl.getNameAsString()));
+        FractalModule.Builder builder = FractalModule.builder();
+        builder.className(classDecl.getFullyQualifiedName().orElse(classDecl.getNameAsString()));
 
-        // Extract package name
-        cu.getPackageDeclaration().ifPresent(pd -> {
-            descriptor.setPackageName(pd.getNameAsString());
-        });
+        cu.getPackageDeclaration().ifPresent(pd -> builder.packageName(pd.getNameAsString()));
 
-        // Extract annotation properties
         if (annotation.isNormalAnnotationExpr()) {
             NormalAnnotationExpr normalAnnotation = annotation.asNormalAnnotationExpr();
             for (MemberValuePair pair : normalAnnotation.getPairs()) {
@@ -81,72 +78,56 @@ public class ModuleAnalyzer {
                 String value = pair.getValue().toString().replace("\"", "");
 
                 switch (name) {
-                    case "serviceName":
-                        descriptor.setServiceName(value);
-                        break;
-                    case "port":
+                    case "serviceName" -> builder.serviceName(value);
+                    case "port" -> {
                         try {
-                            descriptor.setPort(Integer.parseInt(value));
+                            builder.port(Integer.parseInt(value));
                         } catch (NumberFormatException e) {
                             log.warn("Invalid port number: {}", value);
                         }
-                        break;
-                    case "independentDeployment":
-                        descriptor.setIndependentDeployment(Boolean.parseBoolean(value));
-                        break;
+                    }
+                    case "independentDeployment" -> builder.independentDeployment(Boolean.parseBoolean(value));
                 }
             }
         }
 
-        // Analyze dependencies - Look at field types
         List<String> dependencies = findDependencies(classDecl);
-        descriptor.setDependencies(dependencies);
+        builder.dependencies(dependencies);
+
+        FractalModule module = builder.build();
 
         if (!dependencies.isEmpty()) {
-            log.info("Detected dependencies for {}: {}", descriptor.getServiceName(), dependencies);
+            log.info("Detected dependencies for {}: {}", module.getServiceName(), dependencies);
         }
 
-        return descriptor;
+        return module;
     }
 
     /**
-     * Find dependencies by analyzing field declarations
+     * Finds cross-module dependencies by inspecting injected fields and constructor parameters.
+     * Types ending with "Client" or "Service" are treated as potential cross-module calls.
      */
     private List<String> findDependencies(ClassOrInterfaceDeclaration classDecl) {
         Set<String> dependencies = new HashSet<>();
 
-        // Analyze field declarations (injected dependencies)
         classDecl.findAll(FieldDeclaration.class).forEach(field -> {
             String fieldType = field.getCommonType().asString();
-
-            // Check if it's a client or service interface
             if (fieldType.endsWith("Client") || fieldType.endsWith("Service")) {
                 dependencies.add(fieldType);
                 log.debug("Found dependency: {} in field declaration", fieldType);
             }
         });
 
-        // Also check constructor parameters
-        classDecl.getConstructors().forEach(constructor -> {
-            constructor.getParameters().forEach(param -> {
-                String paramType = param.getType().asString();
-
-                if (paramType.endsWith("Client") || paramType.endsWith("Service")) {
-                    dependencies.add(paramType);
-                    log.debug("Found dependency: {} in constructor parameter", paramType);
-                }
-            });
-        });
+        classDecl.getConstructors().forEach(constructor ->
+                constructor.getParameters().forEach(param -> {
+                    String paramType = param.getType().asString();
+                    if (paramType.endsWith("Client") || paramType.endsWith("Service")) {
+                        dependencies.add(paramType);
+                        log.debug("Found dependency: {} in constructor parameter", paramType);
+                    }
+                })
+        );
 
         return new ArrayList<>(dependencies);
-    }
-
-    /**
-     * Check if admin service should be generated
-     */
-    public boolean shouldGenerateAdminService(Path sourceRoot) throws IOException {
-        // For now, always generate admin if there are 2+ services
-        // Later we can check for @AdminEnabled annotation
-        return true;
     }
 }

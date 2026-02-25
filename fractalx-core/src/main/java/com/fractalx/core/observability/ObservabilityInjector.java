@@ -1,6 +1,5 @@
 package com.fractalx.core.observability;
 
-import com.fractalx.core.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.IOException;
