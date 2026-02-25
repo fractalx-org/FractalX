@@ -7,17 +7,25 @@ import java.lang.annotation.*;
 @Documented
 public @interface DistributedSaga {
     /**
-     * Saga identifier
+     * Unique saga identifier used to correlate orchestration state.
+     * Example: {@code "place-order-saga"}
      */
     String sagaId();
 
     /**
-     * Compensation method name for rollback
+     * Name of the compensation (rollback) method to call on failure.
+     * The method must be in the same class and accept the same parameters.
      */
     String compensationMethod() default "";
 
     /**
-     * Timeout in milliseconds
+     * Timeout in milliseconds for the entire saga execution.
      */
     long timeout() default 30000;
+
+    /**
+     * Human-readable description of what this saga does.
+     * Used in generated documentation and the admin UI.
+     */
+    String description() default "";
 }
