@@ -19,6 +19,8 @@ import java.util.List;
 public class ServiceGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceGenerator.class);
+    private static final int GATEWAY_PORT = 9999;
+    private static final String GATEWAY_DIR = "fractalx-gateway";
 
     private final Path sourceRoot;
     private final Path outputRoot;
@@ -117,11 +119,11 @@ public class ServiceGenerator {
         log.info("Generating API Gateway for {} services", modules.size());
 
         try {
-            GatewayGenerator gatewayGen = new GatewayGenerator(sourceRoot, outputRoot);
+            GatewayGenerator gatewayGen = new GatewayGenerator(sourceRoot, outputRoot); // generates into GATEWAY_DIR
             gatewayGen.generateGateway(modules);
 
             log.info("✓ Generated API Gateway");
-            log.info("  Gateway URL: http://localhost:9999");
+            log.info("  Gateway URL: http://localhost:{}", GATEWAY_PORT);
             // REMOVED: Swagger UI and Health Check logs
 
             // Update README to include gateway info
@@ -152,7 +154,7 @@ public class ServiceGenerator {
         gatewaySection.append("FractalX generates a simple API Gateway that provides a unified entry point.\n\n");
 
         gatewaySection.append("### Gateway Features\n\n");
-        gatewaySection.append("- **Unified API**: Single entry point at `http://localhost:9999`\n");
+        gatewaySection.append("- **Unified API**: Single entry point at `http://localhost:").append(GATEWAY_PORT).append("`\n");
         gatewaySection.append("- **Static Routing**: Direct routing to services based on port numbers\n");
         gatewaySection.append("- **No Service Discovery**: Simple configuration without Eureka\n");
         gatewaySection.append("- **Path Rewriting**: Strip service prefixes from URLs\n\n");
@@ -161,7 +163,7 @@ public class ServiceGenerator {
         gatewaySection.append("All services are accessible through the gateway:\n\n");
         gatewaySection.append("```\n");
         gatewaySection.append("Direct URL:  http://localhost:{port}/api/{endpoint}\n");
-        gatewaySection.append("Gateway URL: http://localhost:9999/api/{service-name}/{endpoint}\n");
+        gatewaySection.append("Gateway URL: http://localhost:").append(GATEWAY_PORT).append("/api/{service-name}/{endpoint}\n");
         gatewaySection.append("```\n\n");
 
         gatewaySection.append("**Examples:**\n\n");
@@ -170,7 +172,7 @@ public class ServiceGenerator {
             gatewaySection.append(String.format("- **%s Service**\n", module.getServiceName()));
             gatewaySection.append(String.format("  - Direct: `http://localhost:%d/api/%s/health`\n",
                     module.getPort(), servicePath));
-            gatewaySection.append(String.format("  - Gateway: `http://localhost:9999/api/%s/health`\n\n",
+            gatewaySection.append(String.format("  - Gateway: `http://localhost:%d/api/%s/health`\n\n", GATEWAY_PORT,
                     servicePath));
         }
 
@@ -191,88 +193,72 @@ public class ServiceGenerator {
     }
 
     private void generateStartScripts(List<FractalModule> modules) throws IOException {
-        // Generate start-all.sh for Unix/Mac
-        StringBuilder bashScript = new StringBuilder();
-        bashScript.append("#!/bin/bash\n\n");
-        bashScript.append("echo \"Starting all FractalX microservices...\"\n\n");
+        Path gatewayPath = outputRoot.resolve(GATEWAY_DIR);
 
-        // Start API Gateway first if it exists
-        Path gatewayPath = outputRoot.resolve("fractalx-gateway");
-        if (Files.exists(gatewayPath)) {
-            bashScript.append("echo \"✅ All services and gateway started successfully!\"\n");
-            bashScript.append("echo \"\"\n");
-            bashScript.append("echo \"=========================================\"\n");
-            bashScript.append("echo \"🔗 Gateway URL: http://localhost:9999\"\n");
-            bashScript.append("echo \"=========================================\"\n");
-        }
-
-        bashScript.append("# Start all microservices\n");
-
-        for (FractalModule module : modules) {
-            bashScript.append(String.format(
-                    "echo \"Starting %s on port %d...\"\n",
-                    module.getServiceName(),
-                    module.getPort()
-            ));
-            bashScript.append(String.format(
-                    "cd %s && mvn spring-boot:run > ../%s.log 2>&1 &\n",
-                    module.getServiceName(),
-                    module.getServiceName()
-            ));
-            bashScript.append("cd ..\n\n");
-        }
-
-        if (Files.exists(gatewayPath)) {
-            bashScript.append("echo \"✅ All services and gateway started successfully!\"\n");
-            bashScript.append("echo \"\"\n");
-            bashScript.append("echo \"=========================================\"\n");
-            bashScript.append("echo \"🔗 Gateway URL: http://localhost:9999\"\n"); // CHANGED PORT
-            // REMOVED: API Docs and Health Check messages
-            bashScript.append("echo \"=========================================\"\n");
-        } else {
-            bashScript.append("echo \"All services started. Check logs in *.log files\"\n");
-        }
-
-        bashScript.append("echo \"To stop all services, run: ./stop-all.sh\"\n");
-
-        // Show service URLs
-        bashScript.append("\necho \"\"\n");
-        bashScript.append("echo \"Service URLs:\"\n");
-        for (FractalModule module : modules) {
-            bashScript.append(String.format("echo \"  %-20s http://localhost:%d\"\n",
-                    module.getServiceName() + ":", module.getPort()));
-        }
-
-        Path bashScriptPath = outputRoot.resolve("start-all.sh");
-        Files.writeString(bashScriptPath, bashScript.toString());
-        bashScriptPath.toFile().setExecutable(true);
-
-        // Generate stop-all.sh with gateway support
-        StringBuilder stopScript = new StringBuilder();
-        stopScript.append("#!/bin/bash\n\n");
-        stopScript.append("echo \"Stopping all FractalX microservices...\"\n\n");
-
-        if (Files.exists(gatewayPath)) {
-            stopScript.append("# Stop API Gateway\n");
-            stopScript.append("echo \"Stopping API Gateway...\"\n");
-            stopScript.append("pkill -f \"fractalx-gateway\"\n");
-            stopScript.append("sleep 2\n\n");
-        }
-
-        stopScript.append("# Stop all microservices\n");
-        stopScript.append("echo \"Stopping all services...\"\n");
-        stopScript.append("pkill -f \"spring-boot:run\"\n\n");
-
-        stopScript.append("echo \"✅ All services stopped.\"\n");
-
-        Path stopScriptPath = outputRoot.resolve("stop-all.sh");
-        Files.writeString(stopScriptPath, stopScript.toString());
-        stopScriptPath.toFile().setExecutable(true);
-
-        // Generate README
+        generateStartScript(modules, gatewayPath);
+        generateStopScript(gatewayPath);
         generateReadme(modules);
 
         log.info("✓ Generated start scripts");
+    }
+
+    private void generateStartScript(List<FractalModule> modules, Path gatewayPath) throws IOException {
+        StringBuilder script = new StringBuilder();
+        script.append("#!/bin/bash\n\n");
+        script.append("echo \"Starting all FractalX microservices...\"\n\n");
+        script.append("# Start all microservices\n");
+
+        for (FractalModule module : modules) {
+            script.append(String.format("echo \"Starting %s on port %d...\"\n",
+                    module.getServiceName(), module.getPort()));
+            script.append(String.format("cd %s && mvn spring-boot:run > ../%s.log 2>&1 &\n",
+                    module.getServiceName(), module.getServiceName()));
+            script.append("cd ..\n\n");
+        }
+
+        if (Files.exists(gatewayPath)) {
+            script.append("echo \"All services and gateway started successfully!\"\n");
+            script.append("echo \"\"\n");
+            script.append("echo \"=========================================\"\n");
+            script.append(String.format("echo \"Gateway URL: http://localhost:%d\"\n", GATEWAY_PORT));
+            script.append("echo \"=========================================\"\n");
+        } else {
+            script.append("echo \"All services started. Check logs in *.log files\"\n");
+        }
+
+        script.append("echo \"To stop all services, run: ./stop-all.sh\"\n");
+        script.append("\necho \"\"\n");
+        script.append("echo \"Service URLs:\"\n");
+        for (FractalModule module : modules) {
+            script.append(String.format("echo \"  %-20s http://localhost:%d\"\n",
+                    module.getServiceName() + ":", module.getPort()));
+        }
+
+        Path scriptPath = outputRoot.resolve("start-all.sh");
+        Files.writeString(scriptPath, script.toString());
+        scriptPath.toFile().setExecutable(true);
+    }
+
+    private void generateStopScript(Path gatewayPath) throws IOException {
+        StringBuilder script = new StringBuilder();
+        script.append("#!/bin/bash\n\n");
+        script.append("echo \"Stopping all FractalX microservices...\"\n\n");
+
+        if (Files.exists(gatewayPath)) {
+            script.append("# Stop API Gateway\n");
+            script.append("echo \"Stopping API Gateway...\"\n");
+            script.append(String.format("pkill -f \"%s\"\n", GATEWAY_DIR));
+            script.append("sleep 2\n\n");
+        }
+
+        script.append("# Stop all microservices\n");
+        script.append("echo \"Stopping all services...\"\n");
+        script.append("pkill -f \"spring-boot:run\"\n\n");
+        script.append("echo \"All services stopped.\"\n");
+
+        Path scriptPath = outputRoot.resolve("stop-all.sh");
+        Files.writeString(scriptPath, script.toString());
+        scriptPath.toFile().setExecutable(true);
     }
 
     private void generateReadme(List<FractalModule> modules) throws IOException {
@@ -320,10 +306,10 @@ public class ServiceGenerator {
         for (FractalModule module : modules) {
             readme.append(String.format("    ├── %s (:%d)\n", module.getServiceName(), module.getPort()));
             if (!module.getDependencies().isEmpty()) {
-                readme.append("    │   └─ Dependencies: " + String.join(", ", module.getDependencies()) + "\n");
+                readme.append(String.format("    │   └─ Dependencies: %s\n", String.join(", ", module.getDependencies())));
             }
         }
-        readme.append("    └── Gateway → http://localhost:9999\n");
+        readme.append(String.format("    └── Gateway → http://localhost:%d\n", GATEWAY_PORT));
         readme.append("```\n");
 
         Path readmePath = outputRoot.resolve("README.md");

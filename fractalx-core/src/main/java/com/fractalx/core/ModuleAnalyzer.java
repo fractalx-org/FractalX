@@ -39,7 +39,7 @@ public class ModuleAnalyzer {
                     try {
                         analyzeFile(path, modules);
                     } catch (IOException e) {
-                        log.error("Failed to analyze file: " + path, e);
+                        log.error("Failed to analyze file: {}", path, e);
                     }
                 });
 
@@ -88,7 +88,7 @@ public class ModuleAnalyzer {
                         try {
                             descriptor.setPort(Integer.parseInt(value));
                         } catch (NumberFormatException e) {
-                            log.warn("Invalid port number: " + value);
+                            log.warn("Invalid port number: {}", value);
                         }
                         break;
                     case "independentDeployment":
