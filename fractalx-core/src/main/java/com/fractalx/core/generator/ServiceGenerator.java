@@ -3,7 +3,7 @@ package com.fractalx.core.generator;
 import com.fractalx.core.generator.admin.AdminServiceGenerator;
 import com.fractalx.core.generator.service.ApplicationGenerator;
 import com.fractalx.core.generator.service.ConfigurationGenerator;
-import com.fractalx.core.generator.service.FeignClientGenerator;
+import com.fractalx.core.generator.service.NetScopeClientGenerator;
 import com.fractalx.core.generator.service.PomGenerator;
 import com.fractalx.core.generator.transformation.AnnotationRemover;
 import com.fractalx.core.generator.transformation.CodeCopier;
@@ -11,6 +11,7 @@ import com.fractalx.core.generator.transformation.CodeTransformer;
 import com.fractalx.core.generator.transformation.FileCleanupStep;
 import com.fractalx.core.generator.transformation.ImportCleaner;
 import com.fractalx.core.generator.transformation.ImportPreserver;
+import com.fractalx.core.generator.transformation.NetScopeServerAnnotationStep;
 import com.fractalx.core.datamanagement.DistributedServiceHelper;
 import com.fractalx.core.gateway.GatewayGenerator;
 import com.fractalx.core.model.FractalModule;
@@ -74,7 +75,8 @@ public class ServiceGenerator {
                         new ImportCleaner()
                 ),
                 new FileCleanupStep(List.of("PaymentClientImpl.java")),
-                new FeignClientGenerator(),
+                new NetScopeServerAnnotationStep(),
+                new NetScopeClientGenerator(),
                 context -> distributedServiceHelper.upgradeService(
                         context.getModule(), context.getSourceRoot(), context.getServiceRoot())
         );
