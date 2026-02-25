@@ -14,6 +14,7 @@ import java.nio.file.Path;
 public class PomGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(PomGenerator.class);
+    private static final String FRACTALX_RUNTIME_VERSION = "0.2.0-SNAPSHOT";
     private final ObservabilityInjector observabilityInjector = new ObservabilityInjector();
 
     public void generatePom(FractalModule module, Path serviceRoot) throws IOException {
@@ -81,9 +82,9 @@ public class PomGenerator {
                     <dependency>
                         <groupId>com.fractalx</groupId>
                         <artifactId>fractalx-runtime</artifactId>
-                        <version>0.2.0-SNAPSHOT</version>
+                        <version>%s</version>
                     </dependency>
-                    
+
                     <dependency>
                         <groupId>com.h2database</groupId>
                         <artifactId>h2</artifactId>
@@ -91,7 +92,7 @@ public class PomGenerator {
                     </dependency>
                     %s
                 </dependencies>
-            
+
                 <build>
                     <plugins>
                         <plugin>
@@ -112,6 +113,7 @@ public class PomGenerator {
             """.formatted(
                 module.getServiceName(),
                 module.getServiceName(),
+                FRACTALX_RUNTIME_VERSION,
                 observabilityInjector.getDependencies()
         );
     }
