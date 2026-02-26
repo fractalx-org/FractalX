@@ -30,6 +30,10 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
     @Override
     public void generate(GenerationContext context) throws IOException {
         FractalModule module = context.getModule();
+        if (module.getDependencies().isEmpty()) {
+            log.debug("Skipping resilience config for {} — no cross-service dependencies", module.getServiceName());
+            return;
+        }
         log.debug("Generating resilience config for {}", module.getServiceName());
 
         String generatedPkg = "com.fractalx.generated." + toJavaId(module.getServiceName()).toLowerCase();
