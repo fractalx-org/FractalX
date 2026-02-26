@@ -32,10 +32,10 @@ public class FractalLogAppender extends AppenderBase<ILoggingEvent> {
             payload.put("level", event.getLevel().toString());
             payload.put("message", event.getFormattedMessage());
 
-            // Capture Trace ID (Novelty!)
-            String traceId = MDC.get("traceId");
-            if (traceId != null) {
-                payload.put("traceId", traceId);
+            // Capture Correlation ID for cross-service log correlation
+            String correlationId = MDC.get("correlationId");
+            if (correlationId != null) {
+                payload.put("correlationId", correlationId);
             }
 
             // Send async (fire and forget)

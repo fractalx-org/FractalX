@@ -63,6 +63,9 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   observability:
                     tracing: true
                     metrics: true
+                    logger-url: ${FRACTALX_LOGGER_URL:http://localhost:9099/api/logs}
+                    otel:
+                      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
 
                 netscope:
                   server:
@@ -75,7 +78,14 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   endpoints:
                     web:
                       exposure:
-                        include: health,info,metrics
+                        include: health,info,metrics,prometheus
+                  endpoint:
+                    health:
+                      show-details: always
+                      show-components: always
+                  tracing:
+                    sampling:
+                      probability: 1.0
 
                 logging:
                   level:
@@ -131,6 +141,11 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
         sb.append("  flyway:\n");
         sb.append("    enabled: true\n");
         sb.append("    locations: classpath:db/migration\n");
+        sb.append("fractalx:\n");
+        sb.append("  observability:\n");
+        sb.append("    otel:\n");
+        sb.append("      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://jaeger:4317}\n");
+        sb.append("    logger-url: ${FRACTALX_LOGGER_URL:http://logger-service:9099/api/logs}\n");
 
         List<String> deps = module.getDependencies();
         if (!deps.isEmpty()) {

@@ -86,8 +86,8 @@ public class GatewayGenerator {
         // Step 10: Global CORS filter
         new GatewayCorsGenerator().generate(srcMainJava);
 
-        // Step 11: Request tracing + structured logging
-        new GatewayObservabilityGenerator().generate(srcMainJava);
+        // Step 11: Request tracing + structured logging + metrics filter
+        new GatewayObservabilityGenerator().generate(srcMainJava, modules);
 
         log.info("✓ API Gateway generated at: {}", gatewayRoot.toAbsolutePath());
     }

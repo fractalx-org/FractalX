@@ -72,6 +72,15 @@ class AdminPomGenerator {
                             <version>0.2.0-SNAPSHOT</version>
                         </dependency>
                         <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-mail</artifactId>
+                        </dependency>
+                        <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-configuration-processor</artifactId>
+                            <optional>true</optional>
+                        </dependency>
+                        <dependency>
                             <groupId>org.webjars</groupId>
                             <artifactId>bootstrap</artifactId>
                             <version>5.3.0</version>
