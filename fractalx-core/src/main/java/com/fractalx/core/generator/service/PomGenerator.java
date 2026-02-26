@@ -107,6 +107,23 @@ public class PomGenerator implements ServiceFileGenerator {
                             <groupId>org.flywaydb</groupId>
                             <artifactId>flyway-core</artifactId>
                         </dependency>
+
+                        <!-- Resilience4j — circuit breaker, retry, time limiter for NetScope calls -->
+                        <dependency>
+                            <groupId>io.github.resilience4j</groupId>
+                            <artifactId>resilience4j-spring-boot3</artifactId>
+                            <version>2.1.0</version>
+                        </dependency>
+                        <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-aop</artifactId>
+                        </dependency>
+
+                        <!-- Actuator for health endpoints (used by registry health polling) -->
+                        <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-actuator</artifactId>
+                        </dependency>
                         %s
                     </dependencies>
 

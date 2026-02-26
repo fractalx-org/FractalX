@@ -59,19 +59,57 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("    web-application-type: reactive\n\n");
         ymlBuilder.append("  cloud:\n");
         ymlBuilder.append("    gateway:\n");
+        ymlBuilder.append("      default-filters:\n");
+        ymlBuilder.append("        - name: Retry\n");
+        ymlBuilder.append("          args:\n");
+        ymlBuilder.append("            retries: 2\n");
+        ymlBuilder.append("            statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT\n");
         ymlBuilder.append("      routes:\n");
         ymlBuilder.append(routesConfig.toString());
         ymlBuilder.append("\n");
 
-        // REMOVED ALL EUREKA CONFIGURATION
-        // No Eureka client configuration at all
+        ymlBuilder.append("fractalx:\n");
+        ymlBuilder.append("  registry:\n");
+        ymlBuilder.append("    url: ${FRACTALX_REGISTRY_URL:http://localhost:8761}\n");
+        ymlBuilder.append("  gateway:\n");
+        ymlBuilder.append("    security:\n");
+        ymlBuilder.append("      # Set enabled: true and configure one or more auth mechanisms below\n");
+        ymlBuilder.append("      enabled: ${GATEWAY_SECURITY_ENABLED:false}\n");
+        ymlBuilder.append("      public-paths: /api/*/public/**, /api/*/auth/**\n");
+        ymlBuilder.append("      bearer:\n");
+        ymlBuilder.append("        enabled: ${GATEWAY_BEARER_ENABLED:false}\n");
+        ymlBuilder.append("        jwt-secret: ${JWT_SECRET:fractalx-default-secret-change-in-prod-min-32chars!!}\n");
+        ymlBuilder.append("      oauth2:\n");
+        ymlBuilder.append("        enabled: ${GATEWAY_OAUTH2_ENABLED:false}\n");
+        ymlBuilder.append("        jwk-set-uri: ${OAUTH2_JWK_URI:http://localhost:8080/realms/fractalx/protocol/openid-connect/certs}\n");
+        ymlBuilder.append("      basic:\n");
+        ymlBuilder.append("        enabled: ${GATEWAY_BASIC_ENABLED:false}\n");
+        ymlBuilder.append("        username: ${GATEWAY_BASIC_USER:fractalx}\n");
+        ymlBuilder.append("        password: ${GATEWAY_BASIC_PASS:changeme}\n");
+        ymlBuilder.append("      api-key:\n");
+        ymlBuilder.append("        enabled: ${GATEWAY_APIKEY_ENABLED:false}\n");
+        ymlBuilder.append("        valid-keys:\n");
+        ymlBuilder.append("          - ${GATEWAY_API_KEY_1:dev-key-replace-me}\n");
+        ymlBuilder.append("    cors:\n");
+        ymlBuilder.append("      allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:4200}\n");
+        ymlBuilder.append("      allowed-methods: GET,POST,PUT,DELETE,PATCH,OPTIONS\n");
+        ymlBuilder.append("      allow-credentials: true\n");
+        ymlBuilder.append("    rate-limit:\n");
+        ymlBuilder.append("      default-rps: ${GATEWAY_DEFAULT_RPS:100}\n");
+        ymlBuilder.append("\n");
 
-        ymlBuilder.append("# Simple logging\n");
+        ymlBuilder.append("management:\n");
+        ymlBuilder.append("  endpoints:\n");
+        ymlBuilder.append("    web:\n");
+        ymlBuilder.append("      exposure:\n");
+        ymlBuilder.append("        include: health,info,metrics\n");
+        ymlBuilder.append("\n");
+
         ymlBuilder.append("logging:\n");
         ymlBuilder.append("  level:\n");
         ymlBuilder.append("    org.springframework.cloud.gateway: INFO\n");
         ymlBuilder.append("    com.fractalx.gateway: INFO\n");
-        ymlBuilder.append("    com.netflix.eureka: OFF\n");  // Turn off Eureka logs
+        ymlBuilder.append("    com.netflix.eureka: OFF\n");
         ymlBuilder.append("    com.netflix.discovery: OFF\n");
 
         return ymlBuilder.toString();
@@ -99,6 +137,14 @@ public class GatewayConfigGenerator {
         route.append("            - Path=/api/").append(servicePath).append("/**\n");
         route.append("          filters:\n");
         route.append("            - StripPrefix=0\n");
+        route.append("            - name: CircuitBreaker\n");
+        route.append("              args:\n");
+        route.append("                name: ").append(module.getServiceName()).append("\n");
+        route.append("                fallbackUri: forward:/fallback/").append(module.getServiceName()).append("\n");
+        route.append("            - name: RequestRateLimiter\n");
+        route.append("              args:\n");
+        route.append("                redis-rate-limiter.replenishRate: 100\n");
+        route.append("                redis-rate-limiter.burstCapacity: 200\n");
 
         return route.toString();
     }

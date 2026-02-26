@@ -71,12 +71,55 @@ public class GatewayPomGenerator {
                         <artifactId>spring-cloud-starter-gateway</artifactId>
                     </dependency>
                     
-                    <!-- REMOVED: Eureka client dependency -->
-                    
                     <!-- Actuator for health checks -->
                     <dependency>
                         <groupId>org.springframework.boot</groupId>
                         <artifactId>spring-boot-starter-actuator</artifactId>
+                    </dependency>
+
+                    <!-- Security: OAuth2 Resource Server + JWT validation -->
+                    <dependency>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-starter-security</artifactId>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+                    </dependency>
+                    <!-- JJWT for symmetric Bearer JWT validation -->
+                    <dependency>
+                        <groupId>io.jsonwebtoken</groupId>
+                        <artifactId>jjwt-api</artifactId>
+                        <version>0.11.5</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>io.jsonwebtoken</groupId>
+                        <artifactId>jjwt-impl</artifactId>
+                        <version>0.11.5</version>
+                        <scope>runtime</scope>
+                    </dependency>
+                    <dependency>
+                        <groupId>io.jsonwebtoken</groupId>
+                        <artifactId>jjwt-jackson</artifactId>
+                        <version>0.11.5</version>
+                        <scope>runtime</scope>
+                    </dependency>
+
+                    <!-- Resilience4j circuit breaker for gateway -->
+                    <dependency>
+                        <groupId>org.springframework.cloud</groupId>
+                        <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+                    </dependency>
+                    <dependency>
+                        <groupId>io.github.resilience4j</groupId>
+                        <artifactId>resilience4j-reactor</artifactId>
+                    </dependency>
+
+                    <!-- API documentation aggregation -->
+                    <dependency>
+                        <groupId>org.springdoc</groupId>
+                        <artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
+                        <version>2.3.0</version>
                     </dependency>
                 </dependencies>
             
