@@ -153,4 +153,67 @@ class DockerComposeGeneratorSpec extends Specification {
         dockerfile.contains("FROM maven:3.9-eclipse-temurin-17 AS build")
         dockerfile.contains("FROM eclipse-temurin:17-jre-alpine")
     }
+
+    def "Jaeger all-in-one service is included with OTLP enabled"() {
+        when:
+        generator.generate([order], outputRoot, false)
+
+        then:
+        def c = compose()
+        c.contains("jaeger:")
+        c.contains("jaegertracing/all-in-one")
+        c.contains("COLLECTOR_OTLP_ENABLED=true")
+    }
+
+    def "Jaeger exposes UI port 16686 and OTLP gRPC port 4317"() {
+        when:
+        generator.generate([order], outputRoot, false)
+
+        then:
+        def c = compose()
+        c.contains("16686:16686")
+        c.contains("4317:4317")
+    }
+
+    def "logger-service is included in docker-compose"() {
+        when:
+        generator.generate([order], outputRoot, false)
+
+        then:
+        def c = compose()
+        c.contains("logger-service:")
+        c.contains("9099:9099") || c.contains("9099")
+    }
+
+    def "each microservice has OTEL_EXPORTER_OTLP_ENDPOINT pointing to jaeger"() {
+        when:
+        generator.generate([order], outputRoot, false)
+
+        then:
+        compose().contains("OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317")
+    }
+
+    def "each microservice has OTEL_SERVICE_NAME set to its service name"() {
+        when:
+        generator.generate([order], outputRoot, false)
+
+        then:
+        compose().contains("OTEL_SERVICE_NAME=order-service")
+    }
+
+    def "each microservice has FRACTALX_LOGGER_URL pointing to logger-service"() {
+        when:
+        generator.generate([order], outputRoot, false)
+
+        then:
+        compose().contains("FRACTALX_LOGGER_URL=http://logger-service:9099/api/logs")
+    }
+
+    def "admin-service has JAEGER_QUERY_URL environment variable"() {
+        when:
+        generator.generate([order], outputRoot, false)
+
+        then:
+        compose().contains("JAEGER_QUERY_URL=http://jaeger:")
+    }
 }

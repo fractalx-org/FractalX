@@ -6,6 +6,8 @@ import com.fractalx.core.datamanagement.SagaAnalyzer;
 import com.fractalx.core.gateway.GatewayGenerator;
 import com.fractalx.core.generator.admin.AdminServiceGenerator;
 import com.fractalx.core.generator.registry.RegistryServiceGenerator;
+import com.fractalx.core.generator.observability.OtelConfigStep;
+import com.fractalx.core.generator.observability.HealthMetricsStep;
 import com.fractalx.core.generator.resilience.ResilienceConfigStep;
 import com.fractalx.core.generator.saga.SagaOrchestratorGenerator;
 import com.fractalx.core.generator.service.ApplicationGenerator;
@@ -99,6 +101,8 @@ public class ServiceGenerator {
                 new NetScopeClientWiringStep(),
                 context -> distributedServiceHelper.upgradeService(
                         context.getModule(), context.getSourceRoot(), context.getServiceRoot()),
+                new OtelConfigStep(),
+                new HealthMetricsStep(),
                 new ServiceRegistrationStep(),
                 new NetScopeRegistryBridgeStep(),
                 new ResilienceConfigStep()

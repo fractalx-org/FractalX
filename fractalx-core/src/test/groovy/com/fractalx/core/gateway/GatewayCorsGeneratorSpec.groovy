@@ -77,7 +77,7 @@ class GatewayCorsGeneratorSpec extends Specification {
         then:
         def c = corsConfig()
         c.contains("X-Request-Id")
-        c.contains("X-Trace-Id")
+        c.contains("X-Correlation-Id")
         c.contains("X-Auth-Method")
     }
 

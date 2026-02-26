@@ -64,7 +64,7 @@ public class GatewayCorsGenerator {
                         config.setAllowedMethods(Arrays.asList(allowedMethodsRaw.split(",")));
                         config.setAllowedHeaders(List.of("*"));
                         config.setExposedHeaders(List.of(
-                                "X-Request-Id", "X-Trace-Id", "X-Auth-Method",
+                                "X-Request-Id", "X-Correlation-Id", "X-Auth-Method",
                                 "X-RateLimit-Limit", "X-RateLimit-Remaining",
                                 "Location", "Content-Disposition"));
                         config.setAllowCredentials(allowCredentials);

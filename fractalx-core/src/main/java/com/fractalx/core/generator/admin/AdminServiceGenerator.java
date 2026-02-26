@@ -23,6 +23,7 @@ import java.util.List;
  *   <li>{@link AdminConfigGenerator} — application.yml</li>
  *   <li>{@link AdminTemplateGenerator} — Thymeleaf HTML templates</li>
  *   <li>{@link AdminStaticAssetsGenerator} — CSS/JS static files</li>
+ *   <li>{@link AdminObservabilityGenerator} — alert system + observability REST API</li>
  * </ul>
  */
 public class AdminServiceGenerator {
@@ -33,16 +34,17 @@ public class AdminServiceGenerator {
     private static final String ADMIN_SERVICE_NAME = "admin-service";
     private static final String BASE_PACKAGE       = "com.fractalx.admin";
 
-    private final AdminPomGenerator           pomGenerator;
-    private final AdminAppGenerator           appGenerator;
-    private final AdminSecurityConfigGenerator securityConfigGenerator;
-    private final AdminWebConfigGenerator     webConfigGenerator;
-    private final AdminControllerGenerator    controllerGenerator;
-    private final AdminModelGenerator         modelGenerator;
-    private final AdminConfigGenerator        configGenerator;
-    private final AdminTemplateGenerator      templateGenerator;
-    private final AdminStaticAssetsGenerator  staticAssetsGenerator;
-    private final AdminTopologyGenerator      topologyGenerator;
+    private final AdminPomGenerator             pomGenerator;
+    private final AdminAppGenerator             appGenerator;
+    private final AdminSecurityConfigGenerator  securityConfigGenerator;
+    private final AdminWebConfigGenerator       webConfigGenerator;
+    private final AdminControllerGenerator      controllerGenerator;
+    private final AdminModelGenerator           modelGenerator;
+    private final AdminConfigGenerator          configGenerator;
+    private final AdminTemplateGenerator        templateGenerator;
+    private final AdminStaticAssetsGenerator    staticAssetsGenerator;
+    private final AdminTopologyGenerator        topologyGenerator;
+    private final AdminObservabilityGenerator   observabilityGenerator;
 
     public AdminServiceGenerator() {
         this.pomGenerator            = new AdminPomGenerator();
@@ -55,6 +57,7 @@ public class AdminServiceGenerator {
         this.templateGenerator       = new AdminTemplateGenerator();
         this.staticAssetsGenerator   = new AdminStaticAssetsGenerator();
         this.topologyGenerator       = new AdminTopologyGenerator();
+        this.observabilityGenerator  = new AdminObservabilityGenerator();
     }
 
     public void generateAdminService(List<FractalModule> modules, Path outputRoot) throws IOException {
@@ -79,9 +82,10 @@ public class AdminServiceGenerator {
         controllerGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         modelGenerator.generate(srcMainJava, BASE_PACKAGE);
         configGenerator.generate(srcMainRes);
-        templateGenerator.generate(templatesPath);
+        templateGenerator.generate(templatesPath, modules);
         staticAssetsGenerator.generate(staticPath);
         topologyGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        observabilityGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
 
         log.info("Generated Admin Service on port {}", ADMIN_PORT);
     }

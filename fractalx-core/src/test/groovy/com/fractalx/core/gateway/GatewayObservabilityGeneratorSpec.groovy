@@ -63,13 +63,13 @@ class GatewayObservabilityGeneratorSpec extends Specification {
         c.contains("X-Request-Id")
     }
 
-    def "TracingFilter propagates X-Trace-Id from upstream if present, else uses request ID"() {
+    def "TracingFilter propagates X-Correlation-Id from upstream if present, else uses request ID"() {
         when:
         generator.generate(srcMainJava)
 
         then:
         def c = tracingFilter()
-        c.contains("X-Trace-Id")
+        c.contains("X-Correlation-Id")
     }
 
     def "TracingFilter echoes X-Request-Id in the response headers"() {
@@ -92,7 +92,7 @@ class GatewayObservabilityGeneratorSpec extends Specification {
         c.contains("-100")
     }
 
-    def "RequestLoggingFilter logs method, path, status, duration, and traceId"() {
+    def "RequestLoggingFilter logs method, path, status, duration, and correlationId"() {
         when:
         generator.generate(srcMainJava)
 
@@ -102,7 +102,7 @@ class GatewayObservabilityGeneratorSpec extends Specification {
         c.contains("path")
         c.contains("status")
         c.contains("duration")
-        c.contains("traceId")
+        c.contains("correlationId")
     }
 
     def "RequestLoggingFilter logs on both ingress and egress using doFinally"() {

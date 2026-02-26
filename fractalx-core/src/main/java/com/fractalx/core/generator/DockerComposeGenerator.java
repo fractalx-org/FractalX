@@ -18,9 +18,12 @@ import java.util.List;
  */
 public class DockerComposeGenerator {
 
-    private static final Logger log = LoggerFactory.getLogger(DockerComposeGenerator.class);
-    private static final int GATEWAY_PORT = 9999;
-    private static final int ADMIN_PORT   = 9090;
+    private static final Logger log           = LoggerFactory.getLogger(DockerComposeGenerator.class);
+    private static final int GATEWAY_PORT    = 9999;
+    private static final int ADMIN_PORT      = 9090;
+    private static final int LOGGER_PORT     = 9099;
+    private static final int JAEGER_UI_PORT  = 16686;
+    private static final int JAEGER_OTLP_PORT = 4317;
 
     public void generate(List<FractalModule> modules, Path outputRoot,
                          boolean hasSagaOrchestrator) throws IOException {
@@ -35,8 +38,29 @@ public class DockerComposeGenerator {
                                         boolean hasSagaOrchestrator) throws IOException {
         StringBuilder services = new StringBuilder();
 
-        // fractalx-registry (must start first)
         int regPort = RegistryServiceGenerator.REGISTRY_PORT;
+
+        // Jaeger all-in-one (no registry dependency — starts independently)
+        services.append("  jaeger:\n");
+        services.append("    image: jaegertracing/all-in-one:1.53\n");
+        services.append("    environment:\n");
+        services.append("      - COLLECTOR_OTLP_ENABLED=true\n");
+        services.append("      - MEMORY_MAX_TRACES=50000\n");
+        services.append("    ports:\n");
+        services.append("      - \"").append(JAEGER_UI_PORT).append(":").append(JAEGER_UI_PORT).append("\"\n");
+        services.append("      - \"").append(JAEGER_OTLP_PORT).append(":").append(JAEGER_OTLP_PORT).append("\"\n");
+        services.append("      - \"4318:4318\"\n\n");
+
+        // Logger service
+        services.append("  logger-service:\n");
+        services.append("    build:\n      context: ./logger-service\n      dockerfile: Dockerfile\n");
+        services.append("    ports:\n      - \"").append(LOGGER_PORT).append(":").append(LOGGER_PORT).append("\"\n");
+        services.append("    environment:\n");
+        services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
+        services.append("      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:").append(JAEGER_OTLP_PORT).append("\n");
+        services.append("      - OTEL_SERVICE_NAME=logger-service\n\n");
+
+        // fractalx-registry (must start first)
         services.append("  fractalx-registry:\n");
         services.append("    build:\n      context: ./fractalx-registry\n      dockerfile: Dockerfile\n");
         services.append("    ports:\n      - \"").append(regPort).append(":").append(regPort).append("\"\n");
@@ -58,6 +82,9 @@ public class DockerComposeGenerator {
             services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
             services.append("      - FRACTALX_REGISTRY_URL=http://fractalx-registry:").append(regPort).append("\n");
             services.append("      - FRACTALX_REGISTRY_HOST=").append(m.getServiceName()).append("\n");
+            services.append("      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:").append(JAEGER_OTLP_PORT).append("\n");
+            services.append("      - OTEL_SERVICE_NAME=").append(m.getServiceName()).append("\n");
+            services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(LOGGER_PORT).append("/api/logs\n");
             for (String dep : m.getDependencies()) {
                 String peer   = beanTypeToServiceName(dep);
                 String envPfx = peer.toUpperCase().replace("-", "_");
@@ -76,6 +103,9 @@ public class DockerComposeGenerator {
             services.append("    environment:\n");
             services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
             services.append("      - FRACTALX_REGISTRY_URL=http://fractalx-registry:").append(regPort).append("\n");
+            services.append("      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:").append(JAEGER_OTLP_PORT).append("\n");
+            services.append("      - OTEL_SERVICE_NAME=fractalx-saga-orchestrator\n");
+            services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(LOGGER_PORT).append("/api/logs\n");
             services.append("    depends_on:\n      fractalx-registry:\n        condition: service_healthy\n\n");
         }
 
@@ -86,6 +116,8 @@ public class DockerComposeGenerator {
         services.append("    environment:\n");
         services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
         services.append("      - FRACTALX_REGISTRY_URL=http://fractalx-registry:").append(regPort).append("\n");
+        services.append("      - JAEGER_QUERY_URL=http://jaeger:").append(JAEGER_UI_PORT).append("\n");
+        services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(LOGGER_PORT).append("/api/logs\n");
         services.append("    depends_on:\n      fractalx-registry:\n        condition: service_healthy\n\n");
 
         // API Gateway
@@ -95,6 +127,8 @@ public class DockerComposeGenerator {
         services.append("    environment:\n");
         services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
         services.append("      - FRACTALX_REGISTRY_URL=http://fractalx-registry:").append(regPort).append("\n");
+        services.append("      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:").append(JAEGER_OTLP_PORT).append("\n");
+        services.append("      - OTEL_SERVICE_NAME=fractalx-gateway\n");
         services.append("    depends_on:\n      fractalx-registry:\n        condition: service_healthy\n");
 
         String compose = "version: '3.9'\n\n# Auto-generated by FractalX — edit as needed\nservices:\n" + services;
@@ -125,6 +159,7 @@ public class DockerComposeGenerator {
         serviceDirs.add("fractalx-registry");
         serviceDirs.add("fractalx-gateway");
         serviceDirs.add("admin-service");
+        serviceDirs.add("logger-service");
         if (hasSagaOrchestrator) serviceDirs.add("fractalx-saga-orchestrator");
 
         for (String dir : serviceDirs) {

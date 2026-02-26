@@ -169,4 +169,70 @@ class ConfigurationGeneratorSpec extends Specification {
             docker().substring(docker().indexOf("netscope:")) : ""
         !netScopeSection.contains("host: localhost")
     }
+
+    def "base YAML includes OTEL endpoint under fractalx.observability.otel"() {
+        when:
+        generator.generate(ctx(moduleNoDeps))
+
+        then:
+        def c = base()
+        c.contains("otel:")
+        c.contains("OTEL_EXPORTER_OTLP_ENDPOINT")
+        c.contains("http://localhost:4317")
+    }
+
+    def "base YAML includes fractalx.observability.logger-url"() {
+        when:
+        generator.generate(ctx(moduleNoDeps))
+
+        then:
+        base().contains("logger-url:")
+    }
+
+    def "base YAML exposes prometheus endpoint via management.endpoints.web.exposure"() {
+        when:
+        generator.generate(ctx(moduleNoDeps))
+
+        then:
+        def c = base()
+        c.contains("prometheus")
+        c.contains("include:")
+    }
+
+    def "base YAML includes management.endpoint.health with show-details: always"() {
+        when:
+        generator.generate(ctx(moduleNoDeps))
+
+        then:
+        def c = base()
+        c.contains("show-details: always")
+    }
+
+    def "base YAML includes management.tracing.sampling.probability"() {
+        when:
+        generator.generate(ctx(moduleNoDeps))
+
+        then:
+        def c = base()
+        c.contains("sampling:")
+        c.contains("probability: 1.0")
+    }
+
+    def "docker YAML includes OTEL endpoint pointing to jaeger container"() {
+        when:
+        generator.generate(ctx(moduleNoDeps))
+
+        then:
+        def c = docker()
+        c.contains("OTEL_EXPORTER_OTLP_ENDPOINT")
+        c.contains("jaeger:4317")
+    }
+
+    def "docker YAML includes logger-url pointing to logger-service container"() {
+        when:
+        generator.generate(ctx(moduleNoDeps))
+
+        then:
+        docker().contains("logger-service")
+    }
 }

@@ -30,10 +30,10 @@ public class AutomaticRequestLogger {
         String methodName = joinPoint.getSignature().getName();
         String className = joinPoint.getTarget().getClass().getSimpleName();
         Object[] args = joinPoint.getArgs();
-        String traceId = MDC.get("traceId"); // Capture Trace ID explicitly
+        String correlationId = MDC.get("correlationId"); // Capture Trace ID explicitly
 
-        log.info("[AUTO-LOG] [TraceID:{}] Entering {}.{}() with args: {}",
-                traceId != null ? traceId : "N/A",
+        log.info("[AUTO-LOG] [CorrelationId:{}] Entering {}.{}() with args: {}",
+                correlationId != null ? correlationId : "N/A",
                 className,
                 methodName,
                 Arrays.toString(args));
@@ -43,10 +43,10 @@ public class AutomaticRequestLogger {
     public void logResponse(JoinPoint joinPoint, Object result) {
         String methodName = joinPoint.getSignature().getName();
         String className = joinPoint.getTarget().getClass().getSimpleName();
-        String traceId = MDC.get("traceId");
+        String correlationId = MDC.get("correlationId");
 
-        log.info("[AUTO-LOG] [TraceID:{}] Exiting {}.{}() returned: {}",
-                traceId != null ? traceId : "N/A",
+        log.info("[AUTO-LOG] [CorrelationId:{}] Exiting {}.{}() returned: {}",
+                correlationId != null ? correlationId : "N/A",
                 className,
                 methodName,
                 result);

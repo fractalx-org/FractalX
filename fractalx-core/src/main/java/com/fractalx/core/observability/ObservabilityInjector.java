@@ -16,20 +16,33 @@ public class ObservabilityInjector {
 
     public String getDependencies() {
         return """
-                <dependency>
-                            <groupId>org.springframework.boot</groupId>
-                            <artifactId>spring-boot-starter-actuator</artifactId>
-                        </dependency>
-
+                <!-- Micrometer OpenTelemetry tracing bridge (replaces Brave) -->
                         <dependency>
                             <groupId>io.micrometer</groupId>
-                            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+                            <artifactId>micrometer-tracing-bridge-otel</artifactId>
                         </dependency>
-                        
+
+                        <!-- OpenTelemetry SDK for span creation and OTLP export to Jaeger -->
                         <dependency>
-                            <groupId>io.github.openfeign</groupId>
-                            <artifactId>feign-micrometer</artifactId>
-                            <version>13.1</version>
+                            <groupId>io.opentelemetry</groupId>
+                            <artifactId>opentelemetry-sdk</artifactId>
+                            <version>1.32.0</version>
+                        </dependency>
+                        <dependency>
+                            <groupId>io.opentelemetry</groupId>
+                            <artifactId>opentelemetry-exporter-otlp</artifactId>
+                            <version>1.32.0</version>
+                        </dependency>
+                        <dependency>
+                            <groupId>io.opentelemetry.semconv</groupId>
+                            <artifactId>opentelemetry-semconv</artifactId>
+                            <version>1.21.0-alpha</version>
+                        </dependency>
+
+                        <!-- Prometheus registry for /actuator/prometheus scraping -->
+                        <dependency>
+                            <groupId>io.micrometer</groupId>
+                            <artifactId>micrometer-registry-prometheus</artifactId>
                         </dependency>
                         """;
     }
