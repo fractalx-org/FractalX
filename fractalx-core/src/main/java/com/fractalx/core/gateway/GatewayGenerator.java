@@ -10,6 +10,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+// New generators wired in below
+
 /**
  * Main generator for API Gateway project
  */
@@ -65,9 +67,27 @@ public class GatewayGenerator {
         GatewayConfigGenerator configGen = new GatewayConfigGenerator();
         configGen.generateConfig(srcMainResources, modules, allRoutes);
 
-        // Step 5: Generate simple documentation (REMOVED: complex OpenAPI/Postman generation)
+        // Step 5: Generate documentation
         ApiDocumentationGenerator docGen = new ApiDocumentationGenerator();
         docGen.generateDocumentation(gatewayRoot, modules, allRoutes);
+
+        // Step 6: Dynamic route locator (registry-backed with static fallback)
+        new GatewayRouteLocatorGenerator().generate(srcMainJava, modules);
+
+        // Step 7: Multi-mechanism security (OAuth2 / Bearer / Basic / API-Key)
+        new GatewaySecurityGenerator().generate(srcMainJava, modules);
+
+        // Step 8: Gateway-level circuit breakers + fallback controller
+        new GatewayCircuitBreakerGenerator().generate(srcMainJava, modules);
+
+        // Step 9: In-memory rate limiter
+        new GatewayRateLimiterGenerator().generate(srcMainJava, modules);
+
+        // Step 10: Global CORS filter
+        new GatewayCorsGenerator().generate(srcMainJava);
+
+        // Step 11: Request tracing + structured logging
+        new GatewayObservabilityGenerator().generate(srcMainJava);
 
         log.info("✓ API Gateway generated at: {}", gatewayRoot.toAbsolutePath());
     }

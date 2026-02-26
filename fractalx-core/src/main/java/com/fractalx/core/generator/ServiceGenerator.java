@@ -5,11 +5,15 @@ import com.fractalx.core.datamanagement.RepositoryAnalyzer;
 import com.fractalx.core.datamanagement.SagaAnalyzer;
 import com.fractalx.core.gateway.GatewayGenerator;
 import com.fractalx.core.generator.admin.AdminServiceGenerator;
+import com.fractalx.core.generator.registry.RegistryServiceGenerator;
+import com.fractalx.core.generator.resilience.ResilienceConfigStep;
 import com.fractalx.core.generator.saga.SagaOrchestratorGenerator;
 import com.fractalx.core.generator.service.ApplicationGenerator;
 import com.fractalx.core.generator.service.ConfigurationGenerator;
 import com.fractalx.core.generator.service.NetScopeClientGenerator;
+import com.fractalx.core.generator.service.NetScopeRegistryBridgeStep;
 import com.fractalx.core.generator.service.PomGenerator;
+import com.fractalx.core.generator.service.ServiceRegistrationStep;
 import com.fractalx.core.generator.transformation.AnnotationRemover;
 import com.fractalx.core.generator.transformation.CodeCopier;
 import com.fractalx.core.generator.transformation.CodeTransformer;
@@ -55,6 +59,8 @@ public class ServiceGenerator {
     private final SagaOrchestratorGenerator sagaOrchestratorGenerator;
     private final SagaAnalyzer              sagaAnalyzer;
     private final RepositoryAnalyzer        repositoryAnalyzer;
+    private final RegistryServiceGenerator  registryServiceGenerator;
+    private final DockerComposeGenerator    dockerComposeGenerator;
 
     public ServiceGenerator(Path sourceRoot, Path outputRoot) {
         this.sourceRoot = sourceRoot;
@@ -66,6 +72,8 @@ public class ServiceGenerator {
         this.sagaOrchestratorGenerator = new SagaOrchestratorGenerator();
         this.sagaAnalyzer              = new SagaAnalyzer();
         this.repositoryAnalyzer        = new RepositoryAnalyzer();
+        this.registryServiceGenerator  = new RegistryServiceGenerator();
+        this.dockerComposeGenerator    = new DockerComposeGenerator();
 
         this.pipeline = buildPipeline();
     }
@@ -90,7 +98,10 @@ public class ServiceGenerator {
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
                 context -> distributedServiceHelper.upgradeService(
-                        context.getModule(), context.getSourceRoot(), context.getServiceRoot())
+                        context.getModule(), context.getSourceRoot(), context.getServiceRoot()),
+                new ServiceRegistrationStep(),
+                new NetScopeRegistryBridgeStep(),
+                new ResilienceConfigStep()
         );
     }
 
@@ -111,6 +122,9 @@ public class ServiceGenerator {
         // Detect @DistributedSaga definitions across all modules
         List<SagaDefinition> sagaDefinitions = sagaAnalyzer.analyzeSagas(sourceRoot, modules);
 
+        // Generate the service registry first so it is available for all other generators
+        registryServiceGenerator.generate(modules, outputRoot);
+
         for (FractalModule module : modules) {
             generateService(module, modules);
         }
@@ -125,6 +139,9 @@ public class ServiceGenerator {
 
         // Generate saga orchestrator service if any sagas were detected
         sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
+
+        boolean hasSagas = !sagaDefinitions.isEmpty();
+        dockerComposeGenerator.generate(modules, outputRoot, hasSagas);
 
         generateStartScripts(modules, sagaDefinitions);
 
@@ -180,6 +197,12 @@ public class ServiceGenerator {
         StringBuilder script = new StringBuilder();
         script.append("#!/bin/bash\n\n");
         script.append("echo \"Starting all FractalX microservices...\"\n\n");
+        script.append("# Start fractalx-registry first\n");
+        script.append("echo \"Starting fractalx-registry on port 8761...\"\n");
+        script.append("cd fractalx-registry && mvn spring-boot:run > ../fractalx-registry.log 2>&1 &\n");
+        script.append("cd ..\n");
+        script.append("echo \"Waiting 5s for registry to become ready...\"\n");
+        script.append("sleep 5\n\n");
         script.append("# Start all microservices\n");
 
         for (FractalModule module : modules) {

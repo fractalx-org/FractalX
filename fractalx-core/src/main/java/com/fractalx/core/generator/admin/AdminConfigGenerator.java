@@ -23,6 +23,10 @@ class AdminConfigGenerator {
                 server:
                   port: 9090
 
+                fractalx:
+                  registry:
+                    url: ${FRACTALX_REGISTRY_URL:http://localhost:8761}
+
                 management:
                   endpoints:
                     web:

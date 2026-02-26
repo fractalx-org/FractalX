@@ -21,18 +21,26 @@ class AdminControllerGenerator {
                 package com.fractalx.admin.controller;
 
                 import com.fractalx.admin.model.ServiceInfo;
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.http.ResponseEntity;
                 import org.springframework.stereotype.Controller;
                 import org.springframework.ui.Model;
                 import org.springframework.web.bind.annotation.GetMapping;
+                import org.springframework.web.bind.annotation.RestController;
                 import org.springframework.web.client.RestTemplate;
 
                 import java.util.ArrayList;
                 import java.util.List;
+                import java.util.Map;
+                import java.util.LinkedHashMap;
 
                 @Controller
                 public class DashboardController {
 
                     private final RestTemplate restTemplate = new RestTemplate();
+
+                    @Value("${fractalx.registry.url:http://localhost:8761}")
+                    private String registryUrl;
 
                     @GetMapping("/dashboard")
                     public String dashboard(Model model) {
@@ -52,8 +60,8 @@ class AdminControllerGenerator {
 
                     private boolean checkServiceHealth(String url) {
                         try {
-                            restTemplate.getForObject(url, String.class);
-                            return true;
+                            String resp = restTemplate.getForObject(url, String.class);
+                            return resp != null && resp.contains("UP");
                         } catch (Exception e) {
                             return false;
                         }

@@ -42,6 +42,7 @@ public class AdminServiceGenerator {
     private final AdminConfigGenerator        configGenerator;
     private final AdminTemplateGenerator      templateGenerator;
     private final AdminStaticAssetsGenerator  staticAssetsGenerator;
+    private final AdminTopologyGenerator      topologyGenerator;
 
     public AdminServiceGenerator() {
         this.pomGenerator            = new AdminPomGenerator();
@@ -53,6 +54,7 @@ public class AdminServiceGenerator {
         this.configGenerator         = new AdminConfigGenerator();
         this.templateGenerator       = new AdminTemplateGenerator();
         this.staticAssetsGenerator   = new AdminStaticAssetsGenerator();
+        this.topologyGenerator       = new AdminTopologyGenerator();
     }
 
     public void generateAdminService(List<FractalModule> modules, Path outputRoot) throws IOException {
@@ -79,6 +81,7 @@ public class AdminServiceGenerator {
         configGenerator.generate(srcMainRes);
         templateGenerator.generate(templatesPath);
         staticAssetsGenerator.generate(staticPath);
+        topologyGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
 
         log.info("Generated Admin Service on port {}", ADMIN_PORT);
     }

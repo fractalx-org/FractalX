@@ -23,16 +23,73 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
     @Override
     public void generate(GenerationContext context) throws IOException {
         FractalModule module = context.getModule();
-        log.debug("Generating application.yml for {}", module.getServiceName());
+        log.debug("Generating application YAMLs for {}", module.getServiceName());
+
+        // Base config (profile-agnostic, references env vars)
         Files.writeString(context.getSrcMainResources().resolve("application.yml"),
-                buildYml(module, context.getAllModules()));
+                buildBaseYml(module));
+
+        // Dev profile (localhost defaults)
+        Files.writeString(context.getSrcMainResources().resolve("application-dev.yml"),
+                buildDevYml(module, context.getAllModules()));
+
+        // Docker profile (all env-var driven, container-ready)
+        Files.writeString(context.getSrcMainResources().resolve("application-docker.yml"),
+                buildDockerYml(module, context.getAllModules()));
     }
 
-    private String buildYml(FractalModule module, List<FractalModule> allModules) {
+    // -------------------------------------------------------------------------
+    // Profile-specific YAML builders
+    // -------------------------------------------------------------------------
+
+    /** Base application.yml — references env vars, activates dev profile by default. */
+    private String buildBaseYml(FractalModule module) {
         return """
                 spring:
                   application:
                     name: %s
+                  profiles:
+                    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+                server:
+                  port: %d
+
+                fractalx:
+                  enabled: true
+                  registry:
+                    url: ${FRACTALX_REGISTRY_URL:http://localhost:8761}
+                    enabled: true
+                    host: ${FRACTALX_REGISTRY_HOST:localhost}
+                  observability:
+                    tracing: true
+                    metrics: true
+
+                netscope:
+                  server:
+                    grpc:
+                      port: %d
+                    security:
+                      enabled: false
+
+                management:
+                  endpoints:
+                    web:
+                      exposure:
+                        include: health,info,metrics
+
+                logging:
+                  level:
+                    com.fractalx: DEBUG
+                    org.fractalx.netscope: DEBUG
+                """.formatted(module.getServiceName(), module.getPort(),
+                module.getPort() + GRPC_PORT_OFFSET);
+    }
+
+    /** application-dev.yml — localhost hardcoded, H2 in-memory, suitable for local dev. */
+    private String buildDevYml(FractalModule module, List<FractalModule> allModules) {
+        return """
+                # Dev profile — all services run on localhost
+                spring:
                   datasource:
                     url: jdbc:h2:mem:%s
                     driver-class-name: org.h2.Driver
@@ -45,8 +102,6 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                       idle-timeout: 600000
                   jpa:
                     hibernate:
-                      # Use 'validate' in production when Flyway manages schema migrations.
-                      # Set to 'create-drop' for local testing without Flyway.
                       ddl-auto: update
                     show-sql: true
                     properties:
@@ -58,34 +113,50 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   flyway:
                     enabled: true
                     locations: classpath:db/migration
-
-                server:
-                  port: %d
-
-                fractalx:
-                  enabled: true
-                  observability:
-                    tracing: true
-                    metrics: true
-
-                netscope:
-                  server:
-                    grpc:
-                      port: %d
-                    security:
-                      enabled: false
                 %s
-                logging:
-                  level:
-                    com.fractalx: DEBUG
-                    org.fractalx.netscope: DEBUG
                 """.formatted(
-                module.getServiceName(),
                 module.getServiceName().replace("-", "_"),
-                module.getPort(),
-                module.getPort() + GRPC_PORT_OFFSET,
                 buildClientServersConfig(module, allModules)
         );
+    }
+
+    /** application-docker.yml — all values driven by env vars, no hardcoded localhost. */
+    private String buildDockerYml(FractalModule module, List<FractalModule> allModules) {
+        StringBuilder sb = new StringBuilder("# Docker profile — all values from environment variables\n");
+        sb.append("spring:\n");
+        sb.append("  datasource:\n");
+        sb.append("    url: ${DB_URL:jdbc:h2:mem:").append(module.getServiceName().replace("-", "_")).append("}\n");
+        sb.append("    username: ${DB_USERNAME:sa}\n");
+        sb.append("    password: ${DB_PASSWORD:}\n");
+        sb.append("  flyway:\n");
+        sb.append("    enabled: true\n");
+        sb.append("    locations: classpath:db/migration\n");
+
+        List<String> deps = module.getDependencies();
+        if (!deps.isEmpty()) {
+            sb.append("netscope:\n  client:\n    servers:\n");
+            for (String beanType : deps) {
+                String targetServiceName = NetScopeClientGenerator.beanTypeToServiceName(beanType);
+                allModules.stream()
+                        .filter(m -> targetServiceName.equals(m.getServiceName()))
+                        .findFirst()
+                        .ifPresent(target -> {
+                            String envPfx = targetServiceName.toUpperCase().replace("-", "_");
+                            sb.append("      ").append(targetServiceName).append(":\n");
+                            sb.append("        host: ${").append(envPfx).append("_HOST:")
+                              .append(targetServiceName).append("}\n");
+                            sb.append("        port: ${").append(envPfx).append("_GRPC_PORT:")
+                              .append(target.getPort() + GRPC_PORT_OFFSET).append("}\n");
+                        });
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Builds the legacy dev localhost {@code netscope.client.servers} block. */
+    private String buildYml(FractalModule module, List<FractalModule> allModules) {
+        // kept for backward-compat — not called by generate() anymore
+        return buildBaseYml(module);
     }
 
     /**
