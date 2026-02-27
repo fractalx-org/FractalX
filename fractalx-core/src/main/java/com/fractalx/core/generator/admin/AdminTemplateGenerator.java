@@ -30,61 +30,76 @@ class AdminTemplateGenerator {
     private void generateLoginTemplate(Path templatesPath) throws IOException {
         String content = """
                 <!DOCTYPE html>
-                <html xmlns:th="http://www.thymeleaf.org">
+                <html xmlns:th="http://www.thymeleaf.org" lang="en">
                 <head>
                     <meta charset="UTF-8">
-                    <title>FractalX Admin - Login</title>
-                    <link rel="stylesheet" th:href="@{/webjars/bootstrap/5.3.0/css/bootstrap.min.css}">
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <title>FractalX Admin</title>
+                    <link rel="preconnect" href="https://fonts.googleapis.com">
+                    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
                     <link rel="stylesheet" th:href="@{/webjars/font-awesome/6.4.0/css/all.min.css}">
                     <style>
-                        body { background: linear-gradient(135deg,#667eea 0%,#764ba2 100%);
-                               min-height:100vh; display:flex; align-items:center; }
-                        .login-card { max-width:420px; margin:0 auto; width:100%; }
-                        .card { border:none; border-radius:1rem; box-shadow:0 1rem 3rem rgba(0,0,0,.2); }
-                        .card-header { background:transparent; border-bottom:none; padding:2rem 2rem 0; }
-                        .btn-primary { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); border:none; }
-                        .brand-icon { font-size:2.5rem; color:#667eea; }
+                        *,*::before,*::after{box-sizing:border-box}
+                        body{margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                             background:#f9fafb;min-height:100vh;display:flex;align-items:center;
+                             justify-content:center;color:#111827;-webkit-font-smoothing:antialiased}
+                        .wrap{width:100%;max-width:400px;padding:20px}
+                        .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:40px 36px}
+                        .logo{display:flex;align-items:center;gap:10px;margin-bottom:28px}
+                        .logo-icon{width:32px;height:32px;background:#111827;border-radius:7px;
+                                   display:flex;align-items:center;justify-content:center;
+                                   color:#fff;font-size:13px;flex-shrink:0}
+                        .logo-name{font-size:15px;font-weight:600;color:#111827}
+                        h2{margin:0 0 6px;font-size:22px;font-weight:600;color:#111827}
+                        .sub{margin:0 0 28px;font-size:13px;color:#6b7280}
+                        label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+                        input{width:100%;padding:9px 12px;font-size:14px;font-family:inherit;
+                              border:1px solid #d1d5db;border-radius:7px;color:#111827;background:#fff;
+                              outline:none;transition:border-color .15s,box-shadow .15s}
+                        input:focus{border-color:#111827;box-shadow:0 0 0 3px rgba(17,24,39,.08)}
+                        .mb4{margin-bottom:18px}.mb5{margin-bottom:24px}
+                        .btn-submit{width:100%;padding:10px;background:#111827;color:#fff;border:none;
+                                    border-radius:7px;font-size:14px;font-weight:500;font-family:inherit;
+                                    cursor:pointer;transition:background .15s}
+                        .btn-submit:hover{background:#1f2937}
+                        .alert-err{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;
+                                   font-size:13px;padding:10px 12px;border-radius:7px;margin-bottom:16px}
+                        .alert-ok{background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;
+                                  font-size:13px;padding:10px 12px;border-radius:7px;margin-bottom:16px}
+                        .footer{text-align:center;margin-top:20px;font-size:12px;color:#9ca3af}
                     </style>
                 </head>
                 <body>
-                    <div class="container">
-                        <div class="login-card">
-                            <div class="card">
-                                <div class="card-header text-center">
-                                    <div class="brand-icon mb-2"><i class="fas fa-cubes"></i></div>
-                                    <h2 class="fw-bold mb-0">FractalX Admin</h2>
-                                    <p class="text-muted small">Microservices Management Dashboard</p>
-                                </div>
-                                <div class="card-body p-4">
-                                    <div th:if="${param.error}" class="alert alert-danger small">
-                                        Invalid username or password.
-                                    </div>
-                                    <div th:if="${param.logout}" class="alert alert-success small">
-                                        You have been logged out.
-                                    </div>
-                                    <form th:action="@{/login}" method="post">
-                                        <div class="mb-3">
-                                            <label class="form-label fw-semibold">Username</label>
-                                            <input type="text" name="username" class="form-control"
-                                                   placeholder="admin" autofocus required>
-                                        </div>
-                                        <div class="mb-4">
-                                            <label class="form-label fw-semibold">Password</label>
-                                            <input type="password" name="password" class="form-control"
-                                                   placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" required>
-                                        </div>
-                                        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">
-                                            <i class="fas fa-sign-in-alt me-2"></i>Sign In
-                                        </button>
-                                    </form>
-                                </div>
-                                <div class="card-footer text-center text-muted small border-0 pb-3">
-                                    FractalX v0.3.2 &mdash; Microservices Framework
-                                </div>
+                    <div class="wrap">
+                        <div class="card">
+                            <div class="logo">
+                                <div class="logo-icon"><i class="fas fa-cubes"></i></div>
+                                <span class="logo-name">FractalX</span>
                             </div>
+                            <h2>Sign in</h2>
+                            <p class="sub">Access your microservices dashboard</p>
+                            <div th:if="${param.error}" class="alert-err">
+                                <i class="fas fa-exclamation-circle"></i>&nbsp;Invalid username or password.
+                            </div>
+                            <div th:if="${param.logout}" class="alert-ok">
+                                <i class="fas fa-check-circle"></i>&nbsp;You have been signed out.
+                            </div>
+                            <form th:action="@{/login}" method="post">
+                                <div class="mb4">
+                                    <label for="username">Username</label>
+                                    <input type="text" id="username" name="username" placeholder="admin" autofocus required>
+                                </div>
+                                <div class="mb5">
+                                    <label for="password">Password</label>
+                                    <input type="password" id="password" name="password" placeholder="••••••••" required>
+                                </div>
+                                <button type="submit" class="btn-submit">
+                                    Sign in &nbsp;<i class="fas fa-arrow-right" style="font-size:11px"></i>
+                                </button>
+                            </form>
                         </div>
+                        <div class="footer">FractalX v0.3.2 &mdash; Microservices Framework</div>
                     </div>
-                    <script th:src="@{/webjars/bootstrap/5.3.0/js/bootstrap.bundle.min.js}"></script>
                 </body>
                 </html>
                 """;
@@ -98,15 +113,17 @@ class AdminTemplateGenerator {
     }
 
     // -------------------------------------------------------------------------
-    // Dashboard HTML — split across helper methods to stay under JVM 65535-byte limit
+    // Dashboard — assembled from focused helpers to stay under JVM 65535-byte limit
     // -------------------------------------------------------------------------
 
     private String buildDashboard() {
         return buildHtmlHead()
             + "<body>\n"
+            + "<div class=\"sb-overlay\" id=\"sb-overlay\" onclick=\"closeSidebar()\"></div>\n"
             + buildSidebar()
-            + "\n<div class=\"main-content\">\n"
+            + "<div class=\"main-wrap\" id=\"main-wrap\">\n"
             + buildTopbar()
+            + "<div class=\"content-area\">\n"
             + buildSectionOverview()
             + buildSectionServices()
             + buildSectionCommunication()
@@ -115,6 +132,7 @@ class AdminTemplateGenerator {
             + buildSectionAlerts()
             + buildSectionTracesLogs()
             + buildSectionSettings()
+            + "</div>\n"
             + "</div>\n\n"
             + buildModals()
             + "<script th:src=\"@{/webjars/jquery/3.7.0/jquery.min.js}\"></script>\n"
@@ -126,82 +144,242 @@ class AdminTemplateGenerator {
             + buildScriptsData()
             + buildScriptsObservabilityAndAlerts()
             + buildScriptsTracesLogsSettings()
+            + buildScriptsMobileNav()
             + "</script>\n</body>\n</html>\n";
     }
 
     // ---- HTML HEAD ----------------------------------------------------------
 
     private String buildHtmlHead() {
+        return buildHtmlHeadA() + buildHtmlHeadB();
+    }
+
+    private String buildHtmlHeadA() {
         return """
                 <!DOCTYPE html>
                 <html xmlns:th="http://www.thymeleaf.org" lang="en">
                 <head>
                     <meta charset="UTF-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <title>FractalX Admin Dashboard</title>
+                    <title>FractalX Admin</title>
+                    <link rel="preconnect" href="https://fonts.googleapis.com">
+                    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
                     <link rel="stylesheet" th:href="@{/webjars/bootstrap/5.3.0/css/bootstrap.min.css}">
                     <link rel="stylesheet" th:href="@{/webjars/font-awesome/6.4.0/css/all.min.css}">
                     <style>
-                        :root { --sidebar-width: 220px; --sidebar-bg: #1e293b; --sidebar-text: #94a3b8;
-                                --accent: #6366f1; --accent2: #8b5cf6; }
-                        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #f1f5f9; }
-                        .sidebar { position: fixed; top: 0; left: 0; height: 100vh;
-                                   width: var(--sidebar-width); background: var(--sidebar-bg);
-                                   display: flex; flex-direction: column; z-index: 1000; overflow-y: auto; }
-                        .sidebar-brand { padding: 1.25rem 1rem; border-bottom: 1px solid #334155;
-                                         color: #f1f5f9; font-weight: 700; font-size: 1.1rem;
-                                         display: flex; align-items: center; gap: .6rem; }
-                        .sidebar-brand i { color: var(--accent); font-size: 1.4rem; }
-                        .nav-section { padding: .5rem 1rem .25rem; font-size: .7rem;
-                                       color: #475569; text-transform: uppercase; letter-spacing: .08em; }
-                        .sidebar-nav a { display: flex; align-items: center; gap: .7rem;
-                                         padding: .55rem 1rem; color: var(--sidebar-text);
-                                         text-decoration: none; font-size: .9rem; transition: all .2s; }
-                        .sidebar-nav a:hover, .sidebar-nav a.active {
-                            background: #334155; color: #f1f5f9; border-left: 3px solid var(--accent); }
-                        .sidebar-nav a i { width: 18px; text-align: center; }
-                        .alert-badge { background: #ef4444; color: #fff; border-radius: 999px;
-                                       padding: 1px 6px; font-size: .7rem; }
-                        .main-content { margin-left: var(--sidebar-width); padding: 1.5rem; min-height: 100vh; }
-                        .topbar { background: #fff; border-radius: .75rem; padding: .75rem 1.25rem;
-                                  margin-bottom: 1.5rem; display: flex; justify-content: space-between;
-                                  align-items: center; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-                        .section { display: none; }
-                        .section.active { display: block; }
-                        .stat-card { background: #fff; border-radius: .75rem; padding: 1.25rem;
-                                     box-shadow: 0 1px 4px rgba(0,0,0,.06); transition: transform .2s; }
-                        .stat-card:hover { transform: translateY(-2px); }
-                        .stat-card .stat-icon { width: 48px; height: 48px; border-radius: .6rem;
-                                                display: flex; align-items: center; justify-content: center;
-                                                font-size: 1.4rem; }
-                        .stat-card .stat-value { font-size: 1.8rem; font-weight: 700; color: #1e293b; }
-                        .stat-card .stat-label { color: #64748b; font-size: .85rem; }
-                        .table-card { background: #fff; border-radius: .75rem;
-                                      box-shadow: 0 1px 4px rgba(0,0,0,.06); overflow: hidden; }
-                        .table-card .card-header { padding: 1rem 1.25rem; border-bottom: 1px solid #f1f5f9;
-                                                   font-weight: 600; background: #fff; }
-                        .badge-up { background: #dcfce7; color: #166534; }
-                        .badge-down { background: #fee2e2; color: #991b1b; }
-                        .badge-unknown { background: #f1f5f9; color: #475569; }
-                        .topology-grid { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem; }
-                        .topo-node { background: #fff; border: 2px solid #e2e8f0; border-radius: .75rem;
-                                     padding: .75rem 1rem; text-align: center; min-width: 130px;
-                                     position: relative; font-size: .85rem; }
-                        .topo-node.microservice { border-color: var(--accent); }
-                        .topo-node.infrastructure { border-color: #10b981; }
-                        .topo-node .node-type { font-size: .7rem; color: #94a3b8; text-transform: uppercase; }
-                        .topo-node .node-port { font-size: .75rem; color: #64748b; }
-                        .cmd-box { background: #1e293b; color: #86efac; font-family: monospace;
-                                   padding: .5rem .75rem; border-radius: .5rem; font-size: .85rem;
-                                   margin: .25rem 0; cursor: pointer; user-select: all; }
-                        .settings-tabs { border-bottom: 2px solid #e2e8f0; margin-bottom: 1.25rem; }
-                        .settings-tabs .tab-btn { background: none; border: none; padding: .6rem 1.2rem;
-                                                   color: #64748b; font-size: .9rem; cursor: pointer;
-                                                   border-bottom: 2px solid transparent; margin-bottom: -2px; }
-                        .settings-tabs .tab-btn.active {
-                            color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-                        .settings-pane { display: none; }
-                        .settings-pane.active { display: block; }
+                        :root{--sb:240px;--topbar:52px;--bg:#f5f5f5;--surf:#ffffff;
+                              --bdr:#e5e7eb;--t1:#111827;--t2:#6b7280;--t3:#9ca3af;--r:8px}
+                        *,*::before,*::after{box-sizing:border-box}
+                        body{margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                             background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;
+                             -webkit-font-smoothing:antialiased}
+
+                        /* ── Sidebar ── */
+                        .sidebar{position:fixed;top:0;left:0;width:var(--sb);height:100vh;
+                                 background:var(--surf);border-right:1px solid var(--bdr);
+                                 display:flex;flex-direction:column;z-index:1000;
+                                 overflow-y:auto;transition:transform .25s ease}
+                        .sb-brand{display:flex;align-items:center;gap:10px;padding:16px;
+                                  border-bottom:1px solid var(--bdr);text-decoration:none;color:var(--t1);
+                                  flex-shrink:0}
+                        .sb-icon{width:30px;height:30px;background:#111827;border-radius:7px;
+                                 display:flex;align-items:center;justify-content:center;
+                                 color:#fff;font-size:13px;flex-shrink:0}
+                        .sb-name{font-size:14px;font-weight:600;color:#111827}
+                        .nav-grp{padding:14px 8px 2px}
+                        .nav-lbl{font-size:10.5px;font-weight:500;color:var(--t3);
+                                 text-transform:uppercase;letter-spacing:.08em;padding:0 8px 4px}
+                        .sidebar-nav a{display:flex;align-items:center;gap:9px;padding:7px 8px;
+                                       margin-bottom:1px;color:var(--t2);text-decoration:none;
+                                       font-size:13.5px;border-radius:6px;
+                                       transition:background .12s,color .12s}
+                        .sidebar-nav a .ni{width:15px;text-align:center;font-size:12px;
+                                           flex-shrink:0;color:var(--t3);transition:color .12s}
+                        .sidebar-nav a:hover,.sidebar-nav a.active{background:#f3f4f6;color:#111827}
+                        .sidebar-nav a:hover .ni,.sidebar-nav a.active .ni{color:#111827}
+                        .sidebar-nav a.active{font-weight:500}
+                        .alert-badge{background:#ef4444;color:#fff;border-radius:10px;
+                                     padding:1px 6px;font-size:10px;font-weight:600;
+                                     margin-left:auto;line-height:1.5}
+                        .sb-footer{margin-top:auto;padding:12px 8px;border-top:1px solid var(--bdr)}
+                        .sb-footer a{display:flex;align-items:center;gap:8px;padding:7px 8px;
+                                     color:var(--t2);text-decoration:none;font-size:13px;
+                                     border-radius:6px;transition:background .12s}
+                        .sb-footer a:hover{background:#fef2f2;color:#dc2626}
+                        .sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:999}
+                        .sb-overlay.open{display:block}
+                """;
+    }
+
+    private String buildHtmlHeadB() {
+        return """
+                        /* ── Layout ── */
+                        .main-wrap{margin-left:var(--sb);min-height:100vh;display:flex;flex-direction:column}
+                        .topbar{background:var(--surf);border-bottom:1px solid var(--bdr);
+                                padding:0 24px;height:var(--topbar);display:flex;align-items:center;
+                                justify-content:space-between;position:sticky;top:0;z-index:100;flex-shrink:0}
+                        .topbar-l{display:flex;align-items:center;gap:6px}
+                        .topbar-brand{font-size:13px;color:var(--t2);text-decoration:none}
+                        .topbar-sep{color:var(--t3);font-size:14px;padding:0 2px}
+                        #page-title{font-size:13px;font-weight:500;color:var(--t1)}
+                        .topbar-r{display:flex;align-items:center;gap:10px}
+                        .refresh-ts{font-size:11.5px;color:var(--t3)}
+                        .content-area{padding:24px;flex:1}
+                        .hamburger{display:none;background:none;border:1px solid var(--bdr);
+                                   border-radius:6px;width:34px;height:34px;align-items:center;
+                                   justify-content:center;cursor:pointer;color:var(--t2);font-size:13px}
+
+                        /* ── Cards ── */
+                        .card2{background:var(--surf);border:1px solid var(--bdr);
+                               border-radius:var(--r);overflow:hidden;margin-bottom:12px}
+                        .card2:last-child{margin-bottom:0}
+                        .card-hd{padding:12px 16px;border-bottom:1px solid var(--bdr);display:flex;
+                                 align-items:center;justify-content:space-between;font-size:13px;
+                                 font-weight:500;color:var(--t1);background:#fafafa}
+                        .card-hd-l{display:flex;align-items:center;gap:7px}
+                        .card-hd i{color:var(--t2);font-size:12px}
+                        .card-bd{padding:0}
+
+                        /* ── Stat cards ── */
+                        .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+                        .stat-card{background:var(--surf);border:1px solid var(--bdr);
+                                   border-radius:var(--r);padding:18px 20px}
+                        .stat-ic{width:34px;height:34px;border-radius:7px;display:flex;
+                                 align-items:center;justify-content:center;font-size:14px;margin-bottom:12px}
+                        .stat-val{font-size:26px;font-weight:600;line-height:1;
+                                  color:var(--t1);margin-bottom:4px}
+                        .stat-lbl{font-size:12px;color:var(--t2)}
+
+                        /* ── Tables ── */
+                        .table-wrap{overflow-x:auto}
+                        .table{font-size:13px}
+                        .table thead th{background:#fafafa;border-bottom:1px solid var(--bdr);
+                                        font-size:10.5px;font-weight:500;color:var(--t2);
+                                        text-transform:uppercase;letter-spacing:.05em;
+                                        padding:9px 14px;white-space:nowrap}
+                        .table tbody td{padding:11px 14px;border-bottom:1px solid #f3f4f6;
+                                        vertical-align:middle;color:var(--t1)}
+                        .table tbody tr:last-child td{border-bottom:none}
+                        .table-sm thead th,.table-sm tbody td{padding:8px 12px}
+                        .table-hover tbody tr:hover td{background:#fafafa}
+
+                        /* ── Badges ── */
+                        .badge-up{background:#dcfce7!important;color:#15803d!important}
+                        .badge-down{background:#fee2e2!important;color:#b91c1c!important}
+                        .badge-unknown{background:#f3f4f6!important;color:#6b7280!important}
+                        .badge.bg-success{background:#dcfce7!important;color:#15803d!important}
+                        .badge.bg-danger{background:#fee2e2!important;color:#b91c1c!important}
+                        .badge.bg-warning{background:#fef9c3!important;color:#854d0e!important;color:#854d0e}
+                        .badge.bg-secondary{background:#f3f4f6!important;color:#6b7280!important}
+                        .badge.bg-info{background:#dbeafe!important;color:#1d4ed8!important}
+                        .badge.bg-light{background:#f9fafb!important;color:#374151!important;
+                                        border:1px solid var(--bdr)!important}
+                        .badge.bg-primary{background:#ede9fe!important;color:#5b21b6!important}
+                        .badge{font-size:11px;font-weight:500;border-radius:20px;padding:2px 8px}
+
+                        /* ── Buttons override ── */
+                        .btn{font-family:inherit;font-size:13px;font-weight:500;border-radius:6px;
+                             transition:all .15s;display:inline-flex;align-items:center;gap:5px}
+                        .btn-primary{background:#111827!important;border-color:#111827!important;color:#fff!important}
+                        .btn-primary:hover{background:#1f2937!important;border-color:#1f2937!important}
+                        .btn-secondary{background:var(--surf)!important;border-color:var(--bdr)!important;color:var(--t1)!important}
+                        .btn-secondary:hover{background:#f9fafb!important}
+                        .btn-outline-primary{color:var(--t1)!important;border-color:var(--bdr)!important;background:var(--surf)!important}
+                        .btn-outline-primary:hover{background:#f3f4f6!important;border-color:#d1d5db!important;color:var(--t1)!important}
+                        .btn-outline-secondary{color:var(--t2)!important;border-color:var(--bdr)!important;background:transparent!important}
+                        .btn-outline-secondary:hover{background:#f3f4f6!important;color:var(--t1)!important}
+                        .btn-outline-success{color:#15803d!important;border-color:#bbf7d0!important;background:transparent!important}
+                        .btn-outline-success:hover{background:#f0fdf4!important}
+                        .btn-outline-warning{color:#92400e!important;border-color:#fde68a!important;background:transparent!important}
+                        .btn-outline-warning:hover{background:#fffbeb!important}
+                        .btn-outline-danger{color:#b91c1c!important;border-color:#fca5a5!important;background:transparent!important}
+                        .btn-outline-danger:hover{background:#fef2f2!important}
+                        .btn-outline-info{color:#1d4ed8!important;border-color:#bfdbfe!important;background:transparent!important}
+                        .btn-outline-info:hover{background:#eff6ff!important}
+                        .btn-light{background:#f3f4f6!important;border-color:var(--bdr)!important;color:var(--t2)!important}
+                        .btn-light:hover{background:#e5e7eb!important}
+                        .btn-xs{padding:2px 7px!important;font-size:11px!important}
+
+                        /* ── Forms ── */
+                        .form-control,.form-select{font-family:inherit;font-size:13px;
+                             border:1px solid var(--bdr);border-radius:6px;color:var(--t1);
+                             background:var(--surf);transition:border-color .15s,box-shadow .15s}
+                        .form-control:focus,.form-select:focus{border-color:#111827;
+                             box-shadow:0 0 0 3px rgba(17,24,39,.07);outline:none}
+                        .form-control-sm,.form-select-sm{padding:5px 9px;font-size:12.5px}
+                        .form-label{font-size:13px;font-weight:500;color:var(--t1)}
+                        .form-check-input:checked{background-color:#111827;border-color:#111827}
+
+                        /* ── Sections ── */
+                        .section{display:none}.section.active{display:block}
+
+                        /* ── Command box ── */
+                        .cmd-box{background:#0d0d0d;color:#4ade80;font-family:'Menlo','Monaco',monospace;
+                                 padding:9px 14px;border-radius:6px;font-size:12px;cursor:pointer;
+                                 user-select:all;overflow-x:auto;transition:background .2s;margin:3px 0}
+                        .cmd-box:hover{background:#1a1a1a}
+
+                        /* ── Topology ── */
+                        .topology-grid{display:flex;flex-wrap:wrap;gap:10px;padding:16px}
+                        .topo-node{background:var(--surf);border:1px solid var(--bdr);
+                                   border-top:3px solid var(--bdr);border-radius:8px;
+                                   padding:12px 14px;min-width:130px;text-align:center;font-size:13px}
+                        .topo-node.microservice{border-top-color:#6366f1}
+                        .topo-node.infrastructure{border-top-color:#10b981}
+                        .node-type{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.05em}
+                        .node-port{font-size:11px;color:var(--t2)}
+
+                        /* ── Settings tabs ── */
+                        .settings-tabs{display:flex;border-bottom:1px solid var(--bdr);
+                                       margin-bottom:16px;overflow-x:auto}
+                        .tab-btn{background:none;border:none;border-bottom:2px solid transparent;
+                                 padding:9px 14px;font-size:13px;color:var(--t2);cursor:pointer;
+                                 font-family:inherit;margin-bottom:-1px;white-space:nowrap;
+                                 transition:color .12s}
+                        .tab-btn:hover{color:var(--t1)}
+                        .tab-btn.active{color:var(--t1);font-weight:500;border-bottom-color:#111827}
+                        .settings-pane{display:none}.settings-pane.active{display:block}
+
+                        /* ── Modal ── */
+                        .modal-content{border:1px solid var(--bdr);border-radius:12px;
+                                       box-shadow:0 8px 32px rgba(0,0,0,.1);font-family:inherit}
+                        .modal-header{border-bottom:1px solid var(--bdr);padding:16px 20px}
+                        .modal-title{font-size:15px;font-weight:600}
+                        .modal-body{padding:20px}
+                        .modal-footer{border-top:1px solid var(--bdr);padding:14px 20px}
+
+                        /* ── Accordion override ── */
+                        .accordion-button{font-family:inherit;font-size:13px;background:#fafafa;
+                                          color:var(--t1);padding:10px 14px}
+                        .accordion-button:not(.collapsed){background:#f3f4f6;color:var(--t1);box-shadow:none}
+                        .accordion-item{border-color:var(--bdr)}
+
+                        /* ── Code ── */
+                        code{font-family:'Menlo','Monaco','Courier New',monospace;font-size:11.5px;
+                             background:#f3f4f6;padding:1px 5px;border-radius:4px;color:#374151}
+                        pre{font-family:'Menlo','Monaco',monospace;font-size:12px;background:#f9fafb;
+                            border:1px solid var(--bdr);border-radius:6px;padding:10px 12px;
+                            overflow-x:auto;color:var(--t1);margin:0}
+
+                        /* ── Responsive ── */
+                        @media(max-width:900px){
+                            .sidebar{transform:translateX(-100%);box-shadow:2px 0 16px rgba(0,0,0,.1)}
+                            .sidebar.open{transform:translateX(0)}
+                            .main-wrap{margin-left:0}
+                            .hamburger{display:flex}
+                            .stats-row{grid-template-columns:repeat(2,1fr)}
+                            .content-area{padding:16px}
+                        }
+                        @media(max-width:480px){
+                            .stats-row{grid-template-columns:1fr 1fr}
+                            .topbar{padding:0 14px}
+                        }
+
+                        /* ── Utilities ── */
+                        .text-muted{color:var(--t2)!important}
+                        .ms-auto{margin-left:auto!important}
+                        .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+                        @media(max-width:768px){.two-col{grid-template-columns:1fr}}
                     </style>
                 </head>
                 """;
@@ -211,50 +389,60 @@ class AdminTemplateGenerator {
 
     private String buildSidebar() {
         return """
-                <div class="sidebar">
-                    <div class="sidebar-brand">
-                        <i class="fas fa-cubes"></i> FractalX Admin
-                    </div>
+                <aside class="sidebar" id="sidebar">
+                    <a class="sb-brand" href="#">
+                        <div class="sb-icon"><i class="fas fa-cubes"></i></div>
+                        <span class="sb-name">FractalX</span>
+                    </a>
                     <nav class="sidebar-nav">
-                        <div class="nav-section">Main</div>
-                        <a href="#" onclick="showSection('overview')" id="nav-overview" class="active">
-                            <i class="fas fa-th-large"></i> Overview
-                        </a>
-                        <a href="#" onclick="showSection('services')" id="nav-services">
-                            <i class="fas fa-server"></i> Services
-                        </a>
-                        <div class="nav-section">Architecture</div>
-                        <a href="#" onclick="showSection('communication')" id="nav-communication">
-                            <i class="fas fa-project-diagram"></i> Communication
-                        </a>
-                        <a href="#" onclick="showSection('data')" id="nav-data">
-                            <i class="fas fa-database"></i> Data Consistency
-                        </a>
-                        <div class="nav-section">Monitoring</div>
-                        <a href="#" onclick="showSection('observability')" id="nav-observability">
-                            <i class="fas fa-chart-line"></i> Observability
-                        </a>
-                        <a href="#" onclick="showSection('alerts')" id="nav-alerts">
-                            <i class="fas fa-bell"></i> Alerts
-                            <span class="alert-badge" id="alert-badge" style="display:none">0</span>
-                        </a>
-                        <a href="#" onclick="showSection('traces')" id="nav-traces">
-                            <i class="fas fa-route"></i> Traces
-                        </a>
-                        <a href="#" onclick="showSection('logs')" id="nav-logs">
-                            <i class="fas fa-file-alt"></i> Logs
-                        </a>
-                        <div class="nav-section">Admin</div>
-                        <a href="#" onclick="showSection('settings')" id="nav-settings">
-                            <i class="fas fa-cog"></i> Settings
-                        </a>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Overview</div>
+                            <a href="#" onclick="showSection('overview');closeSidebar()" id="nav-overview" class="active">
+                                <i class="fas fa-th-large ni"></i> Overview
+                            </a>
+                            <a href="#" onclick="showSection('services');closeSidebar()" id="nav-services">
+                                <i class="fas fa-server ni"></i> Services
+                            </a>
+                        </div>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Architecture</div>
+                            <a href="#" onclick="showSection('communication');closeSidebar()" id="nav-communication">
+                                <i class="fas fa-project-diagram ni"></i> Communication
+                            </a>
+                            <a href="#" onclick="showSection('data');closeSidebar()" id="nav-data">
+                                <i class="fas fa-database ni"></i> Data Consistency
+                            </a>
+                        </div>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Monitoring</div>
+                            <a href="#" onclick="showSection('observability');closeSidebar()" id="nav-observability">
+                                <i class="fas fa-chart-line ni"></i> Observability
+                            </a>
+                            <a href="#" onclick="showSection('alerts');closeSidebar()" id="nav-alerts">
+                                <i class="fas fa-bell ni"></i> Alerts
+                                <span class="alert-badge" id="alert-badge" style="display:none">0</span>
+                            </a>
+                            <a href="#" onclick="showSection('traces');closeSidebar()" id="nav-traces">
+                                <i class="fas fa-route ni"></i> Traces
+                            </a>
+                            <a href="#" onclick="showSection('logs');closeSidebar()" id="nav-logs">
+                                <i class="fas fa-file-alt ni"></i> Logs
+                            </a>
+                        </div>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Admin</div>
+                            <a href="#" onclick="showSection('settings');closeSidebar()" id="nav-settings">
+                                <i class="fas fa-sliders-h ni"></i> Settings
+                            </a>
+                        </div>
                     </nav>
-                    <div class="mt-auto p-3" style="border-top:1px solid #334155">
-                        <a href="/logout" class="text-danger text-decoration-none small">
-                            <i class="fas fa-sign-out-alt me-1"></i> Logout
+                    <div class="sb-footer">
+                        <a href="/logout">
+                            <i class="fas fa-sign-out-alt" style="width:15px;text-align:center"></i>
+                            Sign out
                         </a>
                     </div>
-                </div>
+                </aside>
                 """;
     }
 
@@ -262,22 +450,34 @@ class AdminTemplateGenerator {
 
     private String buildTopbar() {
         return """
-                    <div class="topbar">
-                        <h5 class="mb-0 fw-semibold" id="page-title">Overview</h5>
-                        <div class="d-flex align-items-center gap-3">
-                            <span class="text-muted small">
-                                <i class="fas fa-clock me-1"></i>
-                                <span id="last-refresh">Never</span>
-                            </span>
-                            <button class="btn btn-sm btn-outline-primary" onclick="refreshCurrent()">
-                                <i class="fas fa-sync-alt me-1"></i>Refresh
+                    <header class="topbar">
+                        <div class="topbar-l">
+                            <button class="hamburger" onclick="openSidebar()" aria-label="Open menu">
+                                <i class="fas fa-bars"></i>
                             </button>
-                            <a href="/api/auth/profile" class="text-decoration-none small">
-                                <i class="fas fa-user-circle text-muted me-1"></i>
-                                <span id="current-user">admin</span>
+                            <a class="topbar-brand" href="#">FractalX</a>
+                            <span class="topbar-sep">/</span>
+                            <span id="page-title">Overview</span>
+                        </div>
+                        <div class="topbar-r">
+                            <span class="refresh-ts">
+                                <i class="fas fa-clock" style="margin-right:4px;color:var(--t3)"></i>
+                                <span id="last-refresh">—</span>
+                            </span>
+                            <button class="btn btn-light btn-sm" onclick="refreshCurrent()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                            <a href="/api/auth/profile" class="d-flex align-items-center gap-2 text-decoration-none"
+                               style="font-size:13px;color:var(--t2)">
+                                <span style="width:26px;height:26px;background:#f3f4f6;border:1px solid var(--bdr);
+                                             border-radius:50%;display:flex;align-items:center;justify-content:center;
+                                             font-size:11px;color:var(--t2)">
+                                    <i class="fas fa-user"></i>
+                                </span>
+                                <span id="current-user" style="font-weight:500;color:var(--t1)">admin</span>
                             </a>
                         </div>
-                    </div>
+                    </header>
                 """;
     }
 
@@ -286,72 +486,53 @@ class AdminTemplateGenerator {
     private String buildSectionOverview() {
         return """
                     <div id="section-overview" class="section active">
-                        <div class="row g-3 mb-4">
-                            <div class="col-6 col-lg-3">
-                                <div class="stat-card">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="stat-icon" style="background:#ede9fe">
-                                            <i class="fas fa-server text-primary"></i>
-                                        </div>
-                                        <div>
-                                            <div class="stat-value" id="ov-total">-</div>
-                                            <div class="stat-label">Total Services</div>
-                                        </div>
-                                    </div>
+                        <div class="stats-row">
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#ede9fe">
+                                    <i class="fas fa-server" style="color:#7c3aed"></i>
                                 </div>
+                                <div class="stat-val" id="ov-total">—</div>
+                                <div class="stat-lbl">Total Services</div>
                             </div>
-                            <div class="col-6 col-lg-3">
-                                <div class="stat-card">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="stat-icon" style="background:#dcfce7">
-                                            <i class="fas fa-check-circle" style="color:#16a34a"></i>
-                                        </div>
-                                        <div>
-                                            <div class="stat-value" id="ov-up">-</div>
-                                            <div class="stat-label">Running</div>
-                                        </div>
-                                    </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#dcfce7">
+                                    <i class="fas fa-check-circle" style="color:#15803d"></i>
                                 </div>
+                                <div class="stat-val" id="ov-up">—</div>
+                                <div class="stat-lbl">Running</div>
                             </div>
-                            <div class="col-6 col-lg-3">
-                                <div class="stat-card">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="stat-icon" style="background:#fee2e2">
-                                            <i class="fas fa-exclamation-circle text-danger"></i>
-                                        </div>
-                                        <div>
-                                            <div class="stat-value" id="ov-down">-</div>
-                                            <div class="stat-label">Down / Unknown</div>
-                                        </div>
-                                    </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#fee2e2">
+                                    <i class="fas fa-times-circle" style="color:#b91c1c"></i>
                                 </div>
+                                <div class="stat-val" id="ov-down">—</div>
+                                <div class="stat-lbl">Down / Unknown</div>
                             </div>
-                            <div class="col-6 col-lg-3">
-                                <div class="stat-card">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="stat-icon" style="background:#fef3c7">
-                                            <i class="fas fa-bell" style="color:#d97706"></i>
-                                        </div>
-                                        <div>
-                                            <div class="stat-value" id="ov-alerts">-</div>
-                                            <div class="stat-label">Active Alerts</div>
-                                        </div>
-                                    </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#fef3c7">
+                                    <i class="fas fa-bell" style="color:#d97706"></i>
                                 </div>
+                                <div class="stat-val" id="ov-alerts">—</div>
+                                <div class="stat-lbl">Active Alerts</div>
                             </div>
                         </div>
-                        <div class="table-card">
-                            <div class="card-header d-flex justify-content-between">
-                                <span><i class="fas fa-heartbeat me-2 text-success"></i>Quick Health Status</span>
-                                <button class="btn btn-sm btn-light" onclick="loadOverview()">
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-heartbeat" style="color:#10b981"></i>
+                                    <span>Quick Health Status</span>
+                                </div>
+                                <button class="btn btn-light btn-sm" onclick="loadOverview()">
                                     <i class="fas fa-sync-alt"></i>
                                 </button>
                             </div>
-                            <div class="p-3">
+                            <div class="card-bd table-wrap">
                                 <table class="table table-sm table-hover mb-0">
-                                    <thead><tr><th>Service</th><th>Status</th><th>Port</th><th>Type</th><th>Actions</th></tr></thead>
+                                    <thead><tr>
+                                        <th>Service</th><th>Status</th><th>Port</th><th>Type</th><th>Actions</th>
+                                    </tr></thead>
                                     <tbody id="overview-tbody">
-                                        <tr><td colspan="5" class="text-muted text-center">Loading...</td></tr>
+                                        <tr><td colspan="5" class="text-center text-muted p-4">Loading…</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -363,28 +544,29 @@ class AdminTemplateGenerator {
     private String buildSectionServices() {
         return """
                     <div id="section-services" class="section">
-                        <div class="table-card mb-3">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <span><i class="fas fa-server me-2 text-primary"></i>All Services</span>
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-server" style="color:#6366f1"></i>
+                                    <span>All Services</span>
+                                </div>
                                 <div class="d-flex gap-2">
-                                    <input type="text" class="form-control form-control-sm" id="svc-filter"
-                                           placeholder="Filter..." style="width:160px"
-                                           oninput="filterServicesTable(this.value)">
-                                    <button class="btn btn-sm btn-primary" onclick="loadServicesAll()">
-                                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                                    <input type="text" class="form-control form-control-sm"
+                                           id="svc-filter" placeholder="Filter services…"
+                                           style="width:160px" oninput="filterServicesTable(this.value)">
+                                    <button class="btn btn-primary btn-sm" onclick="loadServicesAll()">
+                                        <i class="fas fa-sync-alt"></i> Refresh
                                     </button>
                                 </div>
                             </div>
-                            <div class="p-3">
+                            <div class="card-bd table-wrap">
                                 <table class="table table-sm table-hover mb-0" id="services-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Name</th><th>Type</th><th>Port</th><th>gRPC</th>
-                                            <th>Health</th><th>Dependencies</th><th>Deployment</th><th>Actions</th>
-                                        </tr>
-                                    </thead>
+                                    <thead><tr>
+                                        <th>Name</th><th>Type</th><th>HTTP</th><th>gRPC</th>
+                                        <th>Health</th><th>Dependencies</th><th>Version</th><th>Actions</th>
+                                    </tr></thead>
                                     <tbody id="services-tbody">
-                                        <tr><td colspan="8" class="text-muted text-center">Loading...</td></tr>
+                                        <tr><td colspan="8" class="text-center text-muted p-4">Loading…</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -396,42 +578,58 @@ class AdminTemplateGenerator {
     private String buildSectionCommunication() {
         return """
                     <div id="section-communication" class="section">
-                        <div class="table-card mb-3">
-                            <div class="card-header">
-                                <i class="fas fa-project-diagram me-2 text-primary"></i>Service Dependency Topology
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-project-diagram" style="color:#6366f1"></i>
+                                    <span>Service Dependency Topology</span>
+                                </div>
                             </div>
                             <div id="topology-grid" class="topology-grid">
-                                <div class="text-muted p-3">Loading topology...</div>
+                                <span class="text-muted p-3">Loading topology…</span>
                             </div>
                         </div>
-                        <div class="row g-3">
-                            <div class="col-lg-6">
-                                <div class="table-card">
-                                    <div class="card-header">
-                                        <i class="fas fa-network-wired me-2 text-info"></i>NetScope / gRPC Links
+                        <div class="two-col" style="margin-top:12px">
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-network-wired" style="color:#3b82f6"></i>
+                                        <span>NetScope / gRPC Links</span>
                                     </div>
-                                    <div class="p-3">
-                                        <table class="table table-sm mb-0">
-                                            <thead><tr><th>Source</th><th>Target</th><th>gRPC Port</th><th>Protocol</th></tr></thead>
-                                            <tbody id="netscope-tbody">
-                                                <tr><td colspan="4" class="text-muted">Loading...</td></tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                </div>
+                                <div class="card-bd table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Source</th><th>Target</th><th>gRPC Port</th><th>Protocol</th>
+                                        </tr></thead>
+                                        <tbody id="netscope-tbody">
+                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
-                            <div class="col-lg-6">
-                                <div class="table-card mb-3">
-                                    <div class="card-header">
-                                        <i class="fas fa-exchange-alt me-2 text-success"></i>API Gateway
+                            <div>
+                                <div class="card2">
+                                    <div class="card-hd">
+                                        <div class="card-hd-l">
+                                            <i class="fas fa-exchange-alt" style="color:#10b981"></i>
+                                            <span>API Gateway</span>
+                                        </div>
                                     </div>
-                                    <div class="p-3" id="gateway-info"><span class="text-muted">Loading...</span></div>
+                                    <div class="card-bd p-3" id="gateway-info">
+                                        <span class="text-muted">Loading…</span>
+                                    </div>
                                 </div>
-                                <div class="table-card">
-                                    <div class="card-header">
-                                        <i class="fas fa-satellite-dish me-2 text-warning"></i>Service Discovery
+                                <div class="card2">
+                                    <div class="card-hd">
+                                        <div class="card-hd-l">
+                                            <i class="fas fa-satellite-dish" style="color:#f59e0b"></i>
+                                            <span>Service Discovery</span>
+                                        </div>
                                     </div>
-                                    <div class="p-3" id="discovery-info"><span class="text-muted">Loading...</span></div>
+                                    <div class="card-bd p-3" id="discovery-info">
+                                        <span class="text-muted">Loading…</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -442,64 +640,81 @@ class AdminTemplateGenerator {
     private String buildSectionData() {
         return """
                     <div id="section-data" class="section">
-                        <div class="row g-3 mb-3">
-                            <div class="col-md-4">
-                                <div class="stat-card">
-                                    <div class="stat-value" id="data-saga-count">-</div>
-                                    <div class="stat-label">Saga Definitions</div>
+                        <div class="stats-row" style="grid-template-columns:repeat(3,1fr)">
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#ede9fe">
+                                    <i class="fas fa-sitemap" style="color:#7c3aed"></i>
+                                </div>
+                                <div class="stat-val" id="data-saga-count">—</div>
+                                <div class="stat-lbl">Saga Definitions</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#dbeafe">
+                                    <i class="fas fa-database" style="color:#1d4ed8"></i>
+                                </div>
+                                <div class="stat-val" id="data-svc-count">—</div>
+                                <div class="stat-lbl">Services with DB</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#dcfce7">
+                                    <i class="fas fa-cogs" style="color:#15803d"></i>
+                                </div>
+                                <div class="stat-val" id="data-orch-health">—</div>
+                                <div class="stat-lbl">Saga Orchestrator</div>
+                            </div>
+                        </div>
+                        <div class="two-col">
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-sitemap" style="color:#6366f1"></i>
+                                        <span>Saga Definitions</span>
+                                    </div>
+                                    <button class="btn btn-outline-secondary btn-sm"
+                                            onclick="loadSagaInstances()">
+                                        View Instances
+                                    </button>
+                                </div>
+                                <div class="card-bd table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Saga ID</th><th>Service</th><th>Steps</th><th>Compensation</th>
+                                        </tr></thead>
+                                        <tbody id="sagas-tbody">
+                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="stat-card">
-                                    <div class="stat-value" id="data-svc-count">-</div>
-                                    <div class="stat-label">Services with DB</div>
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-database" style="color:#f59e0b"></i>
+                                        <span>Database Health</span>
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="stat-card">
-                                    <div class="stat-value" id="data-orch-health">-</div>
-                                    <div class="stat-label">Saga Orchestrator</div>
+                                <div class="card-bd table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Service</th><th>Schemas</th><th>Health</th>
+                                        </tr></thead>
+                                        <tbody id="databases-tbody">
+                                            <tr><td colspan="3" class="text-muted p-3">Loading…</td></tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>
-                        <div class="row g-3">
-                            <div class="col-lg-6">
-                                <div class="table-card">
-                                    <div class="card-header d-flex justify-content-between">
-                                        <span><i class="fas fa-sitemap me-2 text-primary"></i>Saga Definitions</span>
-                                        <button class="btn btn-sm btn-outline-primary" onclick="loadSagaInstances()">
-                                            View Instances
-                                        </button>
-                                    </div>
-                                    <div class="p-3">
-                                        <table class="table table-sm mb-0">
-                                            <thead><tr><th>Saga ID</th><th>Service</th><th>Steps</th><th>Compensation</th></tr></thead>
-                                            <tbody id="sagas-tbody">
-                                                <tr><td colspan="4" class="text-muted">Loading...</td></tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
+                        <div class="card2" style="margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-inbox" style="color:#10b981"></i>
+                                    <span>Outbox Events</span>
                                 </div>
                             </div>
-                            <div class="col-lg-6">
-                                <div class="table-card">
-                                    <div class="card-header">
-                                        <i class="fas fa-database me-2 text-warning"></i>Database Health
-                                    </div>
-                                    <div class="p-3">
-                                        <table class="table table-sm mb-0">
-                                            <thead><tr><th>Service</th><th>Schemas</th><th>Health</th></tr></thead>
-                                            <tbody id="databases-tbody">
-                                                <tr><td colspan="3" class="text-muted">Loading...</td></tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
+                            <div class="card-bd p-3" id="outbox-info">
+                                <span class="text-muted">Loading…</span>
                             </div>
-                        </div>
-                        <div class="table-card mt-3">
-                            <div class="card-header"><i class="fas fa-inbox me-2 text-success"></i>Outbox Events</div>
-                            <div class="p-3" id="outbox-info"><span class="text-muted">Loading...</span></div>
                         </div>
                     </div>
                 """;
@@ -509,47 +724,58 @@ class AdminTemplateGenerator {
         return """
                     <div id="section-observability" class="section">
                         <div class="row g-3 mb-3" id="metrics-cards">
-                            <div class="col-12 text-muted text-center p-4">Loading metrics...</div>
+                            <div class="col-12 text-center text-muted p-4">Loading metrics…</div>
                         </div>
-                        <div class="table-card">
-                            <div class="card-header d-flex justify-content-between">
-                                <span><i class="fas fa-chart-bar me-2 text-primary"></i>Service Health Metrics</span>
-                                <button class="btn btn-sm btn-primary" onclick="loadMetrics()">
-                                    <i class="fas fa-sync-alt me-1"></i>Refresh
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-chart-bar" style="color:#6366f1"></i>
+                                    <span>Service Health Metrics</span>
+                                </div>
+                                <button class="btn btn-primary btn-sm" onclick="loadMetrics()">
+                                    <i class="fas fa-sync-alt"></i> Refresh
                                 </button>
                             </div>
-                            <div class="p-3">
+                            <div class="card-bd table-wrap">
                                 <table class="table table-sm mb-0">
-                                    <thead><tr><th>Service</th><th>Health</th><th>Response P99</th><th>Error Rate</th><th>Uptime</th></tr></thead>
+                                    <thead><tr>
+                                        <th>Service</th><th>Health</th><th>Response P99</th>
+                                        <th>Error Rate</th><th>Uptime</th>
+                                    </tr></thead>
                                     <tbody id="metrics-tbody">
-                                        <tr><td colspan="5" class="text-muted">Loading...</td></tr>
+                                        <tr><td colspan="5" class="text-muted p-4 text-center">Loading…</td></tr>
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-                        <div class="table-card mt-3">
-                            <div class="card-header">
-                                <i class="fas fa-broadcast-tower me-2 text-info"></i>OpenTelemetry Configuration
+                        <div class="card2" style="margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-broadcast-tower" style="color:#3b82f6"></i>
+                                    <span>OpenTelemetry Configuration</span>
+                                </div>
                             </div>
-                            <div class="p-3">
-                                <div class="row g-2">
+                            <div class="card-bd p-3">
+                                <div class="row g-3">
                                     <div class="col-md-6">
-                                        <small class="text-muted">OTLP Endpoint</small>
+                                        <div class="text-muted mb-1" style="font-size:11.5px">OTLP Endpoint</div>
                                         <div class="cmd-box">${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}</div>
                                     </div>
                                     <div class="col-md-6">
-                                        <small class="text-muted">Jaeger UI</small>
+                                        <div class="text-muted mb-1" style="font-size:11.5px">Jaeger UI</div>
                                         <div class="cmd-box">
-                                            <a href="http://localhost:16686" target="_blank" class="text-success">
-                                                http://localhost:16686 <i class="fas fa-external-link-alt fa-xs"></i>
+                                            <a href="http://localhost:16686" target="_blank"
+                                               style="color:#4ade80;text-decoration:none">
+                                                http://localhost:16686
+                                                <i class="fas fa-external-link-alt" style="font-size:10px;margin-left:4px"></i>
                                             </a>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="mt-2 small text-muted">
+                                <p class="text-muted mt-2 mb-0" style="font-size:12px">
                                     All services export spans via OTLP/gRPC to Jaeger.
                                     Correlation IDs propagated via W3C <code>traceparent</code> + <code>X-Correlation-Id</code>.
-                                </div>
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -559,39 +785,56 @@ class AdminTemplateGenerator {
     private String buildSectionAlerts() {
         return """
                     <div id="section-alerts" class="section">
-                        <div class="table-card mb-3">
-                            <div class="card-header d-flex justify-content-between">
-                                <span>
-                                    <i class="fas fa-exclamation-triangle me-2 text-warning"></i>
-                                    Active Alerts <span class="badge bg-danger ms-1" id="active-alert-count">0</span>
-                                </span>
-                                <button class="btn btn-sm btn-primary" onclick="loadAlerts()">
-                                    <i class="fas fa-sync-alt me-1"></i>Refresh
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-exclamation-triangle" style="color:#f59e0b"></i>
+                                    <span>Active Alerts</span>
+                                    <span class="badge bg-danger ms-1" id="active-alert-count">0</span>
+                                </div>
+                                <button class="btn btn-primary btn-sm" onclick="loadAlerts()">
+                                    <i class="fas fa-sync-alt"></i> Refresh
                                 </button>
                             </div>
-                            <div class="p-3">
+                            <div class="card-bd table-wrap">
                                 <table class="table table-sm table-hover mb-0">
-                                    <thead><tr><th>Time</th><th>Service</th><th>Severity</th><th>Message</th><th>Action</th></tr></thead>
+                                    <thead><tr>
+                                        <th>Time</th><th>Service</th><th>Severity</th><th>Message</th><th>Action</th>
+                                    </tr></thead>
                                     <tbody id="active-alerts-tbody">
-                                        <tr><td colspan="5" class="text-muted text-center">No active alerts</td></tr>
+                                        <tr><td colspan="5" class="text-center text-muted p-4">No active alerts</td></tr>
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-                        <div class="table-card">
-                            <div class="card-header"><i class="fas fa-history me-2 text-secondary"></i>Alert History</div>
-                            <div class="p-3">
+                        <div class="card2" style="margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-history" style="color:var(--t2)"></i>
+                                    <span>Alert History</span>
+                                </div>
+                            </div>
+                            <div class="card-bd table-wrap">
                                 <table class="table table-sm table-hover mb-0">
-                                    <thead><tr><th>Time</th><th>Service</th><th>Severity</th><th>Message</th><th>Status</th></tr></thead>
+                                    <thead><tr>
+                                        <th>Time</th><th>Service</th><th>Severity</th><th>Message</th><th>Status</th>
+                                    </tr></thead>
                                     <tbody id="alert-history-tbody">
-                                        <tr><td colspan="5" class="text-muted text-center">No alerts recorded</td></tr>
+                                        <tr><td colspan="5" class="text-center text-muted p-4">No alerts recorded</td></tr>
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-                        <div class="table-card mt-3">
-                            <div class="card-header"><i class="fas fa-sliders-h me-2 text-info"></i>Alert Configuration</div>
-                            <div class="p-3" id="alert-config-info"><span class="text-muted">Loading...</span></div>
+                        <div class="card2" style="margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-sliders-h" style="color:#3b82f6"></i>
+                                    <span>Alert Rules</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3" id="alert-config-info">
+                                <span class="text-muted">Loading…</span>
+                            </div>
                         </div>
                     </div>
                 """;
@@ -600,33 +843,47 @@ class AdminTemplateGenerator {
     private String buildSectionTracesLogs() {
         return """
                     <div id="section-traces" class="section">
-                        <div class="table-card mb-3">
-                            <div class="card-header"><i class="fas fa-route me-2 text-primary"></i>Distributed Trace Search</div>
-                            <div class="p-3">
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-route" style="color:#6366f1"></i>
+                                    <span>Distributed Trace Search</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3">
                                 <div class="row g-2 mb-3">
                                     <div class="col-md-5">
-                                        <input type="text" class="form-control form-control-sm" id="trace-correlation-id"
+                                        <input type="text" class="form-control form-control-sm"
+                                               id="trace-correlation-id"
                                                placeholder="Correlation ID (X-Correlation-Id)">
                                     </div>
                                     <div class="col-md-4">
                                         <select class="form-select form-select-sm" id="trace-service-select">
-                                            <option value="">-- All Services --</option>
+                                            <option value="">— All Services —</option>
                                         </select>
                                     </div>
                                     <div class="col-md-3">
-                                        <button class="btn btn-sm btn-primary w-100" onclick="searchTraces()">
-                                            <i class="fas fa-search me-1"></i>Search Traces
+                                        <button class="btn btn-primary btn-sm w-100" onclick="searchTraces()">
+                                            <i class="fas fa-search"></i> Search
                                         </button>
                                     </div>
                                 </div>
-                                <table class="table table-sm mb-0">
-                                    <thead><tr><th>Trace ID</th><th>Service</th><th>Duration</th><th>Spans</th><th>Jaeger Link</th></tr></thead>
-                                    <tbody id="traces-tbody">
-                                        <tr><td colspan="5" class="text-muted text-center">Enter a Correlation ID or service to search</td></tr>
-                                    </tbody>
-                                </table>
-                                <div class="mt-2 small">
-                                    <a href="http://localhost:16686" target="_blank" class="text-info">
+                                <div class="table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Trace ID</th><th>Service</th><th>Duration</th>
+                                            <th>Spans</th><th>Jaeger</th>
+                                        </tr></thead>
+                                        <tbody id="traces-tbody">
+                                            <tr><td colspan="5" class="text-center text-muted p-4">
+                                                Enter a Correlation ID or service to search
+                                            </td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="mt-2">
+                                    <a href="http://localhost:16686" target="_blank"
+                                       style="font-size:12px;color:#3b82f6;text-decoration:none">
                                         <i class="fas fa-external-link-alt me-1"></i>Open Jaeger UI
                                     </a>
                                 </div>
@@ -634,17 +891,22 @@ class AdminTemplateGenerator {
                         </div>
                     </div>
                     <div id="section-logs" class="section">
-                        <div class="table-card">
-                            <div class="card-header"><i class="fas fa-file-alt me-2 text-secondary"></i>Log Viewer</div>
-                            <div class="p-3">
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-file-alt" style="color:var(--t2)"></i>
+                                    <span>Log Viewer</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3">
                                 <div class="row g-2 mb-3">
                                     <div class="col-md-3">
-                                        <input type="text" class="form-control form-control-sm" id="log-correlation-id"
-                                               placeholder="Correlation ID">
+                                        <input type="text" class="form-control form-control-sm"
+                                               id="log-correlation-id" placeholder="Correlation ID">
                                     </div>
                                     <div class="col-md-3">
                                         <select class="form-select form-select-sm" id="log-service-select">
-                                            <option value="">-- All Services --</option>
+                                            <option value="">— All Services —</option>
                                         </select>
                                     </div>
                                     <div class="col-md-2">
@@ -655,28 +917,40 @@ class AdminTemplateGenerator {
                                         </select>
                                     </div>
                                     <div class="col-md-2">
-                                        <button class="btn btn-sm btn-primary w-100" onclick="searchLogs(0)">
-                                            <i class="fas fa-search me-1"></i>Search
+                                        <button class="btn btn-primary btn-sm w-100" onclick="searchLogs(0)">
+                                            <i class="fas fa-search"></i> Search
                                         </button>
                                     </div>
                                     <div class="col-md-2">
-                                        <button class="btn btn-sm btn-outline-secondary w-100" onclick="loadLogStats()">
-                                            <i class="fas fa-chart-pie me-1"></i>Stats
+                                        <button class="btn btn-outline-secondary btn-sm w-100" onclick="loadLogStats()">
+                                            <i class="fas fa-chart-pie"></i> Stats
                                         </button>
                                     </div>
                                 </div>
-                                <table class="table table-sm table-hover mb-2" style="font-size:.82rem">
-                                    <thead><tr><th>Time</th><th>Service</th><th>Level</th><th>Correlation ID</th><th>Message</th></tr></thead>
-                                    <tbody id="logs-tbody">
-                                        <tr><td colspan="5" class="text-muted text-center">Use filters above to search logs</td></tr>
-                                    </tbody>
-                                </table>
+                                <div class="table-wrap">
+                                    <table class="table table-sm table-hover mb-2" style="font-size:.82rem">
+                                        <thead><tr>
+                                            <th>Time</th><th>Service</th><th>Level</th>
+                                            <th>Correlation ID</th><th>Message</th>
+                                        </tr></thead>
+                                        <tbody id="logs-tbody">
+                                            <tr><td colspan="5" class="text-center text-muted p-4">
+                                                Use filters above to search logs
+                                            </td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
                                 <div id="log-pagination" class="d-flex gap-2 flex-wrap"></div>
                             </div>
                         </div>
-                        <div class="table-card mt-3" id="log-stats-card" style="display:none">
-                            <div class="card-header"><i class="fas fa-chart-pie me-2"></i>Log Statistics</div>
-                            <div class="p-3" id="log-stats-content"></div>
+                        <div class="card2" id="log-stats-card" style="display:none;margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-chart-pie"></i>
+                                    <span>Log Statistics</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3" id="log-stats-content"></div>
                         </div>
                     </div>
                 """;
@@ -699,57 +973,96 @@ class AdminTemplateGenerator {
                                 <i class="fas fa-wrench me-1"></i>General
                             </button>
                         </div>
+
                         <div id="settings-pane-users" class="settings-pane active">
-                            <div class="table-card">
-                                <div class="card-header d-flex justify-content-between align-items-center">
-                                    <span><i class="fas fa-users me-2"></i>User Management</span>
-                                    <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">
-                                        <i class="fas fa-plus me-1"></i>Add User
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-users" style="color:#6366f1"></i>
+                                        <span>User Management</span>
+                                    </div>
+                                    <button class="btn btn-primary btn-sm"
+                                            data-bs-toggle="modal" data-bs-target="#addUserModal">
+                                        <i class="fas fa-plus"></i> Add User
                                     </button>
                                 </div>
-                                <div class="p-3">
+                                <div class="card-bd table-wrap">
                                     <table class="table table-sm table-hover mb-0">
-                                        <thead><tr><th>Username</th><th>Roles</th><th>Status</th><th>Last Login</th><th>Created</th><th>Actions</th></tr></thead>
-                                        <tbody id="users-tbody"><tr><td colspan="6" class="text-muted">Loading...</td></tr></tbody>
+                                        <thead><tr>
+                                            <th>Username</th><th>Roles</th><th>Status</th>
+                                            <th>Last Login</th><th>Created</th><th>Actions</th>
+                                        </tr></thead>
+                                        <tbody id="users-tbody">
+                                            <tr><td colspan="6" class="text-muted p-4 text-center">Loading…</td></tr>
+                                        </tbody>
                                     </table>
                                 </div>
                             </div>
                         </div>
+
                         <div id="settings-pane-configuration" class="settings-pane">
-                            <div class="table-card mb-3">
-                                <div class="card-header"><i class="fas fa-network-wired me-2"></i>Port Mapping</div>
-                                <div class="p-3">
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-network-wired" style="color:#3b82f6"></i>
+                                        <span>Port Mapping</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd table-wrap">
                                     <table class="table table-sm mb-0">
-                                        <thead><tr><th>Service</th><th>HTTP Port</th><th>gRPC Port</th><th>Has Outbox</th><th>Commands</th></tr></thead>
-                                        <tbody id="config-ports-tbody"><tr><td colspan="5" class="text-muted">Loading...</td></tr></tbody>
+                                        <thead><tr>
+                                            <th>Service</th><th>HTTP Port</th><th>gRPC Port</th>
+                                            <th>Outbox</th><th>Commands</th>
+                                        </tr></thead>
+                                        <tbody id="config-ports-tbody">
+                                            <tr><td colspan="5" class="text-muted p-3">Loading…</td></tr>
+                                        </tbody>
                                     </table>
                                 </div>
                             </div>
-                            <div class="table-card">
-                                <div class="card-header"><i class="fas fa-code me-2"></i>Environment Variables</div>
-                                <div class="p-3">
+                            <div class="card2" style="margin-top:12px">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-code" style="color:var(--t2)"></i>
+                                        <span>Environment Variables</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd p-2">
                                     <div class="accordion" id="env-accordion">
-                                        <div class="text-muted">Loading...</div>
+                                        <div class="text-muted p-3">Loading…</div>
                                     </div>
                                 </div>
                             </div>
                         </div>
+
                         <div id="settings-pane-notifications" class="settings-pane">
-                            <div class="table-card">
-                                <div class="card-header"><i class="fas fa-bell me-2"></i>Alert Channel Configuration</div>
-                                <div class="p-3" id="notification-config-content">
-                                    <div class="text-muted">Loading alert config...</div>
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-bell" style="color:#f59e0b"></i>
+                                        <span>Alert Channels</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd p-3" id="notification-config-content">
+                                    <span class="text-muted">Loading…</span>
                                 </div>
                             </div>
                         </div>
+
                         <div id="settings-pane-general" class="settings-pane">
-                            <div class="table-card">
-                                <div class="card-header"><i class="fas fa-wrench me-2"></i>General Settings</div>
-                                <div class="p-3">
+                            <div class="card2" style="max-width:560px">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-wrench" style="color:var(--t2)"></i>
+                                        <span>General Settings</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd p-4">
                                     <form onsubmit="updateSettings(event)">
                                         <div class="mb-3">
                                             <label class="form-label">Site Name</label>
-                                            <input type="text" class="form-control" id="setting-site-name" value="FractalX Admin">
+                                            <input type="text" class="form-control" id="setting-site-name"
+                                                   value="FractalX Admin">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Theme</label>
@@ -760,20 +1073,28 @@ class AdminTemplateGenerator {
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Session Timeout (minutes)</label>
-                                            <input type="number" class="form-control" id="setting-session-timeout" value="30" min="5" max="1440">
+                                            <input type="number" class="form-control"
+                                                   id="setting-session-timeout" value="30" min="5" max="1440">
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">Default Alert Email</label>
-                                            <input type="email" class="form-control" id="setting-alert-email" placeholder="alerts@example.com">
+                                            <input type="email" class="form-control" id="setting-alert-email"
+                                                   placeholder="alerts@example.com">
                                         </div>
-                                        <div class="mb-3 form-check">
+                                        <div class="mb-4 form-check">
                                             <input type="checkbox" class="form-check-input" id="setting-maintenance">
-                                            <label class="form-check-label">Maintenance Mode</label>
+                                            <label class="form-check-label" for="setting-maintenance"
+                                                   style="font-weight:400">Maintenance Mode</label>
                                         </div>
-                                        <button type="submit" class="btn btn-primary">
-                                            <i class="fas fa-save me-1"></i>Save Settings
-                                        </button>
-                                        <span id="settings-save-status" class="ms-2 small text-success" style="display:none">Saved!</span>
+                                        <div class="d-flex align-items-center gap-3">
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="fas fa-save"></i> Save Settings
+                                            </button>
+                                            <span id="settings-save-status" class="text-muted"
+                                                  style="font-size:12px;display:none">
+                                                <i class="fas fa-check" style="color:#10b981"></i> Saved
+                                            </span>
+                                        </div>
                                     </form>
                                 </div>
                             </div>
@@ -791,11 +1112,12 @@ class AdminTemplateGenerator {
                         <div class="modal-content">
                             <div class="modal-header">
                                 <h5 class="modal-title">
-                                    <i class="fas fa-server me-2"></i><span id="svc-detail-title">Service Detail</span>
+                                    <i class="fas fa-server me-2" style="color:#6366f1"></i>
+                                    <span id="svc-detail-title">Service Detail</span>
                                 </h5>
                                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
-                            <div class="modal-body" id="svc-detail-body">Loading...</div>
+                            <div class="modal-body" id="svc-detail-body">Loading…</div>
                         </div>
                     </div>
                 </div>
@@ -804,13 +1126,15 @@ class AdminTemplateGenerator {
                         <div class="modal-content">
                             <div class="modal-header">
                                 <h5 class="modal-title">
-                                    <i class="fas fa-terminal me-2"></i>Lifecycle &mdash; <span id="lc-service-name"></span>
+                                    <i class="fas fa-terminal me-2"></i>
+                                    Lifecycle &mdash; <span id="lc-service-name"></span>
                                 </h5>
                                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
                             <div class="modal-body">
-                                <p class="text-muted small mb-3">
-                                    Run these commands from your project directory where <code>docker-compose.yml</code> resides.
+                                <p class="text-muted mb-3" style="font-size:12.5px">
+                                    Run these commands from your project directory where
+                                    <code>docker-compose.yml</code> resides.
                                 </p>
                                 <div id="lifecycle-commands"></div>
                             </div>
@@ -821,7 +1145,9 @@ class AdminTemplateGenerator {
                     <div class="modal-dialog">
                         <div class="modal-content">
                             <div class="modal-header">
-                                <h5 class="modal-title"><i class="fas fa-user-plus me-2"></i>Add User</h5>
+                                <h5 class="modal-title">
+                                    <i class="fas fa-user-plus me-2" style="color:#6366f1"></i>Add User
+                                </h5>
                                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
                             <div class="modal-body">
@@ -841,11 +1167,13 @@ class AdminTemplateGenerator {
                                         <option value="ROLE_VIEWER" selected>Viewer</option>
                                     </select>
                                 </div>
-                                <span id="add-user-error" class="text-danger small"></span>
+                                <span id="add-user-error" class="text-danger" style="font-size:12.5px"></span>
                             </div>
                             <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                                <button type="button" class="btn btn-primary" onclick="createUser()">Create User</button>
+                                <button type="button" class="btn btn-secondary"
+                                        data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-primary"
+                                        onclick="createUser()">Create User</button>
                             </div>
                         </div>
                     </div>
@@ -854,7 +1182,9 @@ class AdminTemplateGenerator {
                     <div class="modal-dialog">
                         <div class="modal-content">
                             <div class="modal-header">
-                                <h5 class="modal-title">Change Password &mdash; <span id="cp-username"></span></h5>
+                                <h5 class="modal-title">
+                                    Change Password &mdash; <span id="cp-username"></span>
+                                </h5>
                                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
                             <div class="modal-body">
@@ -863,11 +1193,13 @@ class AdminTemplateGenerator {
                                     <label class="form-label">New Password</label>
                                     <input type="password" class="form-control" id="cp-new-password">
                                 </div>
-                                <span id="cp-error" class="text-danger small"></span>
+                                <span id="cp-error" class="text-danger" style="font-size:12.5px"></span>
                             </div>
                             <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                                <button type="button" class="btn btn-warning" onclick="submitPasswordChange()">Change Password</button>
+                                <button type="button" class="btn btn-secondary"
+                                        data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-outline-warning"
+                                        onclick="submitPasswordChange()">Change Password</button>
                             </div>
                         </div>
                     </div>
@@ -931,7 +1263,7 @@ class AdminTemplateGenerator {
                             document.getElementById('ov-down').textContent = down;
                         }).catch(() => {
                             document.getElementById('overview-tbody').innerHTML =
-                                '<tr><td colspan="5" class="text-danger">Failed to load services</td></tr>';
+                                '<tr><td colspan="5" class="text-danger text-center p-3">Failed to load services</td></tr>';
                         });
                     fetch('/api/alerts/active')
                         .then(r => r.json())
@@ -1703,6 +2035,21 @@ class AdminTemplateGenerator {
                     setInterval(() => updateAlertBadge(
                         parseInt(document.getElementById('active-alert-count').textContent) || 0), 30000);
                 });
+                """;
+    }
+
+    // ---- SCRIPTS: mobile sidebar --------------------------------------------
+
+    private String buildScriptsMobileNav() {
+        return """
+                function openSidebar() {
+                    document.getElementById('sidebar').classList.add('open');
+                    document.getElementById('sb-overlay').classList.add('open');
+                }
+                function closeSidebar() {
+                    document.getElementById('sidebar').classList.remove('open');
+                    document.getElementById('sb-overlay').classList.remove('open');
+                }
                 """;
     }
 }
