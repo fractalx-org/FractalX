@@ -24,7 +24,7 @@ class AdminSecurityConfigGenerator {
                 package com.fractalx.admin.config;
 
                 import com.fractalx.admin.user.AdminUser;
-                import com.fractalx.admin.user.UserStore;
+                import com.fractalx.admin.user.UserStoreService;
                 import org.springframework.context.annotation.Bean;
                 import org.springframework.context.annotation.Configuration;
                 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -44,7 +44,7 @@ class AdminSecurityConfigGenerator {
                 public class SecurityConfig {
 
                     @Bean
-                    public SecurityFilterChain securityFilterChain(HttpSecurity http, UserStore userStore)
+                    public SecurityFilterChain securityFilterChain(HttpSecurity http, UserStoreService userStore)
                             throws Exception {
                         http
                             .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
@@ -75,7 +75,7 @@ class AdminSecurityConfigGenerator {
                      * with BCrypt-hashed passwords and multiple roles.
                      */
                     @Bean
-                    public UserDetailsService userDetailsService(UserStore userStore) {
+                    public UserDetailsService userDetailsService(UserStoreService userStore) {
                         return username -> userStore.findByUsername(username)
                                 .filter(AdminUser::isActive)
                                 .map(u -> User.withUsername(u.getUsername())

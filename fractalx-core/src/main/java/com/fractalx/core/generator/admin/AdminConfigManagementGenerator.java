@@ -140,7 +140,7 @@ class AdminConfigManagementGenerator {
                     /** Returns the configuration for a single service by name. */
                     @GetMapping("/services/{name}")
                     public ResponseEntity<ServiceConfigStore.ServiceConfig> getServiceConfig(
-                            @PathVariable String name) {
+                            @PathVariable("name") String name) {
                         return configStore.findByName(name)
                                 .map(ResponseEntity::ok)
                                 .orElse(ResponseEntity.notFound().build());
@@ -175,7 +175,7 @@ class AdminConfigManagementGenerator {
                     /** Returns docker-compose lifecycle commands for a service. */
                     @GetMapping("/commands/{name}")
                     public ResponseEntity<Map<String, String>> getLifecycleCommands(
-                            @PathVariable String name) {
+                            @PathVariable("name") String name) {
                         Map<String, String> cmds = new LinkedHashMap<>();
                         cmds.put("start",   "docker compose up -d " + name);
                         cmds.put("stop",    "docker compose stop " + name);

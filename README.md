@@ -512,6 +512,12 @@ FractalX generates a full data isolation and consistency stack per service:
 
 ```yaml
 fractalx:
+  admin:
+    datasource:
+      url: jdbc:mysql://localhost:3306/admin_db
+      username: admin_user
+      password: secret
+      driver-class-name: com.mysql.cj.jdbc.Driver   # optional — auto-detected from URL
   services:
     order-service:
       datasource:
@@ -524,6 +530,8 @@ fractalx:
         username: postgres
         password: secret
 ```
+
+The `fractalx.admin.datasource` block configures the admin service's own database. The `fractalx.services.*` blocks configure the datasource for each generated microservice.
 
 ---
 
@@ -660,6 +668,70 @@ management:
 ## 16. Admin Dashboard
 
 The admin service runs at **http://localhost:9090**. Access it with the default credentials `admin / admin`.
+
+### Admin Service Database Persistence
+
+By default the admin service stores users and settings **in-memory** (resets on every restart). Activate the `db` Spring profile to persist them to a SQL database via JPA + Flyway.
+
+#### 1. Configure in `fractalx-config.yml` before decomposition (recommended)
+
+Add this block **before** running `mvn fractalx:decompose`. FractalX bakes the actual values directly into the generated `application-db.yml` so no env vars are needed at runtime:
+
+```yaml
+fractalx:
+  admin:
+    datasource:
+      url: jdbc:mysql://localhost:3306/admin_db?useSSL=false&serverTimezone=UTC
+      username: admin_user
+      password: secret
+      driver-class-name: com.mysql.cj.jdbc.Driver   # optional — auto-detected from URL
+```
+
+#### 2. Activate the `db` profile
+
+```bash
+# Option A — Maven run flag
+cd target/generated-services/admin-service
+mvn spring-boot:run -Dspring-boot.run.profiles=db
+
+# Option B — environment variable
+SPRING_PROFILES_ACTIVE=db mvn spring-boot:run
+
+# Option C — Docker Compose
+# Add to admin-service environment in docker-compose.yml:
+#   SPRING_PROFILES_ACTIVE: db
+```
+
+#### Supported databases
+
+| Database | JDBC URL pattern | Driver class |
+|----------|-----------------|--------------|
+| H2 (embedded, no setup) | `jdbc:h2:./admin-service;DB_CLOSE_DELAY=-1;MODE=MySQL` | `org.h2.Driver` |
+| MySQL 8+ | `jdbc:mysql://localhost:3306/admin_db?useSSL=false&serverTimezone=UTC` | `com.mysql.cj.jdbc.Driver` |
+| PostgreSQL 15+ | `jdbc:postgresql://localhost:5432/admin_db` | `org.postgresql.Driver` |
+
+For MySQL or PostgreSQL, uncomment the corresponding driver dependency in `admin-service/pom.xml` (lines are present and commented out).
+
+#### Schema
+
+Flyway runs automatically when the `db` profile is active and creates three tables:
+
+| Table | Contents |
+|-------|----------|
+| `admin_users` | User accounts (BCrypt-hashed passwords, active flag) |
+| `admin_user_roles` | User ↔ role join table (ROLE_ADMIN, ROLE_OPERATOR, ROLE_VIEWER) |
+| `admin_settings` | Singleton settings row (site name, theme, session timeout) |
+
+The schema (`V1__admin_schema.sql`) is compatible with H2, MySQL 8+, and PostgreSQL 15+.
+
+#### Runtime env vars (when not baked from `fractalx-config.yml`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADMIN_DB_URL` | H2 embedded | JDBC connection URL |
+| `ADMIN_DB_USERNAME` | `sa` | Database username |
+| `ADMIN_DB_PASSWORD` | *(empty)* | Database password |
+| `ADMIN_DB_DRIVER` | `org.h2.Driver` | JDBC driver class name |
 
 ### Dashboard sections
 
@@ -870,6 +942,10 @@ All values from environment variables. Activated with `SPRING_PROFILES_ACTIVE=do
 | `SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL |
 | `SMTP_HOST` | — | SMTP server for email alerts |
 | `ALERT_EMAIL_TO` | — | Alert recipient email address |
+| `ADMIN_DB_URL` | H2 embedded | Admin service JDBC URL (only used when `db` profile is active) |
+| `ADMIN_DB_USERNAME` | `sa` | Admin service DB username |
+| `ADMIN_DB_PASSWORD` | *(empty)* | Admin service DB password |
+| `ADMIN_DB_DRIVER` | `org.h2.Driver` | Admin service JDBC driver class name |
 
 ---
 

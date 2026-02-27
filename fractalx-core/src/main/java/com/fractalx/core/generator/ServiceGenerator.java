@@ -139,7 +139,7 @@ public class ServiceGenerator {
             generateApiGateway(modules);
         }
 
-        adminServiceGenerator.generateAdminService(modules, outputRoot);
+        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot);
 
         // Generate saga orchestrator service if any sagas were detected
         sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);

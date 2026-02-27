@@ -228,7 +228,7 @@ class AdminServicesDetailGenerator {
 
                     /** Full detail for one service: health, metrics snapshot, dependencies, commands. */
                     @GetMapping("/{name}/detail")
-                    public ResponseEntity<Map<String, Object>> getServiceDetail(@PathVariable String name) {
+                    public ResponseEntity<Map<String, Object>> getServiceDetail(@PathVariable("name") String name) {
                         return registry.findByName(name).map(meta -> {
                             Map<String, Object> detail = new LinkedHashMap<>();
                             detail.put("meta",       meta);
@@ -241,7 +241,7 @@ class AdminServicesDetailGenerator {
 
                     /** Proxies to the service's /actuator/health endpoint. */
                     @GetMapping("/{name}/health")
-                    public ResponseEntity<Object> getServiceHealth(@PathVariable String name) {
+                    public ResponseEntity<Object> getServiceHealth(@PathVariable("name") String name) {
                         return registry.findByName(name).map(meta -> {
                             if (meta.port() == 0) return ResponseEntity.ok((Object) Map.of("status", "UNKNOWN"));
                             try {
@@ -256,7 +256,7 @@ class AdminServicesDetailGenerator {
 
                     /** Proxies to the service's /actuator/metrics endpoint. */
                     @GetMapping("/{name}/metrics")
-                    public ResponseEntity<Object> getServiceMetrics(@PathVariable String name) {
+                    public ResponseEntity<Object> getServiceMetrics(@PathVariable("name") String name) {
                         return registry.findByName(name).map(meta -> {
                             if (meta.port() == 0)
                                 return ResponseEntity.ok((Object) Map.of("error", "No metrics port configured"));
@@ -272,7 +272,7 @@ class AdminServicesDetailGenerator {
 
                     /** Returns the latest deployment record + stages for a service. */
                     @GetMapping("/{name}/deployment")
-                    public ResponseEntity<Object> getDeployment(@PathVariable String name) {
+                    public ResponseEntity<Object> getDeployment(@PathVariable("name") String name) {
                         DeploymentTracker.DeploymentRecord record = deploymentTracker.getLatest(name);
                         if (record == null) return ResponseEntity.notFound().build();
                         return ResponseEntity.ok(record);
@@ -281,13 +281,13 @@ class AdminServicesDetailGenerator {
                     /** Returns the full deployment history for a service. */
                     @GetMapping("/{name}/history")
                     public ResponseEntity<List<DeploymentTracker.DeploymentRecord>> getHistory(
-                            @PathVariable String name) {
+                            @PathVariable("name") String name) {
                         return ResponseEntity.ok(deploymentTracker.getHistory(name));
                     }
 
                     /** Returns docker-compose lifecycle commands (start/stop/restart/logs). */
                     @GetMapping("/{name}/commands")
-                    public ResponseEntity<Map<String, String>> getLifecycleCommands(@PathVariable String name) {
+                    public ResponseEntity<Map<String, String>> getLifecycleCommands(@PathVariable("name") String name) {
                         return ResponseEntity.ok(buildCommands(name));
                     }
 
@@ -298,7 +298,7 @@ class AdminServicesDetailGenerator {
                         try {
                             String resp = restTemplate.getForObject(
                                     "http://localhost:" + meta.port() + "/actuator/health", String.class);
-                            return (resp != null && resp.contains("\"UP\"")) ? "UP" : "DOWN";
+                            return (resp != null && resp.contains("UP")) ? "UP" : "DOWN";
                         } catch (Exception e) {
                             return "DOWN";
                         }

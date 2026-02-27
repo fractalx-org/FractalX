@@ -95,10 +95,59 @@ class AdminPomGenerator {
                             <artifactId>font-awesome</artifactId>
                             <version>6.4.0</version>
                         </dependency>
+
+                        <!-- ── Database (active when spring.profiles.active=db) ── -->
+                        <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-data-jpa</artifactId>
+                        </dependency>
+                        <dependency>
+                            <groupId>org.flywaydb</groupId>
+                            <artifactId>flyway-core</artifactId>
+                        </dependency>
+
+                        <!-- H2 embedded — default database for quick start (no setup required) -->
+                        <dependency>
+                            <groupId>com.h2database</groupId>
+                            <artifactId>h2</artifactId>
+                            <scope>runtime</scope>
+                        </dependency>
+
+                        <!--
+                          MySQL — uncomment + add flyway-mysql for MySQL databases:
+                        <dependency>
+                            <groupId>com.mysql</groupId>
+                            <artifactId>mysql-connector-j</artifactId>
+                            <scope>runtime</scope>
+                        </dependency>
+                        <dependency>
+                            <groupId>org.flywaydb</groupId>
+                            <artifactId>flyway-mysql</artifactId>
+                        </dependency>
+                        -->
+
+                        <!--
+                          PostgreSQL — uncomment for PostgreSQL databases:
+                        <dependency>
+                            <groupId>org.postgresql</groupId>
+                            <artifactId>postgresql</artifactId>
+                            <scope>runtime</scope>
+                        </dependency>
+                        -->
                     </dependencies>
 
                     <build>
                         <plugins>
+                            <plugin>
+                                <groupId>org.apache.maven.plugins</groupId>
+                                <artifactId>maven-compiler-plugin</artifactId>
+                                <version>3.11.0</version>
+                                <configuration>
+                                    <!-- Preserve parameter names in bytecode.
+                                         Required by Spring MVC for @PathVariable name resolution. -->
+                                    <parameters>true</parameters>
+                                </configuration>
+                            </plugin>
                             <plugin>
                                 <groupId>org.springframework.boot</groupId>
                                 <artifactId>spring-boot-maven-plugin</artifactId>
