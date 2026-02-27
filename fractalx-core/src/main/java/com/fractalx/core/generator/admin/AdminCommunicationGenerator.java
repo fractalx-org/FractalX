@@ -129,7 +129,7 @@ class AdminCommunicationGenerator {
 
                     /** Returns NetScope dependency information for a single service. */
                     @GetMapping("/netscope/{service}")
-                    public ResponseEntity<Object> getNetScopeForService(@PathVariable String service) {
+                    public ResponseEntity<Object> getNetScopeForService(@PathVariable("service") String service) {
                         return registry.findByName(service).map(meta -> {
                             Map<String, Object> result = new LinkedHashMap<>();
                             result.put("service", meta.name());

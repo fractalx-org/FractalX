@@ -12,10 +12,18 @@ class AdminConfigGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(AdminConfigGenerator.class);
 
-    void generate(Path srcMainResources) throws IOException {
+    /**
+     * Generates config files, optionally baking in database connection details.
+     *
+     * @param srcMainResources target resources directory
+     * @param db               admin DB config read from {@code fractalx-config.yml}, or
+     *                         {@code null} to generate env-var placeholders instead
+     */
+    void generate(Path srcMainResources, AdminDbConfig db) throws IOException {
         generateApplicationYml(srcMainResources);
+        generateApplicationDbYml(srcMainResources, db);
         generateAlertingYml(srcMainResources);
-        log.debug("Generated admin application.yml and alerting.yml");
+        log.debug("Generated admin application.yml, application-db.yml, and alerting.yml");
     }
 
     private void generateApplicationYml(Path srcMainResources) throws IOException {
@@ -25,6 +33,17 @@ class AdminConfigGenerator {
                     name: admin-service
                   thymeleaf:
                     cache: false
+                  # ── Default (memory) mode: disable JPA/DataSource/Flyway autoconfiguration ──
+                  # Activate db mode with: -Dspring.profiles.active=db (see application-db.yml)
+                  autoconfigure:
+                    exclude:
+                      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+                      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+                      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+                  data:
+                    jpa:
+                      repositories:
+                        enabled: false
 
                 server:
                   port: 9090
@@ -48,6 +67,75 @@ class AdminConfigGenerator {
                     com.fractalx.admin: DEBUG
                 """;
         Files.writeString(srcMainResources.resolve("application.yml"), content);
+    }
+
+    private void generateApplicationDbYml(Path srcMainResources, AdminDbConfig db) throws IOException {
+        // Datasource values: baked from fractalx-config.yml when available, else env-var placeholders
+        final String sourceNote;
+        final String urlVal;
+        final String userVal;
+        final String passVal;
+        final String driverVal;
+
+        if (db != null) {
+            sourceNote = "# Source: fractalx-config.yml → fractalx.admin.datasource\n";
+            urlVal     = db.url();
+            userVal    = db.username() != null ? db.username() : "";
+            passVal    = db.password() != null ? db.password() : "";
+            driverVal  = db.driverClassName() != null ? db.driverClassName() : "org.h2.Driver";
+        } else {
+            sourceNote = "";
+            urlVal     = "${ADMIN_DB_URL:jdbc:h2:./admin-service;DB_CLOSE_DELAY=-1;MODE=MySQL}";
+            userVal    = "${ADMIN_DB_USERNAME:sa}";
+            passVal    = "${ADMIN_DB_PASSWORD:}";
+            driverVal  = "${ADMIN_DB_DRIVER:org.h2.Driver}";
+        }
+
+        String content = "# ================================================================\n"
+                + "# FractalX Admin Service — Database Profile\n"
+                + "# ================================================================\n"
+                + sourceNote
+                + "# Activate: -Dspring.profiles.active=db\n"
+                + "#        or: SPRING_PROFILES_ACTIVE=db  (environment variable)\n"
+                + "#        or: add spring.profiles.active=db in application.yml\n"
+                + "#\n"
+                + "# Supported databases:\n"
+                + "#   H2 (default, embedded — no setup required):\n"
+                + "#     url: jdbc:h2:./admin-service;DB_CLOSE_DELAY=-1;MODE=MySQL\n"
+                + "#\n"
+                + "#   MySQL 8+:\n"
+                + "#     url: jdbc:mysql://localhost:3306/admin_db?useSSL=false&serverTimezone=UTC\n"
+                + "#     driver-class-name: com.mysql.cj.jdbc.Driver\n"
+                + "#     Also uncomment mysql-connector-j + flyway-mysql in pom.xml\n"
+                + "#\n"
+                + "#   PostgreSQL 15+:\n"
+                + "#     url: jdbc:postgresql://localhost:5432/admin_db\n"
+                + "#     driver-class-name: org.postgresql.Driver\n"
+                + "#     Also uncomment postgresql driver in pom.xml\n"
+                + "# ================================================================\n\n"
+                + "spring:\n"
+                + "  autoconfigure:\n"
+                + "    exclude: []   # re-enable DataSource + JPA + Flyway (overrides base config)\n"
+                + "  data:\n"
+                + "    jpa:\n"
+                + "      repositories:\n"
+                + "        enabled: true\n"
+                + "  datasource:\n"
+                + "    url: " + urlVal + "\n"
+                + "    username: " + userVal + "\n"
+                + "    password: " + passVal + "\n"
+                + "    driver-class-name: " + driverVal + "\n"
+                + "  jpa:\n"
+                + "    hibernate:\n"
+                + "      ddl-auto: validate\n"
+                + "    show-sql: false\n"
+                + "    open-in-view: false\n"
+                + "  flyway:\n"
+                + "    enabled: true\n"
+                + "    locations: classpath:db/migration\n"
+                + "    baseline-on-migrate: true   # safe for databases with pre-existing schema\n";
+
+        Files.writeString(srcMainResources.resolve("application-db.yml"), content);
     }
 
     private void generateAlertingYml(Path srcMainResources) throws IOException {

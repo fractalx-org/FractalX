@@ -81,7 +81,7 @@ class AdminDataConsistencyGenerator {
 
                     public boolean hasSagas() { return !SAGAS.isEmpty(); }
                 }
-                """.formatted(sagaEntries.toString());
+                """.formatted(stripTrailingComma(sagaEntries.toString()));
 
         Files.writeString(pkg.resolve("SagaMetaRegistry.java"), content);
     }
@@ -184,7 +184,7 @@ class AdminDataConsistencyGenerator {
 
                     /** Proxies to saga-orchestrator filtered by sagaId. */
                     @GetMapping("/sagas/{sagaId}/instances")
-                    public ResponseEntity<Object> getSagaInstances(@PathVariable String sagaId) {
+                    public ResponseEntity<Object> getSagaInstances(@PathVariable("sagaId") String sagaId) {
                         try {
                             Object resp = restTemplate.getForObject(
                                     "http://localhost:" + SAGA_ORCHESTRATOR_PORT + "/saga?sagaId=" + sagaId,
@@ -260,6 +260,11 @@ class AdminDataConsistencyGenerator {
     }
 
     // -------------------------------------------------------------------------
+
+    /** Removes a trailing {@code ,\n} so List.of() method calls don't end with a stray comma. */
+    private String stripTrailingComma(String s) {
+        return s.endsWith(",\n") ? s.substring(0, s.length() - 2) + "\n" : s;
+    }
 
     private String toCamelCase(String kebabCase) {
         String[] parts = kebabCase.split("-");

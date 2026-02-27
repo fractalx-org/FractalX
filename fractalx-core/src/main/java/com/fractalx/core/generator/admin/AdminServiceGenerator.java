@@ -28,7 +28,8 @@ import java.util.List;
  *   <li>{@link AdminServicesDetailGenerator} — ServiceMetaRegistry, DeploymentTracker, ServicesController</li>
  *   <li>{@link AdminCommunicationGenerator} — CommunicationController (NetScope, gateway, discovery)</li>
  *   <li>{@link AdminDataConsistencyGenerator} — SagaMetaRegistry, DataConsistencyController</li>
- *   <li>{@link AdminUserManagementGenerator} — UserStore, AdminUser, UserController, Settings</li>
+ *   <li>{@link AdminUserManagementGenerator} — UserStoreService interface, UserStore (memory), AdminUser entity, UserController</li>
+ *   <li>{@link AdminDatabaseGenerator} — JPA repos + JpaUserStore + JpaSettingsStore + Flyway SQL (db profile)</li>
  *   <li>{@link AdminConfigManagementGenerator} — ServiceConfigStore, ConfigController</li>
  * </ul>
  */
@@ -55,6 +56,7 @@ public class AdminServiceGenerator {
     private final AdminCommunicationGenerator     communicationGenerator;
     private final AdminDataConsistencyGenerator   dataConsistencyGenerator;
     private final AdminUserManagementGenerator    userManagementGenerator;
+    private final AdminDatabaseGenerator          databaseGenerator;
     private final AdminConfigManagementGenerator  configManagementGenerator;
 
     public AdminServiceGenerator() {
@@ -73,10 +75,12 @@ public class AdminServiceGenerator {
         this.communicationGenerator   = new AdminCommunicationGenerator();
         this.dataConsistencyGenerator = new AdminDataConsistencyGenerator();
         this.userManagementGenerator  = new AdminUserManagementGenerator();
+        this.databaseGenerator        = new AdminDatabaseGenerator();
         this.configManagementGenerator= new AdminConfigManagementGenerator();
     }
 
-    public void generateAdminService(List<FractalModule> modules, Path outputRoot) throws IOException {
+    public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot)
+            throws IOException {
         log.info("Generating Admin Service...");
 
         Path serviceRoot   = outputRoot.resolve(ADMIN_SERVICE_NAME);
@@ -91,6 +95,9 @@ public class AdminServiceGenerator {
         Files.createDirectories(staticPath.resolve("js"));
         Files.createDirectories(templatesPath);
 
+        // Read optional admin DB config from fractalx-config.yml (null if absent)
+        AdminDbConfig dbConfig = AdminDbConfig.readFrom(sourceRoot);
+
         // Core infrastructure
         pomGenerator.generate(serviceRoot);
         appGenerator.generate(srcMainJava, BASE_PACKAGE);
@@ -98,7 +105,7 @@ public class AdminServiceGenerator {
         webConfigGenerator.generate(srcMainJava, BASE_PACKAGE);
         controllerGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         modelGenerator.generate(srcMainJava, BASE_PACKAGE);
-        configGenerator.generate(srcMainRes);
+        configGenerator.generate(srcMainRes, dbConfig);
         staticAssetsGenerator.generate(staticPath);
 
         // Service topology + existing observability
@@ -110,6 +117,7 @@ public class AdminServiceGenerator {
         communicationGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         dataConsistencyGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         userManagementGenerator.generate(srcMainJava, BASE_PACKAGE);
+        databaseGenerator.generate(srcMainJava, BASE_PACKAGE);
         configManagementGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
 
         // Template last (depends on all sub-systems being set up first)
