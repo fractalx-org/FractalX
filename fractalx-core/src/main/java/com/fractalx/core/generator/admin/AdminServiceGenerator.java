@@ -16,14 +16,20 @@ import java.util.List;
  * <ul>
  *   <li>{@link AdminPomGenerator} — pom.xml</li>
  *   <li>{@link AdminAppGenerator} — Spring Boot Application class</li>
- *   <li>{@link AdminSecurityConfigGenerator} — Spring Security config</li>
+ *   <li>{@link AdminSecurityConfigGenerator} — Spring Security (UserStore-backed, role-based)</li>
  *   <li>{@link AdminWebConfigGenerator} — MVC web config</li>
  *   <li>{@link AdminControllerGenerator} — Dashboard controller</li>
- *   <li>{@link AdminModelGenerator} — ServiceInfo model</li>
- *   <li>{@link AdminConfigGenerator} — application.yml</li>
- *   <li>{@link AdminTemplateGenerator} — Thymeleaf HTML templates</li>
+ *   <li>{@link AdminModelGenerator} — ServiceInfo, ServiceDetail, NetScopeLink, SagaInfo models</li>
+ *   <li>{@link AdminConfigGenerator} — application.yml + alerting.yml</li>
+ *   <li>{@link AdminTemplateGenerator} — Thymeleaf HTML templates (9-section dashboard)</li>
  *   <li>{@link AdminStaticAssetsGenerator} — CSS/JS static files</li>
+ *   <li>{@link AdminTopologyGenerator} — topology graph + health/services REST API</li>
  *   <li>{@link AdminObservabilityGenerator} — alert system + observability REST API</li>
+ *   <li>{@link AdminServicesDetailGenerator} — ServiceMetaRegistry, DeploymentTracker, ServicesController</li>
+ *   <li>{@link AdminCommunicationGenerator} — CommunicationController (NetScope, gateway, discovery)</li>
+ *   <li>{@link AdminDataConsistencyGenerator} — SagaMetaRegistry, DataConsistencyController</li>
+ *   <li>{@link AdminUserManagementGenerator} — UserStore, AdminUser, UserController, Settings</li>
+ *   <li>{@link AdminConfigManagementGenerator} — ServiceConfigStore, ConfigController</li>
  * </ul>
  */
 public class AdminServiceGenerator {
@@ -34,40 +40,50 @@ public class AdminServiceGenerator {
     private static final String ADMIN_SERVICE_NAME = "admin-service";
     private static final String BASE_PACKAGE       = "com.fractalx.admin";
 
-    private final AdminPomGenerator             pomGenerator;
-    private final AdminAppGenerator             appGenerator;
-    private final AdminSecurityConfigGenerator  securityConfigGenerator;
-    private final AdminWebConfigGenerator       webConfigGenerator;
-    private final AdminControllerGenerator      controllerGenerator;
-    private final AdminModelGenerator           modelGenerator;
-    private final AdminConfigGenerator          configGenerator;
-    private final AdminTemplateGenerator        templateGenerator;
-    private final AdminStaticAssetsGenerator    staticAssetsGenerator;
-    private final AdminTopologyGenerator        topologyGenerator;
-    private final AdminObservabilityGenerator   observabilityGenerator;
+    private final AdminPomGenerator               pomGenerator;
+    private final AdminAppGenerator               appGenerator;
+    private final AdminSecurityConfigGenerator    securityConfigGenerator;
+    private final AdminWebConfigGenerator         webConfigGenerator;
+    private final AdminControllerGenerator        controllerGenerator;
+    private final AdminModelGenerator             modelGenerator;
+    private final AdminConfigGenerator            configGenerator;
+    private final AdminTemplateGenerator          templateGenerator;
+    private final AdminStaticAssetsGenerator      staticAssetsGenerator;
+    private final AdminTopologyGenerator          topologyGenerator;
+    private final AdminObservabilityGenerator     observabilityGenerator;
+    private final AdminServicesDetailGenerator    servicesDetailGenerator;
+    private final AdminCommunicationGenerator     communicationGenerator;
+    private final AdminDataConsistencyGenerator   dataConsistencyGenerator;
+    private final AdminUserManagementGenerator    userManagementGenerator;
+    private final AdminConfigManagementGenerator  configManagementGenerator;
 
     public AdminServiceGenerator() {
-        this.pomGenerator            = new AdminPomGenerator();
-        this.appGenerator            = new AdminAppGenerator();
-        this.securityConfigGenerator = new AdminSecurityConfigGenerator();
-        this.webConfigGenerator      = new AdminWebConfigGenerator();
-        this.controllerGenerator     = new AdminControllerGenerator();
-        this.modelGenerator          = new AdminModelGenerator();
-        this.configGenerator         = new AdminConfigGenerator();
-        this.templateGenerator       = new AdminTemplateGenerator();
-        this.staticAssetsGenerator   = new AdminStaticAssetsGenerator();
-        this.topologyGenerator       = new AdminTopologyGenerator();
-        this.observabilityGenerator  = new AdminObservabilityGenerator();
+        this.pomGenerator             = new AdminPomGenerator();
+        this.appGenerator             = new AdminAppGenerator();
+        this.securityConfigGenerator  = new AdminSecurityConfigGenerator();
+        this.webConfigGenerator       = new AdminWebConfigGenerator();
+        this.controllerGenerator      = new AdminControllerGenerator();
+        this.modelGenerator           = new AdminModelGenerator();
+        this.configGenerator          = new AdminConfigGenerator();
+        this.templateGenerator        = new AdminTemplateGenerator();
+        this.staticAssetsGenerator    = new AdminStaticAssetsGenerator();
+        this.topologyGenerator        = new AdminTopologyGenerator();
+        this.observabilityGenerator   = new AdminObservabilityGenerator();
+        this.servicesDetailGenerator  = new AdminServicesDetailGenerator();
+        this.communicationGenerator   = new AdminCommunicationGenerator();
+        this.dataConsistencyGenerator = new AdminDataConsistencyGenerator();
+        this.userManagementGenerator  = new AdminUserManagementGenerator();
+        this.configManagementGenerator= new AdminConfigManagementGenerator();
     }
 
     public void generateAdminService(List<FractalModule> modules, Path outputRoot) throws IOException {
         log.info("Generating Admin Service...");
 
-        Path serviceRoot  = outputRoot.resolve(ADMIN_SERVICE_NAME);
-        Path srcMainJava  = serviceRoot.resolve("src/main/java");
-        Path srcMainRes   = serviceRoot.resolve("src/main/resources");
-        Path staticPath   = srcMainRes.resolve("static");
-        Path templatesPath= srcMainRes.resolve("templates");
+        Path serviceRoot   = outputRoot.resolve(ADMIN_SERVICE_NAME);
+        Path srcMainJava   = serviceRoot.resolve("src/main/java");
+        Path srcMainRes    = serviceRoot.resolve("src/main/resources");
+        Path staticPath    = srcMainRes.resolve("static");
+        Path templatesPath = srcMainRes.resolve("templates");
 
         Files.createDirectories(srcMainJava);
         Files.createDirectories(srcMainRes);
@@ -75,6 +91,7 @@ public class AdminServiceGenerator {
         Files.createDirectories(staticPath.resolve("js"));
         Files.createDirectories(templatesPath);
 
+        // Core infrastructure
         pomGenerator.generate(serviceRoot);
         appGenerator.generate(srcMainJava, BASE_PACKAGE);
         securityConfigGenerator.generate(srcMainJava, BASE_PACKAGE);
@@ -82,10 +99,21 @@ public class AdminServiceGenerator {
         controllerGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         modelGenerator.generate(srcMainJava, BASE_PACKAGE);
         configGenerator.generate(srcMainRes);
-        templateGenerator.generate(templatesPath, modules);
         staticAssetsGenerator.generate(staticPath);
+
+        // Service topology + existing observability
         topologyGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         observabilityGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+
+        // New enhanced sub-systems
+        servicesDetailGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        communicationGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        dataConsistencyGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        userManagementGenerator.generate(srcMainJava, BASE_PACKAGE);
+        configManagementGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+
+        // Template last (depends on all sub-systems being set up first)
+        templateGenerator.generate(templatesPath, modules);
 
         log.info("Generated Admin Service on port {}", ADMIN_PORT);
     }
