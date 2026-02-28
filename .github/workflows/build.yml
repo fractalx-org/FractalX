@@ -35,4 +35,8 @@ jobs:
       - name: Build and analyze
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=Project-FractalX_FractalX -f fractalx-parent/pom.xml
+        run: |
+          mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+            -Dsonar.projectKey=Project-FractalX_FractalX \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -f fractalx-parent/pom.xml

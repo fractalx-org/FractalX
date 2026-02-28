@@ -30,7 +30,15 @@
         <spring-modulith.version>1.1.0</spring-modulith.version>
         <javaparser.version>3.25.7</javaparser.version>
         <eclipse-jdt.version>3.36.0</eclipse-jdt.version>
+
+        <!-- SonarCloud -->
         <sonar.organization>project-fractalx</sonar.organization>
+        <sonar.coverage.jacoco.xmlReportPaths>
+            ${project.basedir}/../fractalx-core/target/site/jacoco/jacoco.xml,
+            ${project.basedir}/../fractalx-annotations/target/site/jacoco/jacoco.xml,
+            ${project.basedir}/../fractalx-runtime/target/site/jacoco/jacoco.xml,
+            ${project.basedir}/../fractalx-maven-plugin/target/site/jacoco/jacoco.xml
+        </sonar.coverage.jacoco.xmlReportPaths>
     </properties>
 
     <dependencyManagement>
@@ -77,7 +85,33 @@
                     <artifactId>maven-compiler-plugin</artifactId>
                     <version>3.11.0</version>
                 </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>0.8.11</version>
+                </plugin>
             </plugins>
         </pluginManagement>
+
+        <plugins>
+            <!-- JaCoCo: instrument tests + produce XML report for SonarCloud -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <!-- Attach Java agent before tests run -->
+                    <execution>
+                        <id>jacoco-prepare-agent</id>
+                        <goals><goal>prepare-agent</goal></goals>
+                    </execution>
+                    <!-- Generate XML report after tests finish -->
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>verify</phase>
+                        <goals><goal>report</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>
