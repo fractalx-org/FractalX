@@ -31,6 +31,8 @@ import java.util.List;
  *   <li>{@link AdminUserManagementGenerator} — UserStoreService interface, UserStore (memory), AdminUser entity, UserController</li>
  *   <li>{@link AdminDatabaseGenerator} — JPA repos + JpaUserStore + JpaSettingsStore + Flyway SQL (db profile)</li>
  *   <li>{@link AdminConfigManagementGenerator} — ServiceConfigStore, ConfigController</li>
+ *   <li>{@link AdminAnalyticsGenerator} — MetricsHistoryStore, MetricsCollector, AnalyticsController (/api/analytics/**)</li>
+ *   <li>{@link AdminApiExplorerGenerator} — ApiExplorerController (/api/explorer/**)</li>
  * </ul>
  */
 public class AdminServiceGenerator {
@@ -58,6 +60,8 @@ public class AdminServiceGenerator {
     private final AdminUserManagementGenerator    userManagementGenerator;
     private final AdminDatabaseGenerator          databaseGenerator;
     private final AdminConfigManagementGenerator  configManagementGenerator;
+    private final AdminAnalyticsGenerator         analyticsGenerator;
+    private final AdminApiExplorerGenerator       apiExplorerGenerator;
 
     public AdminServiceGenerator() {
         this.pomGenerator             = new AdminPomGenerator();
@@ -77,6 +81,8 @@ public class AdminServiceGenerator {
         this.userManagementGenerator  = new AdminUserManagementGenerator();
         this.databaseGenerator        = new AdminDatabaseGenerator();
         this.configManagementGenerator= new AdminConfigManagementGenerator();
+        this.analyticsGenerator       = new AdminAnalyticsGenerator();
+        this.apiExplorerGenerator     = new AdminApiExplorerGenerator();
     }
 
     public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot)
@@ -119,6 +125,8 @@ public class AdminServiceGenerator {
         userManagementGenerator.generate(srcMainJava, BASE_PACKAGE);
         databaseGenerator.generate(srcMainJava, BASE_PACKAGE);
         configManagementGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        analyticsGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        apiExplorerGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
 
         // Template last (depends on all sub-systems being set up first)
         templateGenerator.generate(templatesPath, modules);
