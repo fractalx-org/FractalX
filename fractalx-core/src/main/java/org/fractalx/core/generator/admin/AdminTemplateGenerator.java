@@ -132,9 +132,12 @@ class AdminTemplateGenerator {
             + buildSectionAlerts()
             + buildSectionTracesLogs()
             + buildSectionSettings()
+            + buildSectionAnalytics()
+            + buildSectionApiExplorer()
             + "</div>\n"
             + "</div>\n\n"
             + buildModals()
+            + "<script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js\"></script>\n"
             + "<script th:src=\"@{/webjars/jquery/3.7.0/jquery.min.js}\"></script>\n"
             + "<script th:src=\"@{/webjars/bootstrap/5.3.0/js/bootstrap.bundle.min.js}\"></script>\n"
             + "<script>\n"
@@ -144,6 +147,9 @@ class AdminTemplateGenerator {
             + buildScriptsData()
             + buildScriptsObservabilityAndAlerts()
             + buildScriptsTracesLogsSettings()
+            + buildScriptsAnalytics()
+            + buildScriptsAnalyticsB()
+            + buildScriptsApiExplorer()
             + buildScriptsMobileNav()
             + "</script>\n</body>\n</html>\n";
     }
@@ -151,7 +157,7 @@ class AdminTemplateGenerator {
     // ---- HTML HEAD ----------------------------------------------------------
 
     private String buildHtmlHead() {
-        return buildHtmlHeadA() + buildHtmlHeadB();
+        return buildHtmlHeadA() + buildHtmlHeadB() + buildHtmlHeadC();
     }
 
     private String buildHtmlHeadA() {
@@ -380,6 +386,43 @@ class AdminTemplateGenerator {
                         .ms-auto{margin-left:auto!important}
                         .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
                         @media(max-width:768px){.two-col{grid-template-columns:1fr}}
+                """;
+    }
+
+    private String buildHtmlHeadC() {
+        return """
+                        /* ── Analytics ── */
+                        .metric-card{background:var(--surf);border:1px solid var(--bdr);
+                                     border-radius:var(--r);padding:16px;text-align:center}
+                        .metric-card .val{font-size:28px;font-weight:700;color:var(--t1);line-height:1}
+                        .metric-card .lbl{font-size:12px;color:var(--t2);margin-top:4px}
+                        .chart-box{background:var(--surf);border:1px solid var(--bdr);
+                                   border-radius:var(--r);padding:16px;position:relative}
+                        .chart-box canvas{max-height:220px}
+                        .metrics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+                        .svc-metric-row{display:flex;align-items:center;gap:10px;padding:10px 14px;
+                                        background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:8px}
+                        .svc-metric-row .svc-name{font-weight:500;min-width:130px}
+                        .svc-chip{font-size:11px;padding:2px 8px;border-radius:10px;background:#f3f4f6;color:var(--t2)}
+                        /* ── API Explorer ── */
+                        .explorer-layout{display:grid;grid-template-columns:320px 1fr;gap:12px;min-height:500px}
+                        @media(max-width:900px){.explorer-layout{grid-template-columns:1fr}}
+                        .ep-list{max-height:520px;overflow-y:auto}
+                        .ep-item{padding:8px 10px;border-radius:6px;cursor:pointer;
+                                 display:flex;align-items:center;gap:8px;border:1px solid transparent}
+                        .ep-item:hover{background:#f3f4f6;border-color:var(--bdr)}
+                        .ep-item.active{background:#eff6ff;border-color:#bfdbfe}
+                        .method-badge{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;min-width:44px;text-align:center}
+                        .method-GET{background:#d1fae5;color:#065f46}
+                        .method-POST{background:#dbeafe;color:#1e40af}
+                        .method-PUT{background:#fef3c7;color:#92400e}
+                        .method-DELETE{background:#fee2e2;color:#991b1b}
+                        .method-PATCH{background:#ede9fe;color:#5b21b6}
+                        .response-area{font-family:monospace;font-size:12px;max-height:300px;
+                                       overflow:auto;white-space:pre-wrap;word-break:break-all;
+                                       background:#1e1e2e;color:#cdd6f4;border-radius:6px;padding:12px}
+                        .status-ok{color:#22c55e;font-weight:600}
+                        .status-err{color:#ef4444;font-weight:600}
                     </style>
                 </head>
                 """;
@@ -427,6 +470,15 @@ class AdminTemplateGenerator {
                             </a>
                             <a href="#" onclick="showSection('logs');closeSidebar()" id="nav-logs">
                                 <i class="fas fa-file-alt ni"></i> Logs
+                            </a>
+                        </div>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Developer</div>
+                            <a href="#" onclick="showSection('analytics');closeSidebar()" id="nav-analytics">
+                                <i class="fas fa-chart-bar ni"></i> Analytics
+                            </a>
+                            <a href="#" onclick="showSection('explorer');closeSidebar()" id="nav-explorer">
+                                <i class="fas fa-terminal ni"></i> API Explorer
                             </a>
                         </div>
                         <div class="nav-grp">
@@ -1230,7 +1282,8 @@ class AdminTemplateGenerator {
                         communication: loadCommunicationData, data: loadDataConsistency,
                         observability: loadMetrics, alerts: loadAlerts,
                         traces: loadTraceServices, logs: loadLogServices,
-                        settings: loadSettingsSection
+                        settings: loadSettingsSection,
+                        analytics: loadAnalyticsSection, explorer: loadExplorerServices
                     };
                     if (fn[currentSection]) fn[currentSection]();
                     document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
@@ -2035,6 +2088,386 @@ class AdminTemplateGenerator {
                     setInterval(() => updateAlertBadge(
                         parseInt(document.getElementById('active-alert-count').textContent) || 0), 30000);
                 });
+                """;
+    }
+
+    // ---- SECTION: analytics -------------------------------------------------
+
+    private String buildSectionAnalytics() {
+        return """
+                <div class="section" id="section-analytics">
+                    <div class="page-header">
+                        <h1 class="page-title-h">Analytics</h1>
+                        <p class="page-sub">Real-time metrics collected from Actuator endpoints every 15 s</p>
+                    </div>
+
+                    <!-- Overview KPIs -->
+                    <div class="metrics-grid" id="analytics-kpis">
+                        <div class="metric-card"><div class="val" id="kpi-rps">-</div><div class="lbl">Total RPS</div></div>
+                        <div class="metric-card"><div class="val" id="kpi-cpu">-</div><div class="lbl">Avg CPU %</div></div>
+                        <div class="metric-card"><div class="val" id="kpi-err">-</div><div class="lbl">Avg Error %</div></div>
+                        <div class="metric-card"><div class="val" id="kpi-p99">-</div><div class="lbl">Avg P99 ms</div></div>
+                        <div class="metric-card"><div class="val" id="kpi-svcs">-</div><div class="lbl">Tracked</div></div>
+                    </div>
+
+                    <!-- Live per-service cards -->
+                    <div class="card-box mb-3">
+                        <div class="section-hdr">
+                            <span class="section-title">Live Metrics</span>
+                            <span class="text-muted" style="font-size:11px" id="analytics-live-ts"></span>
+                        </div>
+                        <div id="analytics-live-rows"><p class="text-muted p-3">Waiting for first data point…</p></div>
+                    </div>
+
+                    <!-- Charts -->
+                    <div class="two-col mb-3">
+                        <div class="chart-box">
+                            <div class="section-hdr"><span class="section-title">CPU % — select service</span>
+                                <select id="chart-svc-select" class="form-select form-select-sm w-auto" onchange="loadHistoryChart()"></select>
+                            </div>
+                            <canvas id="chart-cpu"></canvas>
+                        </div>
+                        <div class="chart-box">
+                            <div class="section-hdr"><span class="section-title">Heap % — same service</span></div>
+                            <canvas id="chart-heap"></canvas>
+                        </div>
+                    </div>
+                    <div class="two-col mb-3">
+                        <div class="chart-box">
+                            <div class="section-hdr"><span class="section-title">Request Rate (RPS)</span></div>
+                            <canvas id="chart-rps"></canvas>
+                        </div>
+                        <div class="chart-box">
+                            <div class="section-hdr"><span class="section-title">P99 Response Time (ms)</span></div>
+                            <canvas id="chart-p99"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Trends -->
+                    <div class="card-box">
+                        <div class="section-hdr"><span class="section-title">All-service RPS Trends</span></div>
+                        <canvas id="chart-trends" style="max-height:240px"></canvas>
+                    </div>
+                </div>
+                """;
+    }
+
+    // ---- SECTION: API Explorer ----------------------------------------------
+
+    private String buildSectionApiExplorer() {
+        return buildSectionApiExplorerA() + buildSectionApiExplorerB();
+    }
+
+    private String buildSectionApiExplorerA() {
+        return """
+                <div class="section" id="section-explorer">
+                    <div class="page-header">
+                        <h1 class="page-title-h">API Explorer</h1>
+                        <p class="page-sub">Browse endpoints and make REST calls directly from the browser</p>
+                    </div>
+                    <div class="explorer-layout">
+                        <!-- Left: endpoint list -->
+                        <div>
+                            <div class="card-box mb-2" style="padding:10px">
+                                <select id="explorer-svc-select" class="form-select form-select-sm mb-2"
+                                        onchange="loadServiceMappings()">
+                                    <option value="">— select service —</option>
+                                </select>
+                                <input type="text" id="explorer-filter" class="form-control form-control-sm"
+                                       placeholder="Filter endpoints…" oninput="filterEndpoints()">
+                            </div>
+                            <div class="ep-list card-box" id="ep-list" style="padding:8px">
+                                <p class="text-muted p-2" style="font-size:13px">Select a service above</p>
+                            </div>
+                        </div>
+                        <!-- Right: request builder -->
+                        <div>
+                            <div class="card-box mb-2">
+                                <div class="section-hdr"><span class="section-title">Request</span></div>
+                                <div class="d-flex gap-2 mb-2 flex-wrap">
+                                    <select id="req-method" class="form-select form-select-sm" style="width:90px">
+                                        <option>GET</option><option>POST</option><option>PUT</option>
+                                        <option>DELETE</option><option>PATCH</option>
+                                    </select>
+                                    <input type="text" id="req-url" class="form-control form-control-sm"
+                                           placeholder="http://localhost:8081/api/...">
+                                </div>
+                """;
+    }
+
+    private String buildSectionApiExplorerB() {
+        return """
+                                <div class="mb-2">
+                                    <label class="form-label" style="font-size:12px;font-weight:500">Headers (JSON)</label>
+                                    <textarea id="req-headers" class="form-control form-control-sm" rows="2"
+                                              style="font-family:monospace;font-size:12px"
+                                              placeholder='{"Authorization":"Bearer token"}'></textarea>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label" style="font-size:12px;font-weight:500">Body (JSON)</label>
+                                    <textarea id="req-body" class="form-control form-control-sm" rows="4"
+                                              style="font-family:monospace;font-size:12px"
+                                              placeholder='{"key":"value"}'></textarea>
+                                </div>
+                                <button class="btn btn-sm btn-primary" onclick="executeRequest()" id="btn-send">
+                                    <i class="fas fa-paper-plane"></i> Send
+                                </button>
+                            </div>
+                            <div class="card-box">
+                                <div class="section-hdr" id="resp-status-row">
+                                    <span class="section-title">Response</span>
+                                    <span id="resp-status-badge"></span>
+                                    <span id="resp-duration" class="text-muted" style="font-size:11px"></span>
+                                </div>
+                                <div class="mb-2">
+                                    <div style="font-size:11px;font-weight:500;margin-bottom:4px">Headers</div>
+                                    <div id="resp-headers" style="font-family:monospace;font-size:11px;
+                                         max-height:80px;overflow:auto;background:#f9fafb;
+                                         border-radius:6px;padding:8px;color:var(--t2)"></div>
+                                </div>
+                                <div style="font-size:11px;font-weight:500;margin-bottom:4px">Body</div>
+                                <div id="resp-body" class="response-area">No response yet.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """;
+    }
+
+    // ---- SCRIPTS: analytics -------------------------------------------------
+
+    private String buildScriptsAnalytics() {
+        return """
+                // ── Analytics ──────────────────────────────────────────────────────────────
+                let analyticsCharts = {};
+                let analyticsSSE = null;
+                const COLORS = ['#6366f1','#22c55e','#f59e0b','#ef4444','#06b6d4','#8b5cf6','#ec4899'];
+
+                function loadAnalyticsSection() {
+                    fetch('/api/analytics/overview')
+                        .then(r => r.json()).then(d => {
+                            document.getElementById('kpi-rps').textContent  = d.totalRps;
+                            document.getElementById('kpi-cpu').textContent  = d.avgCpuPct + '%';
+                            document.getElementById('kpi-err').textContent  = d.avgErrorRatePct + '%';
+                            document.getElementById('kpi-p99').textContent  = d.avgP99Ms;
+                            document.getElementById('kpi-svcs').textContent = d.trackedServices;
+                        }).catch(() => {});
+                    fetch('/api/analytics/realtime')
+                        .then(r => r.json()).then(renderLiveRows).catch(() => {});
+                    loadTrendsChart();
+                    populateSvcSelect();
+                    if (!analyticsSSE) startAnalyticsSSE();
+                }
+
+                function populateSvcSelect() {
+                    fetch('/api/analytics/realtime')
+                        .then(r => r.json()).then(data => {
+                            const sel = document.getElementById('chart-svc-select');
+                            const cur = sel.value;
+                            sel.innerHTML = Object.keys(data).map(s =>
+                                `<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join('');
+                            if (!cur && sel.options.length) loadHistoryChart();
+                        }).catch(() => {});
+                }
+
+                function renderLiveRows(data) {
+                    const wrap = document.getElementById('analytics-live-rows');
+                    if (!Object.keys(data).length) { wrap.innerHTML='<p class="text-muted p-3">No data yet.</p>'; return; }
+                    wrap.innerHTML = Object.entries(data).map(([svc, m]) => `
+                        <div class="svc-metric-row">
+                            <span class="svc-name">${svc}</span>
+                            <span class="svc-chip" title="CPU">${m.cpu}% CPU</span>
+                            <span class="svc-chip" title="Heap">${m.heapUsed}/${m.heapMax} MB heap (${m.heapPct}%)</span>
+                            <span class="svc-chip" title="RPS">${m.rps} rps</span>
+                            <span class="svc-chip" title="P99">${m.p99Ms} ms p99</span>
+                            <span class="svc-chip" title="Threads">${m.threads} threads</span>
+                            <span class="svc-chip" title="Error rate" style="${m.errorRate>0?'color:#ef4444':''}">${m.errorRate}% err</span>
+                            <span class="ms-auto text-muted" style="font-size:11px">${m.ts}</span>
+                        </div>`).join('');
+                    document.getElementById('analytics-live-ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
+                }
+
+                function loadHistoryChart() {
+                    const svc = document.getElementById('chart-svc-select').value;
+                    if (!svc) return;
+                    fetch('/api/analytics/history/' + encodeURIComponent(svc))
+                        .then(r => r.json()).then(d => {
+                            drawOrUpdate('chart-cpu',  d.labels, d.cpu,       'CPU %',      '#6366f1');
+                            drawOrUpdate('chart-heap', d.labels, d.heapPct,   'Heap %',     '#22c55e');
+                            drawOrUpdate('chart-rps',  d.labels, d.rps,       'RPS',        '#f59e0b');
+                            drawOrUpdate('chart-p99',  d.labels, d.p99Ms,     'P99 ms',     '#ef4444');
+                        }).catch(() => {});
+                }
+
+                function loadTrendsChart() {
+                    fetch('/api/analytics/trends')
+                        .then(r => r.json()).then(d => {
+                            if (!d.datasets || !d.datasets.length) return;
+                            const ctx = document.getElementById('chart-trends');
+                            if (analyticsCharts['trends']) analyticsCharts['trends'].destroy();
+                            analyticsCharts['trends'] = new Chart(ctx, {
+                                type: 'line',
+                                data: {
+                                    labels: d.labels,
+                                    datasets: d.datasets.map((ds, i) => ({
+                                        label: ds.service + ' RPS',
+                                        data: ds.rps,
+                                        borderColor: COLORS[i % COLORS.length],
+                                        backgroundColor: COLORS[i % COLORS.length] + '22',
+                                        tension: 0.3, fill: false, pointRadius: 2
+                                    }))
+                                },
+                                options: chartOpts('RPS')
+                            });
+                        }).catch(() => {});
+                }
+                """;
+    }
+
+    private String buildScriptsAnalyticsB() {
+        return """
+                function drawOrUpdate(canvasId, labels, data, label, color) {
+                    const ctx = document.getElementById(canvasId);
+                    if (analyticsCharts[canvasId]) analyticsCharts[canvasId].destroy();
+                    analyticsCharts[canvasId] = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{ label, data, borderColor: color,
+                                backgroundColor: color + '22', tension: 0.3,
+                                fill: true, pointRadius: 2 }]
+                        },
+                        options: chartOpts(label)
+                    });
+                }
+
+                function chartOpts(yLabel) {
+                    return {
+                        responsive: true, maintainAspectRatio: true,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { ticks: { maxTicksLimit: 8, font: { size: 10 } }, grid: { color: '#f3f4f6' } },
+                            y: { beginAtZero: true, title: { display: true, text: yLabel, font: { size: 10 } },
+                                 ticks: { font: { size: 10 } }, grid: { color: '#f3f4f6' } }
+                        }
+                    };
+                }
+
+                function startAnalyticsSSE() {
+                    analyticsSSE = new EventSource('/api/analytics/stream');
+                    analyticsSSE.addEventListener('metrics', e => {
+                        try { renderLiveRows(JSON.parse(e.data)); } catch (_) {}
+                    });
+                    analyticsSSE.onerror = () => {
+                        analyticsSSE.close(); analyticsSSE = null;
+                        setTimeout(startAnalyticsSSE, 5000);
+                    };
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: API Explorer ----------------------------------------------
+
+    private String buildScriptsApiExplorer() {
+        return """
+                // ── API Explorer ───────────────────────────────────────────────────────────
+                let explorerEndpoints = [];
+
+                function loadExplorerServices() {
+                    fetch('/api/explorer/services')
+                        .then(r => r.json()).then(svcs => {
+                            const sel = document.getElementById('explorer-svc-select');
+                            sel.innerHTML = '<option value="">— select service —</option>' +
+                                svcs.map(s => `<option value="${s.name}" data-url="${s.baseUrl}">${s.name} :${s.port}</option>`).join('');
+                        }).catch(() => {});
+                }
+
+                function loadServiceMappings() {
+                    const sel = document.getElementById('explorer-svc-select');
+                    const svc = sel.value;
+                    if (!svc) return;
+                    const opt = sel.options[sel.selectedIndex];
+                    document.getElementById('req-url').value = opt.dataset.url || '';
+                    document.getElementById('ep-list').innerHTML = '<p class="text-muted p-2" style="font-size:12px">Loading…</p>';
+                    fetch('/api/explorer/' + encodeURIComponent(svc) + '/mappings')
+                        .then(r => r.json()).then(d => {
+                            explorerEndpoints = d.endpoints || [];
+                            renderEndpointList(explorerEndpoints, opt.dataset.url || '');
+                        }).catch(e => {
+                            document.getElementById('ep-list').innerHTML =
+                                `<p class="text-danger p-2" style="font-size:12px">Error: ${e}</p>`;
+                        });
+                }
+
+                function renderEndpointList(eps, baseUrl) {
+                    if (!eps.length) {
+                        document.getElementById('ep-list').innerHTML =
+                            '<p class="text-muted p-2" style="font-size:12px">No endpoints found (is actuator enabled?)</p>';
+                        return;
+                    }
+                    document.getElementById('ep-list').innerHTML = eps.map((ep, i) => {
+                        const methods = Array.isArray(ep.methods) ? ep.methods : ['GET'];
+                        const method = methods[0] || 'GET';
+                        return `<div class="ep-item" id="ep-${i}" onclick="selectEndpoint(${i}, '${baseUrl}')">
+                            <span class="method-badge method-${method}">${method}</span>
+                            <span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${ep.path}">${ep.path}</span>
+                        </div>`;
+                    }).join('');
+                }
+
+                function selectEndpoint(idx, baseUrl) {
+                    document.querySelectorAll('.ep-item').forEach(e => e.classList.remove('active'));
+                    document.getElementById('ep-' + idx).classList.add('active');
+                    const ep = explorerEndpoints[idx];
+                    const methods = Array.isArray(ep.methods) ? ep.methods : ['GET'];
+                    document.getElementById('req-method').value = methods[0] || 'GET';
+                    document.getElementById('req-url').value = baseUrl + ep.path;
+                }
+
+                function filterEndpoints() {
+                    const q = document.getElementById('explorer-filter').value.toLowerCase();
+                    const filtered = explorerEndpoints.filter(ep =>
+                        ep.path.toLowerCase().includes(q) ||
+                        (ep.methods || []).some(m => m.toLowerCase().includes(q)));
+                    const baseUrl = (() => {
+                        const sel = document.getElementById('explorer-svc-select');
+                        return (sel.options[sel.selectedIndex] || {}).dataset?.url || '';
+                    })();
+                    renderEndpointList(filtered, baseUrl);
+                }
+
+                function executeRequest() {
+                    const method  = document.getElementById('req-method').value;
+                    const url     = document.getElementById('req-url').value.trim();
+                    const bodyRaw = document.getElementById('req-body').value.trim();
+                    const hdrsRaw = document.getElementById('req-headers').value.trim();
+                    if (!url) { alert('Enter a URL'); return; }
+                    let headers = {};
+                    if (hdrsRaw) { try { headers = JSON.parse(hdrsRaw); } catch { alert('Invalid headers JSON'); return; } }
+                    const btn = document.getElementById('btn-send');
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending…';
+                    fetch('/api/explorer/request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ method, url, headers, body: bodyRaw || null })
+                    }).then(r => r.json()).then(d => {
+                        btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+                        const ok = !d.error && d.status < 400;
+                        document.getElementById('resp-status-badge').innerHTML =
+                            `<span class="${ok?'status-ok':'status-err'}">${d.status} ${d.statusText}</span>`;
+                        document.getElementById('resp-duration').textContent = d.durationMs + ' ms';
+                        const hdrs = d.headers || {};
+                        document.getElementById('resp-headers').textContent =
+                            Object.entries(hdrs).map(([k,v]) => `${k}: ${v}`).join('\\n') || '(none)';
+                        let body = d.body || '';
+                        try { body = JSON.stringify(JSON.parse(body), null, 2); } catch {}
+                        document.getElementById('resp-body').textContent = body;
+                    }).catch(e => {
+                        btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+                        document.getElementById('resp-body').textContent = 'Request failed: ' + e;
+                    });
+                }
                 """;
     }
 
