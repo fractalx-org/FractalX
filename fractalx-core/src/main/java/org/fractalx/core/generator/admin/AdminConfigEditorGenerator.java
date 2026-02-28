@@ -82,7 +82,7 @@ class AdminConfigEditorGenerator {
                     @GetMapping("/all")
                     public List<Map<String, Object>> all() {
                         List<Map<String, Object>> out = new ArrayList<>();
-                        for (ServiceConfig cfg : configStore.getAll()) {
+                        for (ServiceConfigStore.ServiceConfig cfg : configStore.getAll()) {
                             out.add(toMap(cfg));
                         }
                         return out;
@@ -126,7 +126,7 @@ class AdminConfigEditorGenerator {
                     public Map<String, Object> diff() {
                         Map<String, Object> out = new LinkedHashMap<>();
                         overrides.forEach((svc, kvs) -> {
-                            Optional<ServiceConfig> cfgOpt = configStore.findByName(svc);
+                            Optional<ServiceConfigStore.ServiceConfig> cfgOpt = configStore.findByName(svc);
                             List<Map<String, Object>> changes = new ArrayList<>();
                             kvs.forEach((k, newVal) -> {
                                 String baseVal = cfgOpt.map(c -> c.envVars().get(k)).orElse(null);
@@ -147,23 +147,27 @@ class AdminConfigEditorGenerator {
                         return configStore.findByName(service)
                                 .map(cfg -> {
                                     String url = "http://localhost:" + cfg.httpPort() + "/actuator/refresh";
+                                    Map<String, Object> result = new LinkedHashMap<>();
                                     try {
                                         rest.postForObject(url, null, Object.class);
-                                        return (Map<String, Object>) Map.of(
-                                                "success", true,
-                                                "message", "Refresh triggered on " + service,
-                                                "url", url);
+                                        result.put("success", true);
+                                        result.put("message", "Refresh triggered on " + service);
+                                        result.put("url", url);
                                     } catch (Exception e) {
-                                        return (Map<String, Object>) Map.of(
-                                                "success", false,
-                                                "message", "Could not reach " + url + ": " + e.getMessage(),
-                                                "hint", "Service may need a restart to apply changes");
+                                        result.put("success", false);
+                                        result.put("message", "Could not reach " + url + ": " + e.getMessage());
+                                        result.put("hint", "Service may need a restart to apply changes");
                                     }
+                                    return result;
                                 })
-                                .orElse(Map.of("error", "Unknown service: " + service));
+                                .orElseGet(() -> {
+                                    Map<String, Object> err = new LinkedHashMap<>();
+                                    err.put("error", "Unknown service: " + service);
+                                    return err;
+                                });
                     }
 
-                    private Map<String, Object> toMap(ServiceConfig cfg) {
+                    private Map<String, Object> toMap(ServiceConfigStore.ServiceConfig cfg) {
                         Map<String, Object> m = new LinkedHashMap<>();
                         m.put("name",         cfg.name());
                         m.put("httpPort",     cfg.httpPort());
