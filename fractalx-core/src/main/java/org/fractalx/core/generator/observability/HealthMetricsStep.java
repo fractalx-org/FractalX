@@ -89,7 +89,7 @@ public class HealthMetricsStep implements ServiceFileGenerator {
                         /** Micrometer gauge: fractalx.service.dependency.up{service="%s"} */
                         @Bean
                         public MeterBinder %sDependencyGauge(
-                                HealthIndicator %sHealthIndicator) {
+                                @Qualifier("%sHealthIndicator") HealthIndicator %sHealthIndicator) {
                             return registry -> Gauge.builder(
                                     "fractalx.service.dependency.up",
                                     %sHealthIndicator,
@@ -98,7 +98,7 @@ public class HealthMetricsStep implements ServiceFileGenerator {
                                     .description("1 if the %s dependency is reachable, 0 otherwise")
                                     .register(registry);
                         }
-                    """.formatted(svcName, beanId, beanId, beanId, svcName, svcName));
+                    """.formatted(svcName, beanId, beanId, beanId, beanId, svcName, svcName));
         }
 
         return """
@@ -107,6 +107,7 @@ public class HealthMetricsStep implements ServiceFileGenerator {
                 import io.micrometer.core.instrument.Gauge;
                 import io.micrometer.core.instrument.MeterRegistry;
                 import io.micrometer.core.instrument.binder.MeterBinder;
+                import org.springframework.beans.factory.annotation.Qualifier;
                 import org.springframework.beans.factory.annotation.Value;
                 import org.springframework.boot.actuate.health.Health;
                 import org.springframework.boot.actuate.health.HealthIndicator;

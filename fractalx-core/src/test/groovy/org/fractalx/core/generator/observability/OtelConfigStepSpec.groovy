@@ -119,4 +119,14 @@ class OtelConfigStepSpec extends Specification {
         then:
         content().contains("buildAndRegisterGlobal")
     }
+
+    def "OtelConfig uses correct ResourceAttributes import path"() {
+        when:
+        step.generate(ctx(module))
+
+        then:
+        def c = content()
+        c.contains("import io.opentelemetry.semconv.ResourceAttributes")
+        c.contains("ResourceAttributes.SERVICE_NAME")
+    }
 }

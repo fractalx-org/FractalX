@@ -129,4 +129,15 @@ class HealthMetricsStepSpec extends Specification {
         (c.contains("MeterRegistry") || c.contains("MeterBinder") || c.contains("Gauge"))
         (c.contains("fractalx.service.dependency.up") || c.contains("dependency"))
     }
+
+    def "ServiceHealthConfig uses @Qualifier to resolve correct HealthIndicator bean"() {
+        when:
+        step.generate(ctx(order, [order, payment]))
+
+        then:
+        def c = content(order)
+        c.contains("@Qualifier")
+        c.contains("paymentServiceHealthIndicator")
+        c.contains("import org.springframework.beans.factory.annotation.Qualifier")
+    }
 }
