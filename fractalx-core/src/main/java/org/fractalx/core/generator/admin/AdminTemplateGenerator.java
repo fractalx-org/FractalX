@@ -134,6 +134,10 @@ class AdminTemplateGenerator {
             + buildSectionSettings()
             + buildSectionAnalytics()
             + buildSectionApiExplorer()
+            + buildSectionNetworkMap()
+            + buildSectionGrpcBrowser()
+            + buildSectionIncidents()
+            + buildSectionConfigEditor()
             + "</div>\n"
             + "</div>\n\n"
             + buildModals()
@@ -150,6 +154,12 @@ class AdminTemplateGenerator {
             + buildScriptsAnalytics()
             + buildScriptsAnalyticsB()
             + buildScriptsApiExplorer()
+            + buildScriptsNetworkMap()
+            + buildScriptsNetworkMapB()
+            + buildScriptsGrpcBrowser()
+            + buildScriptsIncidents()
+            + buildScriptsConfigEditor()
+            + buildScriptsOverviewEnhanced()
             + buildScriptsMobileNav()
             + "</script>\n</body>\n</html>\n";
     }
@@ -157,7 +167,7 @@ class AdminTemplateGenerator {
     // ---- HTML HEAD ----------------------------------------------------------
 
     private String buildHtmlHead() {
-        return buildHtmlHeadA() + buildHtmlHeadB() + buildHtmlHeadC();
+        return buildHtmlHeadA() + buildHtmlHeadB() + buildHtmlHeadC() + buildHtmlHeadD();
     }
 
     private String buildHtmlHeadA() {
@@ -423,6 +433,76 @@ class AdminTemplateGenerator {
                                        background:#1e1e2e;color:#cdd6f4;border-radius:6px;padding:12px}
                         .status-ok{color:#22c55e;font-weight:600}
                         .status-err{color:#ef4444;font-weight:600}
+                """;
+    }
+
+    private String buildHtmlHeadD() {
+        return """
+                        /* ── Network Map ── */
+                        .netmap-wrap{position:relative;background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden}
+                        #netmap-canvas{display:block;width:100%;cursor:grab}
+                        #netmap-canvas:active{cursor:grabbing}
+                        .netmap-legend{display:flex;gap:14px;padding:10px 14px;border-top:1px solid var(--bdr);flex-wrap:wrap}
+                        .netmap-legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2)}
+                        .netmap-legend-dot{width:12px;height:12px;border-radius:50%}
+                        .netmap-tooltip{position:absolute;background:#1e1e2e;color:#cdd6f4;font-size:12px;
+                                        padding:8px 12px;border-radius:6px;pointer-events:none;display:none;
+                                        box-shadow:0 4px 12px rgba(0,0,0,.3);z-index:10;max-width:220px;line-height:1.6}
+                        .netmap-controls{display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--bdr)}
+                        /* ── gRPC Browser ── */
+                        .grpc-svc-card{background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s}
+                        .grpc-svc-card:hover,.grpc-svc-card.active{border-color:#6366f1;background:#fafafe}
+                        .grpc-port-chip{background:#ede9fe;color:#5b21b6;font-size:11px;font-weight:600;padding:2px 8px;border-radius:8px}
+                        .grpc-dep-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid #f3f4f6}
+                        .ping-btn{background:none;border:1px solid var(--bdr);border-radius:5px;font-size:11px;padding:2px 8px;cursor:pointer;transition:all .15s}
+                        .ping-ok{color:#15803d;background:#dcfce7;border-color:#bbf7d0}
+                        .ping-fail{color:#b91c1c;background:#fee2e2;border-color:#fecaca}
+                        /* ── Incident Manager ── */
+                        .sev-p1{background:#fee2e2;color:#b91c1c;font-weight:700}
+                        .sev-p2{background:#fef3c7;color:#92400e;font-weight:700}
+                        .sev-p3{background:#dbeafe;color:#1e40af;font-weight:700}
+                        .sev-p4{background:#f3f4f6;color:#6b7280}
+                        .inc-status-open{background:#fee2e2;color:#b91c1c}
+                        .inc-status-investigating{background:#fef3c7;color:#92400e}
+                        .inc-status-resolved{background:#dcfce7;color:#15803d}
+                        .inc-row-p1 td:first-child{border-left:3px solid #ef4444}
+                        .inc-row-p2 td:first-child{border-left:3px solid #f59e0b}
+                        .inc-row-p3 td:first-child{border-left:3px solid #3b82f6}
+                        .inc-row-p4 td:first-child{border-left:3px solid #d1d5db}
+                        /* ── Config Editor ── */
+                        .cfg-kv-row{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid #f3f4f6;font-size:13px}
+                        .cfg-key{font-weight:500;min-width:200px;font-family:monospace;font-size:12px;color:var(--t2);flex-shrink:0}
+                        .cfg-val{flex:1;font-family:monospace;font-size:12px;color:var(--t1);word-break:break-all}
+                        .cfg-override-badge{font-size:10px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:6px;flex-shrink:0}
+                        /* ── Enhanced Overview ── */
+                        .ov-kpi-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px}
+                        @media(max-width:1200px){.ov-kpi-grid{grid-template-columns:repeat(3,1fr)}}
+                        @media(max-width:600px){.ov-kpi-grid{grid-template-columns:repeat(2,1fr)}}
+                        .ov-kpi{background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);padding:14px 16px;text-align:center}
+                        .ov-kpi .val{font-size:26px;font-weight:700;line-height:1}
+                        .ov-kpi .lbl{font-size:11px;color:var(--t2);margin-top:3px}
+                        .ov-alert-item{display:flex;gap:8px;align-items:flex-start;padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:12px}
+                        .ov-inc-item{display:flex;gap:8px;align-items:center;padding:7px 12px;border-bottom:1px solid #f3f4f6;font-size:12px}
+                        /* ── Enhanced API Explorer ── */
+                        .explorer3-layout{display:grid;grid-template-columns:190px 1fr 1fr;min-height:600px;border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;background:var(--surf)}
+                        @media(max-width:1100px){.explorer3-layout{grid-template-columns:1fr}}
+                        .explorer3-col{border-right:1px solid var(--bdr);display:flex;flex-direction:column;overflow:hidden}
+                        .explorer3-col:last-child{border-right:none}
+                        .explorer3-col-hdr{padding:10px 12px;border-bottom:1px solid var(--bdr);background:#fafafa;font-size:12px;font-weight:600;color:var(--t1);flex-shrink:0;display:flex;align-items:center}
+                        .explorer3-ep-list{overflow-y:auto;flex:1}
+                        .explorer3-ep-group-hdr{padding:5px 12px;font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;background:#f9fafb;border-bottom:1px solid #f3f4f6}
+                        .explorer3-ep-item{padding:7px 12px;display:flex;align-items:center;gap:7px;cursor:pointer;border-bottom:1px solid #f3f4f6;font-size:12px}
+                        .explorer3-ep-item:hover{background:#f9fafb}
+                        .explorer3-ep-item.active{background:#eff6ff}
+                        .req-panel{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;flex:1}
+                        .resp-panel{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:0;flex:1}
+                        .resp-tabs{display:flex;border-bottom:1px solid var(--bdr);margin:-12px -12px 10px;padding:0 12px;background:#fafafa;flex-shrink:0}
+                        .resp-tab{padding:8px 12px;font-size:12px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;color:var(--t2)}
+                        .resp-tab.active{color:var(--t1);border-bottom-color:#111827}
+                        .resp-tab-pane{display:none}.resp-tab-pane.active{display:block}
+                        .hist-item{padding:6px 10px;font-size:11px;cursor:pointer;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:7px}
+                        .hist-item:hover{background:#f9fafb}
+                        .json-s{color:#a3e635}.json-n{color:#fb923c}.json-b{color:#60a5fa}.json-k{color:#e879f9}.json-null{color:#94a3b8}
                     </style>
                 </head>
                 """;
@@ -455,6 +535,9 @@ class AdminTemplateGenerator {
                             <a href="#" onclick="showSection('data');closeSidebar()" id="nav-data">
                                 <i class="fas fa-database ni"></i> Data Consistency
                             </a>
+                            <a href="#" onclick="showSection('networkmap');closeSidebar()" id="nav-networkmap">
+                                <i class="fas fa-circle-dot ni"></i> Network Map
+                            </a>
                         </div>
                         <div class="nav-grp">
                             <div class="nav-lbl">Monitoring</div>
@@ -471,20 +554,30 @@ class AdminTemplateGenerator {
                             <a href="#" onclick="showSection('logs');closeSidebar()" id="nav-logs">
                                 <i class="fas fa-file-alt ni"></i> Logs
                             </a>
-                        </div>
-                        <div class="nav-grp">
-                            <div class="nav-lbl">Developer</div>
                             <a href="#" onclick="showSection('analytics');closeSidebar()" id="nav-analytics">
                                 <i class="fas fa-chart-bar ni"></i> Analytics
                             </a>
+                        </div>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Developer</div>
                             <a href="#" onclick="showSection('explorer');closeSidebar()" id="nav-explorer">
                                 <i class="fas fa-terminal ni"></i> API Explorer
                             </a>
+                            <a href="#" onclick="showSection('grpc');closeSidebar()" id="nav-grpc">
+                                <i class="fas fa-network-wired ni"></i> gRPC Browser
+                            </a>
+                            <a href="#" onclick="showSection('configeditor');closeSidebar()" id="nav-configeditor">
+                                <i class="fas fa-sliders-h ni"></i> Config Editor
+                            </a>
                         </div>
                         <div class="nav-grp">
-                            <div class="nav-lbl">Admin</div>
+                            <div class="nav-lbl">Operations</div>
+                            <a href="#" onclick="showSection('incidents');closeSidebar()" id="nav-incidents">
+                                <i class="fas fa-fire ni"></i> Incidents
+                                <span class="alert-badge" id="incident-badge" style="display:none">0</span>
+                            </a>
                             <a href="#" onclick="showSection('settings');closeSidebar()" id="nav-settings">
-                                <i class="fas fa-sliders-h ni"></i> Settings
+                                <i class="fas fa-cog ni"></i> Settings
                             </a>
                         </div>
                     </nav>
@@ -536,6 +629,10 @@ class AdminTemplateGenerator {
     // ---- SECTIONS -----------------------------------------------------------
 
     private String buildSectionOverview() {
+        return buildSectionOverviewA() + buildSectionOverviewB();
+    }
+
+    private String buildSectionOverviewA() {
         return """
                     <div id="section-overview" class="section active">
                         <div class="stats-row">
@@ -567,6 +664,20 @@ class AdminTemplateGenerator {
                                 <div class="stat-val" id="ov-alerts">—</div>
                                 <div class="stat-lbl">Active Alerts</div>
                             </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#e0f2fe">
+                                    <i class="fas fa-chart-line" style="color:#0284c7"></i>
+                                </div>
+                                <div class="stat-val" id="ov-rps">—</div>
+                                <div class="stat-lbl">Total RPS</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#f0fdf4">
+                                    <i class="fas fa-microchip" style="color:#16a34a"></i>
+                                </div>
+                                <div class="stat-val" id="ov-cpu">—</div>
+                                <div class="stat-lbl">Avg CPU</div>
+                            </div>
                         </div>
                         <div class="card2">
                             <div class="card-hd">
@@ -581,12 +692,37 @@ class AdminTemplateGenerator {
                             <div class="card-bd table-wrap">
                                 <table class="table table-sm table-hover mb-0">
                                     <thead><tr>
-                                        <th>Service</th><th>Status</th><th>Port</th><th>Type</th><th>Actions</th>
+                                        <th>Service</th><th>Status</th><th>Port</th><th>gRPC</th><th>Type</th><th>Actions</th>
                                     </tr></thead>
                                     <tbody id="overview-tbody">
-                                        <tr><td colspan="5" class="text-center text-muted p-4">Loading…</td></tr>
+                                        <tr><td colspan="6" class="text-center text-muted p-4">Loading…</td></tr>
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                """;
+    }
+
+    private String buildSectionOverviewB() {
+        return """
+                        <div class="two-col" style="gap:16px;margin-top:16px">
+                            <div class="card-box">
+                                <div class="section-hdr">
+                                    <span class="section-title"><i class="fas fa-bell" style="color:#f59e0b;margin-right:6px"></i>Active Alerts</span>
+                                    <a href="#" onclick="showSection('alerts')" style="font-size:11px;color:#6366f1">View all</a>
+                                </div>
+                                <div id="ov-alerts-list" style="padding:6px 10px;max-height:200px;overflow-y:auto">
+                                    <p style="font-size:12px;color:#9ca3af">Loading…</p>
+                                </div>
+                            </div>
+                            <div class="card-box">
+                                <div class="section-hdr">
+                                    <span class="section-title"><i class="fas fa-fire" style="color:#ef4444;margin-right:6px"></i>Open Incidents</span>
+                                    <a href="#" onclick="showSection('incidents')" style="font-size:11px;color:#6366f1">View all</a>
+                                </div>
+                                <div id="ov-incidents-list" style="padding:6px 10px;max-height:200px;overflow-y:auto">
+                                    <p style="font-size:12px;color:#9ca3af">Loading…</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1283,7 +1419,9 @@ class AdminTemplateGenerator {
                         observability: loadMetrics, alerts: loadAlerts,
                         traces: loadTraceServices, logs: loadLogServices,
                         settings: loadSettingsSection,
-                        analytics: loadAnalyticsSection, explorer: loadExplorerServices
+                        analytics: loadAnalyticsSection, explorer: loadExplorerServices,
+                        networkmap: loadNetworkMap, grpc: loadGrpcBrowser,
+                        incidents: loadIncidents, configeditor: loadConfigEditor
                     };
                     if (fn[currentSection]) fn[currentSection]();
                     document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
@@ -2467,6 +2605,937 @@ class AdminTemplateGenerator {
                         btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
                         document.getElementById('resp-body').textContent = 'Request failed: ' + e;
                     });
+                }
+                """;
+    }
+
+    // ---- SECTION: Network Map -----------------------------------------------
+
+    private String buildSectionNetworkMap() {
+        return """
+                <div class="section" id="section-networkmap">
+                    <div class="page-header">
+                        <h1 class="page-title-h">Network Map</h1>
+                        <p class="page-sub">Force-directed service topology graph — health-coloured nodes, dependency edges</p>
+                    </div>
+                    <div style="position:relative;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:14px">
+                        <canvas id="netmap-canvas" width="1200" height="540"
+                            style="width:100%;height:540px;cursor:grab;display:block"></canvas>
+                        <div id="netmap-tooltip"
+                            style="display:none;position:absolute;background:rgba(15,23,42,.9);color:#f1f5f9;
+                                   padding:7px 12px;border-radius:7px;font-size:12px;pointer-events:none;z-index:20;
+                                   white-space:pre-line;line-height:1.55"></div>
+                        <div id="netmap-loading"
+                            style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                                   color:#94a3b8;font-size:13px">
+                            <i class="fas fa-spinner fa-spin"></i> Loading…
+                        </div>
+                        <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px">
+                            <button onclick="zoomNetmap(1.25)"
+                                style="background:#fff;border:1px solid #d1d5db;border-radius:5px;
+                                       padding:4px 9px;font-size:13px;cursor:pointer">+</button>
+                            <button onclick="zoomNetmap(0.8)"
+                                style="background:#fff;border:1px solid #d1d5db;border-radius:5px;
+                                       padding:4px 9px;font-size:13px;cursor:pointer">−</button>
+                            <button onclick="resetNetmapView()"
+                                style="background:#fff;border:1px solid #d1d5db;border-radius:5px;
+                                       padding:4px 9px;font-size:11px;cursor:pointer">Reset</button>
+                            <button onclick="loadNetworkMap()"
+                                style="background:#fff;border:1px solid #d1d5db;border-radius:5px;
+                                       padding:4px 9px;font-size:11px;cursor:pointer">
+                                <i class="fas fa-sync" style="font-size:10px"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:#6b7280">
+                        <span><span style="display:inline-block;width:13px;height:13px;border-radius:50%;
+                            background:#22c55e;margin-right:5px;vertical-align:middle"></span>UP</span>
+                        <span><span style="display:inline-block;width:13px;height:13px;border-radius:50%;
+                            background:#ef4444;margin-right:5px;vertical-align:middle"></span>DOWN</span>
+                        <span><span style="display:inline-block;width:13px;height:13px;border-radius:50%;
+                            background:#94a3b8;margin-right:5px;vertical-align:middle"></span>UNKNOWN</span>
+                        <span style="margin-left:auto;font-size:11px">Drag nodes · Scroll to zoom · Click for details</span>
+                    </div>
+                    <div id="netmap-info"
+                        style="display:none;padding:14px;background:#fff;border:1px solid #e5e7eb;border-radius:10px">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                            <strong id="netmap-info-name" style="font-size:14px"></strong>
+                            <button onclick="document.getElementById('netmap-info').style.display='none'"
+                                style="background:none;border:none;font-size:18px;color:#9ca3af;cursor:pointer">&times;</button>
+                        </div>
+                        <div id="netmap-info-body"
+                            style="font-size:13px;color:#374151;display:grid;
+                                   grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px">
+                        </div>
+                    </div>
+                </div>
+                """;
+    }
+
+    // ---- SECTION: gRPC Browser ----------------------------------------------
+
+    private String buildSectionGrpcBrowser() {
+        return """
+                <div class="section" id="section-grpc">
+                    <div class="page-header">
+                        <h1 class="page-title-h">gRPC Browser</h1>
+                        <p class="page-sub">Inspect NetScope/gRPC connections, view deps, and TCP-ping ports</p>
+                    </div>
+                    <div class="two-col" style="gap:16px;margin-bottom:16px">
+                        <!-- Service list -->
+                        <div class="card-box">
+                            <div class="section-hdr">
+                                <span class="section-title">gRPC Services</span>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="loadGrpcBrowser()">
+                                    <i class="fas fa-sync"></i>
+                                </button>
+                            </div>
+                            <div id="grpc-svc-list" style="max-height:420px;overflow-y:auto">
+                                <p class="text-muted p-3" style="font-size:12px">Loading…</p>
+                            </div>
+                        </div>
+                        <!-- Detail + ping -->
+                        <div>
+                            <div class="card-box mb-3">
+                                <div class="section-hdr">
+                                    <span class="section-title" id="grpc-detail-title">Select a service</span>
+                                </div>
+                                <div id="grpc-detail-body" style="font-size:13px;color:#374151;padding:10px">
+                                    <p class="text-muted" style="font-size:12px">Click a service on the left to see upstream/downstream gRPC dependencies.</p>
+                                </div>
+                            </div>
+                            <div class="card-box">
+                                <div class="section-hdr"><span class="section-title">TCP Ping</span></div>
+                                <div style="padding:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+                                    <div>
+                                        <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:3px">Host</label>
+                                        <input id="ping-host" value="localhost" class="form-control form-control-sm" style="width:150px">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:3px">Port</label>
+                                        <input id="ping-port" type="number" placeholder="18081" class="form-control form-control-sm" style="width:100px">
+                                    </div>
+                                    <button class="btn btn-sm btn-primary" onclick="doGrpcPing()">Ping</button>
+                                    <span id="ping-result" style="font-size:12px"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- All connections -->
+                    <div class="card-box">
+                        <div class="section-hdr"><span class="section-title">All NetScope Connections</span></div>
+                        <div style="overflow-x:auto">
+                            <table class="data-table" id="grpc-connections-table">
+                                <thead><tr><th>Service</th><th>HTTP Port</th><th>Depends On</th><th>gRPC Port</th><th>Protocol</th><th>Ping</th></tr></thead>
+                                <tbody id="grpc-connections-tbody">
+                                    <tr><td colspan="6" class="text-muted text-center p-3" style="font-size:12px">Loading…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                """;
+    }
+
+    // ---- SECTION: Incidents -------------------------------------------------
+
+    private String buildSectionIncidents() {
+        return buildSectionIncidentsA() + buildSectionIncidentsB();
+    }
+
+    private String buildSectionIncidentsA() {
+        return """
+                <div class="section" id="section-incidents">
+                    <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+                        <div>
+                            <h1 class="page-title-h">Incidents</h1>
+                            <p class="page-sub">Track and manage production incidents with severity and status workflow</p>
+                        </div>
+                        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#inc-create-modal">
+                            <i class="fas fa-plus"></i> New Incident
+                        </button>
+                    </div>
+                    <!-- KPI row -->
+                    <div class="metrics-grid" style="margin-bottom:18px">
+                        <div class="metric-card"><div class="val" id="inc-total">-</div><div class="lbl">Total</div></div>
+                        <div class="metric-card"><div class="val" id="inc-open" style="color:#ef4444">-</div><div class="lbl">Open</div></div>
+                        <div class="metric-card"><div class="val" id="inc-inv" style="color:#f59e0b">-</div><div class="lbl">Investigating</div></div>
+                        <div class="metric-card"><div class="val" id="inc-res" style="color:#22c55e">-</div><div class="lbl">Resolved</div></div>
+                        <div class="metric-card"><div class="val" id="inc-p1" style="color:#dc2626">-</div><div class="lbl">P1 Critical</div></div>
+                    </div>
+                """;
+    }
+
+    private String buildSectionIncidentsB() {
+        return """
+                    <!-- Incident table -->
+                    <div class="card-box">
+                        <div class="section-hdr">
+                            <span class="section-title">Incident Log</span>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="loadIncidents()">
+                                <i class="fas fa-sync"></i>
+                            </button>
+                        </div>
+                        <div style="overflow-x:auto">
+                            <table class="data-table">
+                                <thead>
+                                    <tr><th>Severity</th><th>Title</th><th>Service</th><th>Status</th><th>Assignee</th><th>Age</th><th>Actions</th></tr>
+                                </thead>
+                                <tbody id="inc-tbody">
+                                    <tr><td colspan="7" class="text-muted text-center p-3">Loading…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Create Incident Modal -->
+                <div class="modal fade" id="inc-create-modal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">New Incident</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label class="form-label" style="font-size:13px">Title <span style="color:red">*</span></label>
+                                    <input id="inc-new-title" class="form-control form-control-sm" placeholder="Brief description">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label" style="font-size:13px">Affected Service</label>
+                                    <input id="inc-new-svc" class="form-control form-control-sm" placeholder="payment-service">
+                                </div>
+                                <div class="row mb-3">
+                                    <div class="col">
+                                        <label class="form-label" style="font-size:13px">Severity</label>
+                                        <select id="inc-new-sev" class="form-select form-select-sm">
+                                            <option value="P1">P1 — Critical</option>
+                                            <option value="P2">P2 — High</option>
+                                            <option value="P3" selected>P3 — Medium</option>
+                                            <option value="P4">P4 — Low</option>
+                                        </select>
+                                    </div>
+                                    <div class="col">
+                                        <label class="form-label" style="font-size:13px">Assignee</label>
+                                        <input id="inc-new-assignee" class="form-control form-control-sm" placeholder="admin">
+                                    </div>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label" style="font-size:13px">Description</label>
+                                    <textarea id="inc-new-desc" class="form-control form-control-sm" rows="3" placeholder="What happened?"></textarea>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button class="btn btn-sm btn-primary" onclick="createIncident()">Create Incident</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """;
+    }
+
+    // ---- SECTION: Config Editor ---------------------------------------------
+
+    private String buildSectionConfigEditor() {
+        return buildSectionConfigEditorA() + buildSectionConfigEditorB();
+    }
+
+    private String buildSectionConfigEditorA() {
+        return """
+                <div class="section" id="section-configeditor">
+                    <div class="page-header">
+                        <h1 class="page-title-h">Config Editor</h1>
+                        <p class="page-sub">View service configuration and apply in-memory environment overrides</p>
+                    </div>
+                    <div class="two-col" style="gap:16px;margin-bottom:16px">
+                        <!-- Left: service selector + env vars -->
+                        <div>
+                            <div class="card-box mb-3">
+                                <div class="section-hdr">
+                                    <span class="section-title">Services</span>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadConfigEditor()">
+                                        <i class="fas fa-sync"></i>
+                                    </button>
+                                </div>
+                                <div id="cfg-svc-list" style="max-height:320px;overflow-y:auto"></div>
+                            </div>
+                            <div class="card-box">
+                                <div class="section-hdr">
+                                    <span class="section-title" id="cfg-svc-title">Select a service</span>
+                                    <div id="cfg-reload-wrap" style="display:none">
+                                        <button class="btn btn-sm btn-outline-warning" onclick="hotReloadService()">
+                                            <i class="fas fa-bolt"></i> Hot Reload
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="cfg-detail" style="padding:10px;font-size:13px;color:#6b7280">
+                                    Click a service to view its configuration.
+                                </div>
+                            </div>
+                        </div>
+                """;
+    }
+
+    private String buildSectionConfigEditorB() {
+        return """
+                        <!-- Right: override editor + diff -->
+                        <div>
+                            <div class="card-box mb-3">
+                                <div class="section-hdr"><span class="section-title">Set Override</span></div>
+                                <div style="padding:10px;display:flex;flex-direction:column;gap:8px">
+                                    <div>
+                                        <label style="font-size:11px;color:#6b7280">Service</label>
+                                        <input id="ov-svc" class="form-control form-control-sm" placeholder="payment-service">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:11px;color:#6b7280">Key</label>
+                                        <input id="ov-key" class="form-control form-control-sm" placeholder="SPRING_DATASOURCE_URL">
+                                    </div>
+                                    <div>
+                                        <label style="font-size:11px;color:#6b7280">Value</label>
+                                        <input id="ov-val" class="form-control form-control-sm" placeholder="jdbc:mysql://...">
+                                    </div>
+                                    <button class="btn btn-sm btn-primary" onclick="saveOverride()">
+                                        <i class="fas fa-save"></i> Save Override
+                                    </button>
+                                    <div id="ov-save-msg" style="font-size:12px"></div>
+                                </div>
+                            </div>
+                            <div class="card-box mb-3">
+                                <div class="section-hdr">
+                                    <span class="section-title">Active Overrides</span>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadOverrides()">
+                                        <i class="fas fa-sync"></i>
+                                    </button>
+                                </div>
+                                <div id="cfg-overrides-body" style="font-size:13px;padding:8px;max-height:200px;overflow-y:auto">
+                                    <p class="text-muted" style="font-size:12px">No overrides yet.</p>
+                                </div>
+                            </div>
+                            <div class="card-box">
+                                <div class="section-hdr">
+                                    <span class="section-title">Config Diff</span>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadConfigDiff()">
+                                        <i class="fas fa-code-branch"></i> Show Diff
+                                    </button>
+                                </div>
+                                <div id="cfg-diff-body" style="font-size:12px;font-family:monospace;
+                                    padding:10px;max-height:200px;overflow-y:auto;white-space:pre-wrap">
+                                    Click "Show Diff" to compare overrides vs base config.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """;
+    }
+
+    // ---- SCRIPTS: Network Map -----------------------------------------------
+
+    private String buildScriptsNetworkMap() {
+        return """
+                // ── Network Map ────────────────────────────────────────────────────────────
+                let nmNodes = [], nmEdges = [], nmHealth = {};
+                let nmScale = 1, nmOffX = 0, nmOffY = 0;
+                let nmDrag = null, nmMouse = {x:0,y:0};
+                let nmAnimId = null;
+
+                function loadNetworkMap() {
+                    document.getElementById('netmap-loading').style.display = '';
+                    Promise.all([
+                        fetch('/api/communication/topology').then(r => r.json()),
+                        fetch('/api/health/summary').then(r => r.json()).catch(() => ({}))
+                    ]).then(([topo, health]) => {
+                        const canvas = document.getElementById('netmap-canvas');
+                        const W = canvas.offsetWidth || 900, H = canvas.offsetHeight || 520;
+                        nmHealth = {};
+                        (health.services || []).forEach(s => nmHealth[s.name] = s.health);
+                        const nodeMap = {};
+                        nmNodes = (topo.nodes || []).map((n, i) => {
+                            const angle = (2 * Math.PI * i) / Math.max((topo.nodes || []).length, 1);
+                            const r = Math.min(W, H) * 0.32;
+                            const node = {
+                                id: n.id || n.name, name: n.name, port: n.port,
+                                grpcPort: n.grpcPort, type: n.type,
+                                x: W/2 + r * Math.cos(angle),
+                                y: H/2 + r * Math.sin(angle),
+                                vx: 0, vy: 0, radius: 28
+                            };
+                            nodeMap[node.id] = node;
+                            return node;
+                        });
+                        nmEdges = (topo.edges || []).map(e => ({
+                            source: nodeMap[e.source] || nodeMap[e.from],
+                            target: nodeMap[e.target] || nodeMap[e.to]
+                        })).filter(e => e.source && e.target);
+                        document.getElementById('netmap-loading').style.display = 'none';
+                        if (nmAnimId) cancelAnimationFrame(nmAnimId);
+                        nmTickLoop();
+                        nmSetupCanvas();
+                    }).catch(() => {
+                        document.getElementById('netmap-loading').textContent = 'Failed to load topology';
+                    });
+                }
+
+                function nmTickLoop() {
+                    const REPEL = 3200, SPRING_LEN = 120, SPRING_K = 0.04, DAMP = 0.82, GRAV = 0.025;
+                    const canvas = document.getElementById('netmap-canvas');
+                    const W = canvas.offsetWidth || 900, H = canvas.offsetHeight || 520;
+                    for (let iter = 0; iter < 120; iter++) {
+                        for (let i = 0; i < nmNodes.length; i++) {
+                            const a = nmNodes[i];
+                            for (let j = i + 1; j < nmNodes.length; j++) {
+                                const b = nmNodes[j];
+                                const dx = b.x - a.x, dy = b.y - a.y;
+                                const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+                                const f = REPEL / (dist * dist);
+                                a.vx -= f*dx/dist; a.vy -= f*dy/dist;
+                                b.vx += f*dx/dist; b.vy += f*dy/dist;
+                            }
+                        }
+                        nmEdges.forEach(e => {
+                            if (!e.source || !e.target) return;
+                            const dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
+                            const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+                            const f = (dist - SPRING_LEN) * SPRING_K;
+                            e.source.vx += f*dx/dist; e.source.vy += f*dy/dist;
+                            e.target.vx -= f*dx/dist; e.target.vy -= f*dy/dist;
+                        });
+                        nmNodes.forEach(n => {
+                            n.vx += (W/2 - n.x) * GRAV;
+                            n.vy += (H/2 - n.y) * GRAV;
+                            n.vx *= DAMP; n.vy *= DAMP;
+                            n.x += n.vx; n.y += n.vy;
+                        });
+                    }
+                    nmDraw();
+                    nmAnimId = requestAnimationFrame(() => {
+                        if (nmNodes.some(n => Math.abs(n.vx) > 0.1 || Math.abs(n.vy) > 0.1)) nmTickLoop();
+                    });
+                }
+                """;
+    }
+
+    private String buildScriptsNetworkMapB() {
+        return """
+                function nmDraw() {
+                    const canvas = document.getElementById('netmap-canvas');
+                    if (!canvas) return;
+                    const ctx = canvas.getContext('2d');
+                    const W = canvas.width, H = canvas.height;
+                    ctx.clearRect(0, 0, W, H);
+                    ctx.save();
+                    ctx.translate(nmOffX, nmOffY);
+                    ctx.scale(nmScale, nmScale);
+                    // edges
+                    nmEdges.forEach(e => {
+                        if (!e.source || !e.target) return;
+                        ctx.beginPath();
+                        ctx.moveTo(e.source.x, e.source.y);
+                        ctx.lineTo(e.target.x, e.target.y);
+                        ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                        // arrow head
+                        const dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
+                        const len = Math.sqrt(dx*dx+dy*dy) || 1;
+                        const ux = dx/len, uy = dy/len;
+                        const tx = e.target.x - ux * e.target.radius;
+                        const ty = e.target.y - uy * e.target.radius;
+                        ctx.beginPath();
+                        ctx.moveTo(tx, ty);
+                        ctx.lineTo(tx - ux*10 + uy*5, ty - uy*10 - ux*5);
+                        ctx.lineTo(tx - ux*10 - uy*5, ty - uy*10 + ux*5);
+                        ctx.fillStyle = '#94a3b8'; ctx.fill();
+                    });
+                    // nodes
+                    nmNodes.forEach(n => {
+                        const h = nmHealth[n.name] || 'UNKNOWN';
+                        const fill = h === 'UP' ? '#22c55e' : h === 'DOWN' ? '#ef4444' : '#94a3b8';
+                        ctx.beginPath();
+                        ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+                        ctx.fillStyle = fill + '22'; ctx.fill();
+                        ctx.strokeStyle = fill; ctx.lineWidth = 2.5; ctx.stroke();
+                        ctx.fillStyle = '#1e293b'; ctx.font = 'bold 10px Inter,sans-serif';
+                        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                        const label = n.name.replace('-service','').replace('-svc','');
+                        ctx.fillText(label.length > 10 ? label.slice(0,10)+'…' : label, n.x, n.y);
+                        if (n.port) {
+                            ctx.fillStyle = '#64748b'; ctx.font = '9px Inter,sans-serif';
+                            ctx.fillText(':' + n.port, n.x, n.y + 15);
+                        }
+                    });
+                    ctx.restore();
+                }
+
+                function nmSetupCanvas() {
+                    const canvas = document.getElementById('netmap-canvas');
+                    const tip = document.getElementById('netmap-tooltip');
+                    canvas.onmousedown = e => {
+                        const {nx, ny} = nmCanvasCoords(e);
+                        nmDrag = nmNodes.find(n => Math.hypot(n.x-nx, n.y-ny) < n.radius) || null;
+                        if (!nmDrag) { canvas.style.cursor = 'grabbing'; nmMouse = nmCanvasCoords(e, true); }
+                    };
+                    canvas.onmousemove = e => {
+                        if (nmDrag) {
+                            const {nx, ny} = nmCanvasCoords(e);
+                            nmDrag.x = nx; nmDrag.y = ny; nmDrag.vx = 0; nmDrag.vy = 0; nmDraw();
+                        } else if (e.buttons === 1) {
+                            const {nx, ny} = nmCanvasCoords(e, true);
+                            nmOffX += nx - nmMouse.x; nmOffY += ny - nmMouse.y;
+                            nmMouse = {nx, ny}; nmDraw();
+                        } else {
+                            const {nx, ny} = nmCanvasCoords(e);
+                            const hit = nmNodes.find(n => Math.hypot(n.x-nx, n.y-ny) < n.radius);
+                            if (hit) {
+                                const h = nmHealth[hit.name] || 'UNKNOWN';
+                                tip.innerHTML = `<b>${hit.name}</b>\\nHTTP :${hit.port||'-'}  gRPC :${hit.grpcPort||'-'}\\nHealth: ${h}`;
+                                tip.style.display = '';
+                                tip.style.left = (e.offsetX + 14) + 'px';
+                                tip.style.top  = (e.offsetY - 10) + 'px';
+                            } else { tip.style.display = 'none'; }
+                        }
+                    };
+                    canvas.onmouseup = e => {
+                        if (!nmDrag) canvas.style.cursor = 'grab';
+                        const {nx, ny} = nmCanvasCoords(e);
+                        const hit = nmNodes.find(n => Math.hypot(n.x-nx, n.y-ny) < n.radius);
+                        if (hit && nmDrag === hit) showNetmapInfo(hit);
+                        nmDrag = null;
+                    };
+                    canvas.onmouseleave = () => { tip.style.display = 'none'; nmDrag = null; };
+                    canvas.onwheel = e => {
+                        e.preventDefault();
+                        zoomNetmap(e.deltaY < 0 ? 1.1 : 0.9);
+                    };
+                }
+
+                function nmCanvasCoords(e, raw) {
+                    const canvas = document.getElementById('netmap-canvas');
+                    const rect = canvas.getBoundingClientRect();
+                    const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+                    const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+                    if (raw) return {nx: cx, ny: cy};
+                    return { nx: (cx - nmOffX) / nmScale, ny: (cy - nmOffY) / nmScale };
+                }
+
+                function zoomNetmap(factor) {
+                    nmScale = Math.max(0.25, Math.min(4, nmScale * factor)); nmDraw();
+                }
+                function resetNetmapView() { nmScale = 1; nmOffX = 0; nmOffY = 0; nmDraw(); }
+
+                function showNetmapInfo(node) {
+                    const info = document.getElementById('netmap-info');
+                    document.getElementById('netmap-info-name').textContent = node.name;
+                    const h = nmHealth[node.name] || 'UNKNOWN';
+                    const color = h === 'UP' ? '#22c55e' : h === 'DOWN' ? '#ef4444' : '#94a3b8';
+                    document.getElementById('netmap-info-body').innerHTML =
+                        `<div><small style="color:#9ca3af">Health</small><br><b style="color:${color}">${h}</b></div>
+                        <div><small style="color:#9ca3af">HTTP Port</small><br><b>${node.port || '-'}</b></div>
+                        <div><small style="color:#9ca3af">gRPC Port</small><br><b>${node.grpcPort || '-'}</b></div>
+                        <div><small style="color:#9ca3af">Type</small><br><b>${node.type || '-'}</b></div>`;
+                    info.style.display = '';
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: gRPC Browser ----------------------------------------------
+
+    private String buildScriptsGrpcBrowser() {
+        return """
+                // ── gRPC Browser ───────────────────────────────────────────────────────────
+                function loadGrpcBrowser() {
+                    fetch('/api/grpc/services')
+                        .then(r => r.json()).then(svcs => {
+                            const el = document.getElementById('grpc-svc-list');
+                            if (!svcs.length) {
+                                el.innerHTML = '<p class="text-muted p-3" style="font-size:12px">No gRPC services found.</p>';
+                                return;
+                            }
+                            el.innerHTML = svcs.map(s => `
+                                <div onclick="loadGrpcDeps('${s.name}')" class="ep-item" style="cursor:pointer;padding:10px 12px;border-bottom:1px solid #f1f5f9">
+                                    <div style="font-weight:600;font-size:13px">${s.name}</div>
+                                    <div style="font-size:11px;color:#6b7280;margin-top:3px">
+                                        HTTP :${s.httpPort}&nbsp;&nbsp;
+                                        <span style="color:#6366f1;font-weight:500">gRPC :${s.grpcPort}</span>
+                                        &nbsp;&nbsp;<span class="badge bg-light text-dark">${s.type || 'service'}</span>
+                                    </div>
+                                </div>`).join('');
+                        }).catch(() => {
+                            document.getElementById('grpc-svc-list').innerHTML =
+                                '<p class="text-danger p-3" style="font-size:12px">Failed to load gRPC services.</p>';
+                        });
+                    loadGrpcConnections();
+                }
+
+                function loadGrpcDeps(name) {
+                    document.getElementById('grpc-detail-title').textContent = name + ' — Dependencies';
+                    document.getElementById('grpc-detail-body').innerHTML =
+                        '<p style="font-size:12px;color:#94a3b8">Loading…</p>';
+                    fetch('/api/grpc/' + encodeURIComponent(name) + '/deps')
+                        .then(r => r.json()).then(d => {
+                            if (d.error) {
+                                document.getElementById('grpc-detail-body').innerHTML =
+                                    `<p class="text-danger" style="font-size:12px">${d.error}</p>`;
+                                return;
+                            }
+                            const rows = arr => arr.length
+                                ? arr.map(x => `<div style="padding:4px 0;font-size:12px">
+                                    <span style="font-weight:500">${x.name}</span>&nbsp;
+                                    <span style="color:#6366f1">gRPC :${x.grpcPort||'-'}</span>&nbsp;
+                                    <span class="badge ${x.direction==='UPSTREAM'?'bg-success':'bg-primary'} bg-opacity-25 text-dark" style="font-size:10px">${x.direction}</span>
+                                  </div>`).join('') : '<span style="color:#9ca3af;font-size:12px">None</span>';
+                            document.getElementById('grpc-detail-body').innerHTML = `
+                                <div style="margin-bottom:10px"><b style="font-size:12px">Upstream (callers)</b>${rows(d.upstream||[])}</div>
+                                <div><b style="font-size:12px">Downstream (dependencies)</b>${rows(d.downstream||[])}</div>`;
+                            document.getElementById('ping-port').value = d.grpcPort || '';
+                        }).catch(() => {
+                            document.getElementById('grpc-detail-body').innerHTML =
+                                '<p class="text-danger" style="font-size:12px">Failed to load deps.</p>';
+                        });
+                }
+
+                function loadGrpcConnections() {
+                    fetch('/api/grpc/connections')
+                        .then(r => r.json()).then(conns => {
+                            const tbody = document.getElementById('grpc-connections-tbody');
+                            if (!conns.length) {
+                                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3" style="font-size:12px">No NetScope connections found.</td></tr>';
+                                return;
+                            }
+                            const rows = [];
+                            conns.forEach(c => {
+                                (c.dependencies || []).forEach(d => {
+                                    rows.push(`<tr>
+                                        <td><strong>${c.service}</strong></td>
+                                        <td>${c.httpPort}</td>
+                                        <td>${d.name}</td>
+                                        <td><span style="color:#6366f1;font-weight:600">:${d.grpcPort}</span></td>
+                                        <td><span class="badge bg-light text-dark" style="font-size:10px">${d.protocol||'NetScope/gRPC'}</span></td>
+                                        <td><button class="btn btn-xs btn-outline-secondary"
+                                            onclick="document.getElementById('ping-host').value='localhost';document.getElementById('ping-port').value=${d.grpcPort};doGrpcPing()"
+                                            style="font-size:10px;padding:1px 6px">Ping</button></td>
+                                    </tr>`);
+                                });
+                            });
+                            tbody.innerHTML = rows.join('');
+                        }).catch(() => {
+                            document.getElementById('grpc-connections-tbody').innerHTML =
+                                '<tr><td colspan="6" class="text-danger text-center p-3">Failed to load</td></tr>';
+                        });
+                }
+
+                function doGrpcPing() {
+                    const host = document.getElementById('ping-host').value || 'localhost';
+                    const port = parseInt(document.getElementById('ping-port').value);
+                    if (!port) { document.getElementById('ping-result').textContent = 'Enter a port'; return; }
+                    const el = document.getElementById('ping-result');
+                    el.textContent = 'Pinging…';
+                    fetch('/api/grpc/ping', { method: 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({host, port})
+                    }).then(r => r.json()).then(d => {
+                        el.innerHTML = d.reachable
+                            ? `<span style="color:#22c55e"><i class="fas fa-check-circle"></i> Reachable — ${d.latencyMs}ms</span>`
+                            : `<span style="color:#ef4444"><i class="fas fa-times-circle"></i> Unreachable — ${d.latencyMs}ms</span>`;
+                    }).catch(() => { el.textContent = 'Ping failed'; });
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: Incidents -------------------------------------------------
+
+    private String buildScriptsIncidents() {
+        return """
+                // ── Incidents ──────────────────────────────────────────────────────────────
+                function loadIncidents() {
+                    fetch('/api/incidents/stats').then(r => r.json()).then(s => {
+                        document.getElementById('inc-total').textContent = s.total ?? '-';
+                        document.getElementById('inc-open').textContent = s.open ?? '-';
+                        document.getElementById('inc-inv').textContent = s.investigating ?? '-';
+                        document.getElementById('inc-res').textContent = s.resolved ?? '-';
+                        const sev = s.bySeverity || {};
+                        document.getElementById('inc-p1').textContent = sev.P1 ?? 0;
+                        const badge = document.getElementById('incident-badge');
+                        const openCount = (s.open || 0) + (s.investigating || 0);
+                        if (openCount > 0) { badge.textContent = openCount; badge.style.display = ''; }
+                        else badge.style.display = 'none';
+                    }).catch(() => {});
+                    fetch('/api/incidents').then(r => r.json()).then(incs => {
+                        const tbody = document.getElementById('inc-tbody');
+                        if (!incs.length) {
+                            tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center p-3" style="font-size:12px">No incidents yet.</td></tr>';
+                            return;
+                        }
+                        tbody.innerHTML = incs.map(i => {
+                            const sevColor = {P1:'#dc2626',P2:'#ea580c',P3:'#d97706',P4:'#65a30d'}[i.severity]||'#6b7280';
+                            const stColor = {OPEN:'#ef4444',INVESTIGATING:'#f59e0b',RESOLVED:'#22c55e'}[i.status]||'#94a3b8';
+                            const age = incAge(i.createdAt);
+                            return `<tr>
+                                <td><span style="font-weight:700;color:${sevColor}">${i.severity}</span></td>
+                                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                                    title="${escHtml(i.title)}">${escHtml(i.title)}</td>
+                                <td>${i.affectedService||'-'}</td>
+                                <td><span style="font-weight:600;color:${stColor}">${i.status}</span></td>
+                                <td>${i.assignee||'-'}</td>
+                                <td>${age}</td>
+                                <td>
+                                    ${i.status!=='RESOLVED'?`<button class="btn btn-xs btn-outline-success"
+                                        onclick="resolveIncident('${i.id}')"
+                                        style="font-size:10px;padding:1px 6px">Resolve</button>`:''}
+                                    <button class="btn btn-xs btn-outline-danger"
+                                        onclick="deleteIncident('${i.id}')"
+                                        style="font-size:10px;padding:1px 6px">Delete</button>
+                                </td>
+                            </tr>`;
+                        }).join('');
+                    }).catch(() => {
+                        document.getElementById('inc-tbody').innerHTML =
+                            '<tr><td colspan="7" class="text-danger text-center p-3">Failed to load</td></tr>';
+                    });
+                }
+
+                function createIncident() {
+                    const body = {
+                        title: document.getElementById('inc-new-title').value,
+                        affectedService: document.getElementById('inc-new-svc').value,
+                        severity: document.getElementById('inc-new-sev').value,
+                        assignee: document.getElementById('inc-new-assignee').value,
+                        description: document.getElementById('inc-new-desc').value
+                    };
+                    if (!body.title) { alert('Title is required'); return; }
+                    fetch('/api/incidents', { method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify(body)
+                    }).then(r => r.json()).then(() => {
+                        bootstrap.Modal.getInstance(document.getElementById('inc-create-modal')).hide();
+                        ['inc-new-title','inc-new-svc','inc-new-assignee','inc-new-desc'].forEach(id => {
+                            document.getElementById(id).value = '';
+                        });
+                        loadIncidents();
+                    }).catch(() => alert('Failed to create incident'));
+                }
+
+                function resolveIncident(id) {
+                    fetch('/api/incidents/' + id + '/status', { method:'PUT',
+                        headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({status:'RESOLVED', notes:'Resolved via admin dashboard'})
+                    }).then(() => loadIncidents()).catch(() => alert('Failed to update incident'));
+                }
+
+                function deleteIncident(id) {
+                    if (!confirm('Delete this incident?')) return;
+                    fetch('/api/incidents/' + id, { method:'DELETE' })
+                        .then(() => loadIncidents()).catch(() => alert('Failed to delete incident'));
+                }
+
+                function incAge(iso) {
+                    if (!iso) return '-';
+                    const diff = Date.now() - new Date(iso).getTime();
+                    const h = Math.floor(diff / 3600000);
+                    if (h < 1) return Math.floor(diff/60000) + 'm ago';
+                    if (h < 24) return h + 'h ago';
+                    return Math.floor(h/24) + 'd ago';
+                }
+
+                function escHtml(s) {
+                    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: Config Editor ---------------------------------------------
+
+    private String buildScriptsConfigEditor() {
+        return """
+                // ── Config Editor ──────────────────────────────────────────────────────────
+                let cfgCurrentService = null;
+
+                function loadConfigEditor() {
+                    fetch('/api/config/editor/all')
+                        .then(r => r.json()).then(cfgs => {
+                            const el = document.getElementById('cfg-svc-list');
+                            if (!cfgs.length) {
+                                el.innerHTML = '<p class="text-muted p-3" style="font-size:12px">No service configs found.</p>';
+                                return;
+                            }
+                            el.innerHTML = cfgs.map(c => `
+                                <div onclick="showCfgDetail('${c.name}')" class="ep-item"
+                                    style="cursor:pointer;padding:10px 12px;border-bottom:1px solid #f1f5f9">
+                                    <div style="font-weight:600;font-size:13px">${c.name}</div>
+                                    <div style="font-size:11px;color:#6b7280;margin-top:2px">
+                                        HTTP :${c.httpPort||'-'} &nbsp;gRPC :${c.grpcPort||'-'}
+                                        ${Object.keys(c.overrides||{}).length ? '<span style="color:#f59e0b;margin-left:6px"><i class="fas fa-exclamation-triangle"></i> '+Object.keys(c.overrides).length+' override(s)</span>' : ''}
+                                    </div>
+                                </div>`).join('');
+                        }).catch(() => {
+                            document.getElementById('cfg-svc-list').innerHTML =
+                                '<p class="text-danger p-3" style="font-size:12px">Failed to load configs.</p>';
+                        });
+                    loadOverrides();
+                }
+
+                function showCfgDetail(name) {
+                    cfgCurrentService = name;
+                    document.getElementById('cfg-svc-title').textContent = name;
+                    document.getElementById('cfg-reload-wrap').style.display = '';
+                    document.getElementById('ov-svc').value = name;
+                    fetch('/api/config/editor/' + encodeURIComponent(name))
+                        .then(r => r.json()).then(c => {
+                            const envRows = Object.entries(c.effective || {}).map(([k,v]) => {
+                                const isOv = k in (c.overrides || {});
+                                return `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid #f1f5f9;font-size:12px">
+                                    <span style="flex:1;font-family:monospace;color:${isOv?'#f59e0b':'#374151'};overflow-wrap:anywhere">${escHtml(k)}</span>
+                                    <span style="flex:2;font-family:monospace;color:#64748b;overflow-wrap:anywhere">${escHtml(v)}</span>
+                                    ${isOv?`<button onclick="removeOverride('${name}','${escHtml(k)}')"
+                                        style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:11px;padding:0">✕</button>`:''}
+                                </div>`;
+                            }).join('');
+                            document.getElementById('cfg-detail').innerHTML = envRows ||
+                                '<p class="text-muted" style="font-size:12px">No environment variables.</p>';
+                        }).catch(() => {
+                            document.getElementById('cfg-detail').innerHTML =
+                                '<p class="text-danger" style="font-size:12px">Failed to load config.</p>';
+                        });
+                }
+
+                function saveOverride() {
+                    const service = document.getElementById('ov-svc').value.trim();
+                    const key = document.getElementById('ov-key').value.trim();
+                    const value = document.getElementById('ov-val').value.trim();
+                    const msg = document.getElementById('ov-save-msg');
+                    if (!service||!key||!value) { msg.innerHTML='<span style="color:#ef4444">All fields required</span>'; return; }
+                    fetch('/api/config/editor/override', { method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({service, key, value})
+                    }).then(r => r.json()).then(() => {
+                        msg.innerHTML = '<span style="color:#22c55e"><i class="fas fa-check"></i> Saved</span>';
+                        document.getElementById('ov-key').value = '';
+                        document.getElementById('ov-val').value = '';
+                        if (cfgCurrentService === service) showCfgDetail(service);
+                        loadOverrides();
+                        setTimeout(() => { msg.textContent = ''; }, 3000);
+                    }).catch(() => { msg.innerHTML = '<span style="color:#ef4444">Failed to save</span>'; });
+                }
+
+                function removeOverride(service, key) {
+                    fetch('/api/config/editor/override/' + encodeURIComponent(service) + '/' + encodeURIComponent(key),
+                        { method:'DELETE' })
+                        .then(() => { if (cfgCurrentService) showCfgDetail(cfgCurrentService); loadOverrides(); })
+                        .catch(() => {});
+                }
+
+                function loadOverrides() {
+                    fetch('/api/config/editor/overrides').then(r => r.json()).then(ovs => {
+                        const el = document.getElementById('cfg-overrides-body');
+                        const entries = Object.entries(ovs);
+                        if (!entries.length) {
+                            el.innerHTML = '<p class="text-muted" style="font-size:12px">No active overrides.</p>';
+                            return;
+                        }
+                        el.innerHTML = entries.map(([svc, kvs]) =>
+                            `<div style="margin-bottom:8px"><b style="font-size:12px">${svc}</b>` +
+                            Object.entries(kvs).map(([k,v]) =>
+                                `<div style="font-size:11px;font-family:monospace;padding:2px 0;color:#6b7280">
+                                    <span style="color:#f59e0b">${escHtml(k)}</span> = ${escHtml(v)}</div>`
+                            ).join('') + '</div>'
+                        ).join('');
+                    }).catch(() => {});
+                }
+
+                function loadConfigDiff() {
+                    fetch('/api/config/editor/diff').then(r => r.json()).then(diff => {
+                        const el = document.getElementById('cfg-diff-body');
+                        const entries = Object.entries(diff);
+                        if (!entries.length) { el.textContent = 'No differences — no overrides applied.'; return; }
+                        el.innerHTML = entries.map(([svc, changes]) =>
+                            `<div style="color:#6366f1;margin-bottom:4px">## ${svc}</div>` +
+                            (changes||[]).map(c =>
+                                `<div><span style="color:#22c55e">+ ${escHtml(c.key)} = ${escHtml(c.newValue)}</span>` +
+                                (c.isNew ? '' : `\\n<span style="color:#ef4444">- ${escHtml(c.key)} = ${escHtml(c.baseValue)}</span>`) +
+                                '</div>'
+                            ).join('')
+                        ).join('\\n');
+                    }).catch(() => { document.getElementById('cfg-diff-body').textContent = 'Failed to load diff.'; });
+                }
+
+                function hotReloadService() {
+                    if (!cfgCurrentService) return;
+                    fetch('/api/config/editor/reload/' + encodeURIComponent(cfgCurrentService), {method:'POST'})
+                        .then(r => r.json()).then(d => {
+                            alert(d.success ? d.message : (d.message || 'Reload failed') + (d.hint ? '\\n' + d.hint : ''));
+                        }).catch(() => alert('Hot reload request failed'));
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: Enhanced Overview -----------------------------------------
+
+    private String buildScriptsOverviewEnhanced() {
+        return """
+                // ── Enhanced Overview ──────────────────────────────────────────────────────
+                function loadOverview() {
+                    fetch('/api/services/all')
+                        .then(r => r.json()).then(services => {
+                            let up = 0, down = 0;
+                            const tbody = document.getElementById('overview-tbody');
+                            tbody.innerHTML = '';
+                            services.forEach(s => {
+                                const h = s.health || 'UNKNOWN';
+                                if (h === 'UP') up++; else down++;
+                                tbody.innerHTML += `<tr>
+                                    <td><strong>${s.meta.name}</strong></td>
+                                    <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'}">${h}</span></td>
+                                    <td>${s.meta.port || '-'}</td>
+                                    <td><span style="color:#6366f1;font-size:12px">${s.meta.grpcPort || '-'}</span></td>
+                                    <td><span class="badge bg-light text-dark">${s.meta.type}</span></td>
+                                    <td>
+                                        <button class="btn btn-xs btn-outline-primary btn-sm py-0 px-1"
+                                            onclick="showServiceDetailModal('${s.meta.name}')">Detail</button>
+                                    </td></tr>`;
+                            });
+                            document.getElementById('ov-total').textContent = services.length;
+                            document.getElementById('ov-up').textContent = up;
+                            document.getElementById('ov-down').textContent = down;
+                        }).catch(() => {
+                            document.getElementById('overview-tbody').innerHTML =
+                                '<tr><td colspan="6" class="text-danger text-center p-3">Failed to load</td></tr>';
+                        });
+                    fetch('/api/alerts/active')
+                        .then(r => r.json())
+                        .then(a => {
+                            document.getElementById('ov-alerts').textContent = a.length;
+                            const el = document.getElementById('ov-alerts-list');
+                            if (!el) return;
+                            el.innerHTML = a.slice(0,5).map(al =>
+                                `<div style="padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px">
+                                    <span style="font-weight:600;color:#ef4444">${al.severity||'WARN'}</span>
+                                    &nbsp;${escHtml(al.message||al.name||'Alert')}
+                                </div>`).join('') || '<p style="font-size:12px;color:#9ca3af">No active alerts.</p>';
+                        }).catch(() => {});
+                    fetch('/api/incidents/open')
+                        .then(r => r.json())
+                        .then(incs => {
+                            const el = document.getElementById('ov-incidents-list');
+                            if (!el) return;
+                            el.innerHTML = incs.slice(0,5).map(i => {
+                                const sevColor={P1:'#dc2626',P2:'#ea580c',P3:'#d97706',P4:'#65a30d'}[i.severity]||'#6b7280';
+                                return `<div style="padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px">
+                                    <span style="font-weight:700;color:${sevColor}">${i.severity}</span>
+                                    &nbsp;<span>${escHtml(i.title)}</span>
+                                    <span style="float:right;color:#9ca3af;font-size:11px">${incAge(i.createdAt)}</span>
+                                </div>`;
+                            }).join('') || '<p style="font-size:12px;color:#9ca3af">No open incidents.</p>';
+                        }).catch(() => {});
+                    fetch('/api/analytics/overview')
+                        .then(r => r.json())
+                        .then(d => {
+                            const rps = document.getElementById('ov-rps');
+                            const cpu = document.getElementById('ov-cpu');
+                            if (rps) rps.textContent = (d.totalRps || 0).toFixed(1);
+                            if (cpu) cpu.textContent = (d.avgCpu || 0).toFixed(1) + '%';
+                        }).catch(() => {});
                 }
                 """;
     }

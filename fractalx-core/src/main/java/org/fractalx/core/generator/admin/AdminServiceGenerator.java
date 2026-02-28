@@ -33,6 +33,9 @@ import java.util.List;
  *   <li>{@link AdminConfigManagementGenerator} — ServiceConfigStore, ConfigController</li>
  *   <li>{@link AdminAnalyticsGenerator} — MetricsHistoryStore, MetricsCollector, AnalyticsController (/api/analytics/**)</li>
  *   <li>{@link AdminApiExplorerGenerator} — ApiExplorerController (/api/explorer/**)</li>
+ *   <li>{@link AdminIncidentGenerator} — Incident, IncidentStore, IncidentController (/api/incidents/**)</li>
+ *   <li>{@link AdminGrpcBrowserGenerator} — GrpcBrowserController (/api/grpc/**)</li>
+ *   <li>{@link AdminConfigEditorGenerator} — ConfigEditorController (/api/config/editor/**)</li>
  * </ul>
  */
 public class AdminServiceGenerator {
@@ -62,6 +65,9 @@ public class AdminServiceGenerator {
     private final AdminConfigManagementGenerator  configManagementGenerator;
     private final AdminAnalyticsGenerator         analyticsGenerator;
     private final AdminApiExplorerGenerator       apiExplorerGenerator;
+    private final AdminIncidentGenerator          incidentGenerator;
+    private final AdminGrpcBrowserGenerator       grpcBrowserGenerator;
+    private final AdminConfigEditorGenerator      configEditorGenerator;
 
     public AdminServiceGenerator() {
         this.pomGenerator             = new AdminPomGenerator();
@@ -83,6 +89,9 @@ public class AdminServiceGenerator {
         this.configManagementGenerator= new AdminConfigManagementGenerator();
         this.analyticsGenerator       = new AdminAnalyticsGenerator();
         this.apiExplorerGenerator     = new AdminApiExplorerGenerator();
+        this.incidentGenerator        = new AdminIncidentGenerator();
+        this.grpcBrowserGenerator     = new AdminGrpcBrowserGenerator();
+        this.configEditorGenerator    = new AdminConfigEditorGenerator();
     }
 
     public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot)
@@ -127,6 +136,9 @@ public class AdminServiceGenerator {
         configManagementGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         analyticsGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         apiExplorerGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        incidentGenerator.generate(srcMainJava, BASE_PACKAGE);
+        grpcBrowserGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        configEditorGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
 
         // Template last (depends on all sub-systems being set up first)
         templateGenerator.generate(templatesPath, modules);
