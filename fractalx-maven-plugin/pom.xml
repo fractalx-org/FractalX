@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.fractalx</groupId>
+        <groupId>org.fractalx</groupId>
         <artifactId>fractalx-parent</artifactId>
         <version>0.2.0-SNAPSHOT</version>
         <relativePath>../fractalx-parent/pom.xml</relativePath>
@@ -19,7 +19,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.fractalx</groupId>
+            <groupId>org.fractalx</groupId>
             <artifactId>fractalx-core</artifactId>
             <version>${project.version}</version>
         </dependency>
