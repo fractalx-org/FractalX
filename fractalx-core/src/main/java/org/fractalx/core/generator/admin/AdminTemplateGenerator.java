@@ -1,0 +1,2055 @@
+package org.fractalx.core.generator.admin;
+
+import org.fractalx.core.model.FractalModule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+/** Generates Thymeleaf HTML templates (login + 9-section dashboard) for the admin service. */
+class AdminTemplateGenerator {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminTemplateGenerator.class);
+
+    /** @deprecated Use {@link #generate(Path, List)} instead. */
+    void generate(Path templatesPath) throws IOException {
+        generate(templatesPath, List.of());
+    }
+
+    void generate(Path templatesPath, List<FractalModule> modules) throws IOException {
+        generateLoginTemplate(templatesPath);
+        generateDashboardTemplate(templatesPath, modules);
+        log.debug("Generated admin templates (login + 9-section dashboard)");
+    }
+
+    // -------------------------------------------------------------------------
+
+    private void generateLoginTemplate(Path templatesPath) throws IOException {
+        String content = """
+                <!DOCTYPE html>
+                <html xmlns:th="http://www.thymeleaf.org" lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <title>FractalX Admin</title>
+                    <link rel="preconnect" href="https://fonts.googleapis.com">
+                    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+                    <link rel="stylesheet" th:href="@{/webjars/font-awesome/6.4.0/css/all.min.css}">
+                    <style>
+                        *,*::before,*::after{box-sizing:border-box}
+                        body{margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                             background:#f9fafb;min-height:100vh;display:flex;align-items:center;
+                             justify-content:center;color:#111827;-webkit-font-smoothing:antialiased}
+                        .wrap{width:100%;max-width:400px;padding:20px}
+                        .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:40px 36px}
+                        .logo{display:flex;align-items:center;gap:10px;margin-bottom:28px}
+                        .logo-icon{width:32px;height:32px;background:#111827;border-radius:7px;
+                                   display:flex;align-items:center;justify-content:center;
+                                   color:#fff;font-size:13px;flex-shrink:0}
+                        .logo-name{font-size:15px;font-weight:600;color:#111827}
+                        h2{margin:0 0 6px;font-size:22px;font-weight:600;color:#111827}
+                        .sub{margin:0 0 28px;font-size:13px;color:#6b7280}
+                        label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+                        input{width:100%;padding:9px 12px;font-size:14px;font-family:inherit;
+                              border:1px solid #d1d5db;border-radius:7px;color:#111827;background:#fff;
+                              outline:none;transition:border-color .15s,box-shadow .15s}
+                        input:focus{border-color:#111827;box-shadow:0 0 0 3px rgba(17,24,39,.08)}
+                        .mb4{margin-bottom:18px}.mb5{margin-bottom:24px}
+                        .btn-submit{width:100%;padding:10px;background:#111827;color:#fff;border:none;
+                                    border-radius:7px;font-size:14px;font-weight:500;font-family:inherit;
+                                    cursor:pointer;transition:background .15s}
+                        .btn-submit:hover{background:#1f2937}
+                        .alert-err{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;
+                                   font-size:13px;padding:10px 12px;border-radius:7px;margin-bottom:16px}
+                        .alert-ok{background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;
+                                  font-size:13px;padding:10px 12px;border-radius:7px;margin-bottom:16px}
+                        .footer{text-align:center;margin-top:20px;font-size:12px;color:#9ca3af}
+                    </style>
+                </head>
+                <body>
+                    <div class="wrap">
+                        <div class="card">
+                            <div class="logo">
+                                <div class="logo-icon"><i class="fas fa-cubes"></i></div>
+                                <span class="logo-name">FractalX</span>
+                            </div>
+                            <h2>Sign in</h2>
+                            <p class="sub">Access your microservices dashboard</p>
+                            <div th:if="${param.error}" class="alert-err">
+                                <i class="fas fa-exclamation-circle"></i>&nbsp;Invalid username or password.
+                            </div>
+                            <div th:if="${param.logout}" class="alert-ok">
+                                <i class="fas fa-check-circle"></i>&nbsp;You have been signed out.
+                            </div>
+                            <form th:action="@{/login}" method="post">
+                                <div class="mb4">
+                                    <label for="username">Username</label>
+                                    <input type="text" id="username" name="username" placeholder="admin" autofocus required>
+                                </div>
+                                <div class="mb5">
+                                    <label for="password">Password</label>
+                                    <input type="password" id="password" name="password" placeholder="••••••••" required>
+                                </div>
+                                <button type="submit" class="btn-submit">
+                                    Sign in &nbsp;<i class="fas fa-arrow-right" style="font-size:11px"></i>
+                                </button>
+                            </form>
+                        </div>
+                        <div class="footer">FractalX v0.3.2 &mdash; Microservices Framework</div>
+                    </div>
+                </body>
+                </html>
+                """;
+        Files.writeString(templatesPath.resolve("login.html"), content);
+    }
+
+    private void generateDashboardTemplate(Path templatesPath, List<FractalModule> modules)
+            throws IOException {
+        String content = buildDashboard();
+        Files.writeString(templatesPath.resolve("dashboard.html"), content);
+    }
+
+    // -------------------------------------------------------------------------
+    // Dashboard — assembled from focused helpers to stay under JVM 65535-byte limit
+    // -------------------------------------------------------------------------
+
+    private String buildDashboard() {
+        return buildHtmlHead()
+            + "<body>\n"
+            + "<div class=\"sb-overlay\" id=\"sb-overlay\" onclick=\"closeSidebar()\"></div>\n"
+            + buildSidebar()
+            + "<div class=\"main-wrap\" id=\"main-wrap\">\n"
+            + buildTopbar()
+            + "<div class=\"content-area\">\n"
+            + buildSectionOverview()
+            + buildSectionServices()
+            + buildSectionCommunication()
+            + buildSectionData()
+            + buildSectionObservability()
+            + buildSectionAlerts()
+            + buildSectionTracesLogs()
+            + buildSectionSettings()
+            + "</div>\n"
+            + "</div>\n\n"
+            + buildModals()
+            + "<script th:src=\"@{/webjars/jquery/3.7.0/jquery.min.js}\"></script>\n"
+            + "<script th:src=\"@{/webjars/bootstrap/5.3.0/js/bootstrap.bundle.min.js}\"></script>\n"
+            + "<script>\n"
+            + buildScriptsNavAndOverview()
+            + buildScriptsServices()
+            + buildScriptsCommunication()
+            + buildScriptsData()
+            + buildScriptsObservabilityAndAlerts()
+            + buildScriptsTracesLogsSettings()
+            + buildScriptsMobileNav()
+            + "</script>\n</body>\n</html>\n";
+    }
+
+    // ---- HTML HEAD ----------------------------------------------------------
+
+    private String buildHtmlHead() {
+        return buildHtmlHeadA() + buildHtmlHeadB();
+    }
+
+    private String buildHtmlHeadA() {
+        return """
+                <!DOCTYPE html>
+                <html xmlns:th="http://www.thymeleaf.org" lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <title>FractalX Admin</title>
+                    <link rel="preconnect" href="https://fonts.googleapis.com">
+                    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+                    <link rel="stylesheet" th:href="@{/webjars/bootstrap/5.3.0/css/bootstrap.min.css}">
+                    <link rel="stylesheet" th:href="@{/webjars/font-awesome/6.4.0/css/all.min.css}">
+                    <style>
+                        :root{--sb:240px;--topbar:52px;--bg:#f5f5f5;--surf:#ffffff;
+                              --bdr:#e5e7eb;--t1:#111827;--t2:#6b7280;--t3:#9ca3af;--r:8px}
+                        *,*::before,*::after{box-sizing:border-box}
+                        body{margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                             background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;
+                             -webkit-font-smoothing:antialiased}
+
+                        /* ── Sidebar ── */
+                        .sidebar{position:fixed;top:0;left:0;width:var(--sb);height:100vh;
+                                 background:var(--surf);border-right:1px solid var(--bdr);
+                                 display:flex;flex-direction:column;z-index:1000;
+                                 overflow-y:auto;transition:transform .25s ease}
+                        .sb-brand{display:flex;align-items:center;gap:10px;padding:16px;
+                                  border-bottom:1px solid var(--bdr);text-decoration:none;color:var(--t1);
+                                  flex-shrink:0}
+                        .sb-icon{width:30px;height:30px;background:#111827;border-radius:7px;
+                                 display:flex;align-items:center;justify-content:center;
+                                 color:#fff;font-size:13px;flex-shrink:0}
+                        .sb-name{font-size:14px;font-weight:600;color:#111827}
+                        .nav-grp{padding:14px 8px 2px}
+                        .nav-lbl{font-size:10.5px;font-weight:500;color:var(--t3);
+                                 text-transform:uppercase;letter-spacing:.08em;padding:0 8px 4px}
+                        .sidebar-nav a{display:flex;align-items:center;gap:9px;padding:7px 8px;
+                                       margin-bottom:1px;color:var(--t2);text-decoration:none;
+                                       font-size:13.5px;border-radius:6px;
+                                       transition:background .12s,color .12s}
+                        .sidebar-nav a .ni{width:15px;text-align:center;font-size:12px;
+                                           flex-shrink:0;color:var(--t3);transition:color .12s}
+                        .sidebar-nav a:hover,.sidebar-nav a.active{background:#f3f4f6;color:#111827}
+                        .sidebar-nav a:hover .ni,.sidebar-nav a.active .ni{color:#111827}
+                        .sidebar-nav a.active{font-weight:500}
+                        .alert-badge{background:#ef4444;color:#fff;border-radius:10px;
+                                     padding:1px 6px;font-size:10px;font-weight:600;
+                                     margin-left:auto;line-height:1.5}
+                        .sb-footer{margin-top:auto;padding:12px 8px;border-top:1px solid var(--bdr)}
+                        .sb-footer a{display:flex;align-items:center;gap:8px;padding:7px 8px;
+                                     color:var(--t2);text-decoration:none;font-size:13px;
+                                     border-radius:6px;transition:background .12s}
+                        .sb-footer a:hover{background:#fef2f2;color:#dc2626}
+                        .sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:999}
+                        .sb-overlay.open{display:block}
+                """;
+    }
+
+    private String buildHtmlHeadB() {
+        return """
+                        /* ── Layout ── */
+                        .main-wrap{margin-left:var(--sb);min-height:100vh;display:flex;flex-direction:column}
+                        .topbar{background:var(--surf);border-bottom:1px solid var(--bdr);
+                                padding:0 24px;height:var(--topbar);display:flex;align-items:center;
+                                justify-content:space-between;position:sticky;top:0;z-index:100;flex-shrink:0}
+                        .topbar-l{display:flex;align-items:center;gap:6px}
+                        .topbar-brand{font-size:13px;color:var(--t2);text-decoration:none}
+                        .topbar-sep{color:var(--t3);font-size:14px;padding:0 2px}
+                        #page-title{font-size:13px;font-weight:500;color:var(--t1)}
+                        .topbar-r{display:flex;align-items:center;gap:10px}
+                        .refresh-ts{font-size:11.5px;color:var(--t3)}
+                        .content-area{padding:24px;flex:1}
+                        .hamburger{display:none;background:none;border:1px solid var(--bdr);
+                                   border-radius:6px;width:34px;height:34px;align-items:center;
+                                   justify-content:center;cursor:pointer;color:var(--t2);font-size:13px}
+
+                        /* ── Cards ── */
+                        .card2{background:var(--surf);border:1px solid var(--bdr);
+                               border-radius:var(--r);overflow:hidden;margin-bottom:12px}
+                        .card2:last-child{margin-bottom:0}
+                        .card-hd{padding:12px 16px;border-bottom:1px solid var(--bdr);display:flex;
+                                 align-items:center;justify-content:space-between;font-size:13px;
+                                 font-weight:500;color:var(--t1);background:#fafafa}
+                        .card-hd-l{display:flex;align-items:center;gap:7px}
+                        .card-hd i{color:var(--t2);font-size:12px}
+                        .card-bd{padding:0}
+
+                        /* ── Stat cards ── */
+                        .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+                        .stat-card{background:var(--surf);border:1px solid var(--bdr);
+                                   border-radius:var(--r);padding:18px 20px}
+                        .stat-ic{width:34px;height:34px;border-radius:7px;display:flex;
+                                 align-items:center;justify-content:center;font-size:14px;margin-bottom:12px}
+                        .stat-val{font-size:26px;font-weight:600;line-height:1;
+                                  color:var(--t1);margin-bottom:4px}
+                        .stat-lbl{font-size:12px;color:var(--t2)}
+
+                        /* ── Tables ── */
+                        .table-wrap{overflow-x:auto}
+                        .table{font-size:13px}
+                        .table thead th{background:#fafafa;border-bottom:1px solid var(--bdr);
+                                        font-size:10.5px;font-weight:500;color:var(--t2);
+                                        text-transform:uppercase;letter-spacing:.05em;
+                                        padding:9px 14px;white-space:nowrap}
+                        .table tbody td{padding:11px 14px;border-bottom:1px solid #f3f4f6;
+                                        vertical-align:middle;color:var(--t1)}
+                        .table tbody tr:last-child td{border-bottom:none}
+                        .table-sm thead th,.table-sm tbody td{padding:8px 12px}
+                        .table-hover tbody tr:hover td{background:#fafafa}
+
+                        /* ── Badges ── */
+                        .badge-up{background:#dcfce7!important;color:#15803d!important}
+                        .badge-down{background:#fee2e2!important;color:#b91c1c!important}
+                        .badge-unknown{background:#f3f4f6!important;color:#6b7280!important}
+                        .badge.bg-success{background:#dcfce7!important;color:#15803d!important}
+                        .badge.bg-danger{background:#fee2e2!important;color:#b91c1c!important}
+                        .badge.bg-warning{background:#fef9c3!important;color:#854d0e!important;color:#854d0e}
+                        .badge.bg-secondary{background:#f3f4f6!important;color:#6b7280!important}
+                        .badge.bg-info{background:#dbeafe!important;color:#1d4ed8!important}
+                        .badge.bg-light{background:#f9fafb!important;color:#374151!important;
+                                        border:1px solid var(--bdr)!important}
+                        .badge.bg-primary{background:#ede9fe!important;color:#5b21b6!important}
+                        .badge{font-size:11px;font-weight:500;border-radius:20px;padding:2px 8px}
+
+                        /* ── Buttons override ── */
+                        .btn{font-family:inherit;font-size:13px;font-weight:500;border-radius:6px;
+                             transition:all .15s;display:inline-flex;align-items:center;gap:5px}
+                        .btn-primary{background:#111827!important;border-color:#111827!important;color:#fff!important}
+                        .btn-primary:hover{background:#1f2937!important;border-color:#1f2937!important}
+                        .btn-secondary{background:var(--surf)!important;border-color:var(--bdr)!important;color:var(--t1)!important}
+                        .btn-secondary:hover{background:#f9fafb!important}
+                        .btn-outline-primary{color:var(--t1)!important;border-color:var(--bdr)!important;background:var(--surf)!important}
+                        .btn-outline-primary:hover{background:#f3f4f6!important;border-color:#d1d5db!important;color:var(--t1)!important}
+                        .btn-outline-secondary{color:var(--t2)!important;border-color:var(--bdr)!important;background:transparent!important}
+                        .btn-outline-secondary:hover{background:#f3f4f6!important;color:var(--t1)!important}
+                        .btn-outline-success{color:#15803d!important;border-color:#bbf7d0!important;background:transparent!important}
+                        .btn-outline-success:hover{background:#f0fdf4!important}
+                        .btn-outline-warning{color:#92400e!important;border-color:#fde68a!important;background:transparent!important}
+                        .btn-outline-warning:hover{background:#fffbeb!important}
+                        .btn-outline-danger{color:#b91c1c!important;border-color:#fca5a5!important;background:transparent!important}
+                        .btn-outline-danger:hover{background:#fef2f2!important}
+                        .btn-outline-info{color:#1d4ed8!important;border-color:#bfdbfe!important;background:transparent!important}
+                        .btn-outline-info:hover{background:#eff6ff!important}
+                        .btn-light{background:#f3f4f6!important;border-color:var(--bdr)!important;color:var(--t2)!important}
+                        .btn-light:hover{background:#e5e7eb!important}
+                        .btn-xs{padding:2px 7px!important;font-size:11px!important}
+
+                        /* ── Forms ── */
+                        .form-control,.form-select{font-family:inherit;font-size:13px;
+                             border:1px solid var(--bdr);border-radius:6px;color:var(--t1);
+                             background:var(--surf);transition:border-color .15s,box-shadow .15s}
+                        .form-control:focus,.form-select:focus{border-color:#111827;
+                             box-shadow:0 0 0 3px rgba(17,24,39,.07);outline:none}
+                        .form-control-sm,.form-select-sm{padding:5px 9px;font-size:12.5px}
+                        .form-label{font-size:13px;font-weight:500;color:var(--t1)}
+                        .form-check-input:checked{background-color:#111827;border-color:#111827}
+
+                        /* ── Sections ── */
+                        .section{display:none}.section.active{display:block}
+
+                        /* ── Command box ── */
+                        .cmd-box{background:#0d0d0d;color:#4ade80;font-family:'Menlo','Monaco',monospace;
+                                 padding:9px 14px;border-radius:6px;font-size:12px;cursor:pointer;
+                                 user-select:all;overflow-x:auto;transition:background .2s;margin:3px 0}
+                        .cmd-box:hover{background:#1a1a1a}
+
+                        /* ── Topology ── */
+                        .topology-grid{display:flex;flex-wrap:wrap;gap:10px;padding:16px}
+                        .topo-node{background:var(--surf);border:1px solid var(--bdr);
+                                   border-top:3px solid var(--bdr);border-radius:8px;
+                                   padding:12px 14px;min-width:130px;text-align:center;font-size:13px}
+                        .topo-node.microservice{border-top-color:#6366f1}
+                        .topo-node.infrastructure{border-top-color:#10b981}
+                        .node-type{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.05em}
+                        .node-port{font-size:11px;color:var(--t2)}
+
+                        /* ── Settings tabs ── */
+                        .settings-tabs{display:flex;border-bottom:1px solid var(--bdr);
+                                       margin-bottom:16px;overflow-x:auto}
+                        .tab-btn{background:none;border:none;border-bottom:2px solid transparent;
+                                 padding:9px 14px;font-size:13px;color:var(--t2);cursor:pointer;
+                                 font-family:inherit;margin-bottom:-1px;white-space:nowrap;
+                                 transition:color .12s}
+                        .tab-btn:hover{color:var(--t1)}
+                        .tab-btn.active{color:var(--t1);font-weight:500;border-bottom-color:#111827}
+                        .settings-pane{display:none}.settings-pane.active{display:block}
+
+                        /* ── Modal ── */
+                        .modal-content{border:1px solid var(--bdr);border-radius:12px;
+                                       box-shadow:0 8px 32px rgba(0,0,0,.1);font-family:inherit}
+                        .modal-header{border-bottom:1px solid var(--bdr);padding:16px 20px}
+                        .modal-title{font-size:15px;font-weight:600}
+                        .modal-body{padding:20px}
+                        .modal-footer{border-top:1px solid var(--bdr);padding:14px 20px}
+
+                        /* ── Accordion override ── */
+                        .accordion-button{font-family:inherit;font-size:13px;background:#fafafa;
+                                          color:var(--t1);padding:10px 14px}
+                        .accordion-button:not(.collapsed){background:#f3f4f6;color:var(--t1);box-shadow:none}
+                        .accordion-item{border-color:var(--bdr)}
+
+                        /* ── Code ── */
+                        code{font-family:'Menlo','Monaco','Courier New',monospace;font-size:11.5px;
+                             background:#f3f4f6;padding:1px 5px;border-radius:4px;color:#374151}
+                        pre{font-family:'Menlo','Monaco',monospace;font-size:12px;background:#f9fafb;
+                            border:1px solid var(--bdr);border-radius:6px;padding:10px 12px;
+                            overflow-x:auto;color:var(--t1);margin:0}
+
+                        /* ── Responsive ── */
+                        @media(max-width:900px){
+                            .sidebar{transform:translateX(-100%);box-shadow:2px 0 16px rgba(0,0,0,.1)}
+                            .sidebar.open{transform:translateX(0)}
+                            .main-wrap{margin-left:0}
+                            .hamburger{display:flex}
+                            .stats-row{grid-template-columns:repeat(2,1fr)}
+                            .content-area{padding:16px}
+                        }
+                        @media(max-width:480px){
+                            .stats-row{grid-template-columns:1fr 1fr}
+                            .topbar{padding:0 14px}
+                        }
+
+                        /* ── Utilities ── */
+                        .text-muted{color:var(--t2)!important}
+                        .ms-auto{margin-left:auto!important}
+                        .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+                        @media(max-width:768px){.two-col{grid-template-columns:1fr}}
+                    </style>
+                </head>
+                """;
+    }
+
+    // ---- SIDEBAR ------------------------------------------------------------
+
+    private String buildSidebar() {
+        return """
+                <aside class="sidebar" id="sidebar">
+                    <a class="sb-brand" href="#">
+                        <div class="sb-icon"><i class="fas fa-cubes"></i></div>
+                        <span class="sb-name">FractalX</span>
+                    </a>
+                    <nav class="sidebar-nav">
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Overview</div>
+                            <a href="#" onclick="showSection('overview');closeSidebar()" id="nav-overview" class="active">
+                                <i class="fas fa-th-large ni"></i> Overview
+                            </a>
+                            <a href="#" onclick="showSection('services');closeSidebar()" id="nav-services">
+                                <i class="fas fa-server ni"></i> Services
+                            </a>
+                        </div>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Architecture</div>
+                            <a href="#" onclick="showSection('communication');closeSidebar()" id="nav-communication">
+                                <i class="fas fa-project-diagram ni"></i> Communication
+                            </a>
+                            <a href="#" onclick="showSection('data');closeSidebar()" id="nav-data">
+                                <i class="fas fa-database ni"></i> Data Consistency
+                            </a>
+                        </div>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Monitoring</div>
+                            <a href="#" onclick="showSection('observability');closeSidebar()" id="nav-observability">
+                                <i class="fas fa-chart-line ni"></i> Observability
+                            </a>
+                            <a href="#" onclick="showSection('alerts');closeSidebar()" id="nav-alerts">
+                                <i class="fas fa-bell ni"></i> Alerts
+                                <span class="alert-badge" id="alert-badge" style="display:none">0</span>
+                            </a>
+                            <a href="#" onclick="showSection('traces');closeSidebar()" id="nav-traces">
+                                <i class="fas fa-route ni"></i> Traces
+                            </a>
+                            <a href="#" onclick="showSection('logs');closeSidebar()" id="nav-logs">
+                                <i class="fas fa-file-alt ni"></i> Logs
+                            </a>
+                        </div>
+                        <div class="nav-grp">
+                            <div class="nav-lbl">Admin</div>
+                            <a href="#" onclick="showSection('settings');closeSidebar()" id="nav-settings">
+                                <i class="fas fa-sliders-h ni"></i> Settings
+                            </a>
+                        </div>
+                    </nav>
+                    <div class="sb-footer">
+                        <a href="/logout">
+                            <i class="fas fa-sign-out-alt" style="width:15px;text-align:center"></i>
+                            Sign out
+                        </a>
+                    </div>
+                </aside>
+                """;
+    }
+
+    // ---- TOPBAR -------------------------------------------------------------
+
+    private String buildTopbar() {
+        return """
+                    <header class="topbar">
+                        <div class="topbar-l">
+                            <button class="hamburger" onclick="openSidebar()" aria-label="Open menu">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <a class="topbar-brand" href="#">FractalX</a>
+                            <span class="topbar-sep">/</span>
+                            <span id="page-title">Overview</span>
+                        </div>
+                        <div class="topbar-r">
+                            <span class="refresh-ts">
+                                <i class="fas fa-clock" style="margin-right:4px;color:var(--t3)"></i>
+                                <span id="last-refresh">—</span>
+                            </span>
+                            <button class="btn btn-light btn-sm" onclick="refreshCurrent()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                            <a href="/api/auth/profile" class="d-flex align-items-center gap-2 text-decoration-none"
+                               style="font-size:13px;color:var(--t2)">
+                                <span style="width:26px;height:26px;background:#f3f4f6;border:1px solid var(--bdr);
+                                             border-radius:50%;display:flex;align-items:center;justify-content:center;
+                                             font-size:11px;color:var(--t2)">
+                                    <i class="fas fa-user"></i>
+                                </span>
+                                <span id="current-user" style="font-weight:500;color:var(--t1)">admin</span>
+                            </a>
+                        </div>
+                    </header>
+                """;
+    }
+
+    // ---- SECTIONS -----------------------------------------------------------
+
+    private String buildSectionOverview() {
+        return """
+                    <div id="section-overview" class="section active">
+                        <div class="stats-row">
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#ede9fe">
+                                    <i class="fas fa-server" style="color:#7c3aed"></i>
+                                </div>
+                                <div class="stat-val" id="ov-total">—</div>
+                                <div class="stat-lbl">Total Services</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#dcfce7">
+                                    <i class="fas fa-check-circle" style="color:#15803d"></i>
+                                </div>
+                                <div class="stat-val" id="ov-up">—</div>
+                                <div class="stat-lbl">Running</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#fee2e2">
+                                    <i class="fas fa-times-circle" style="color:#b91c1c"></i>
+                                </div>
+                                <div class="stat-val" id="ov-down">—</div>
+                                <div class="stat-lbl">Down / Unknown</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#fef3c7">
+                                    <i class="fas fa-bell" style="color:#d97706"></i>
+                                </div>
+                                <div class="stat-val" id="ov-alerts">—</div>
+                                <div class="stat-lbl">Active Alerts</div>
+                            </div>
+                        </div>
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-heartbeat" style="color:#10b981"></i>
+                                    <span>Quick Health Status</span>
+                                </div>
+                                <button class="btn btn-light btn-sm" onclick="loadOverview()">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </div>
+                            <div class="card-bd table-wrap">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead><tr>
+                                        <th>Service</th><th>Status</th><th>Port</th><th>Type</th><th>Actions</th>
+                                    </tr></thead>
+                                    <tbody id="overview-tbody">
+                                        <tr><td colspan="5" class="text-center text-muted p-4">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                """;
+    }
+
+    private String buildSectionServices() {
+        return """
+                    <div id="section-services" class="section">
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-server" style="color:#6366f1"></i>
+                                    <span>All Services</span>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <input type="text" class="form-control form-control-sm"
+                                           id="svc-filter" placeholder="Filter services…"
+                                           style="width:160px" oninput="filterServicesTable(this.value)">
+                                    <button class="btn btn-primary btn-sm" onclick="loadServicesAll()">
+                                        <i class="fas fa-sync-alt"></i> Refresh
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-bd table-wrap">
+                                <table class="table table-sm table-hover mb-0" id="services-table">
+                                    <thead><tr>
+                                        <th>Name</th><th>Type</th><th>HTTP</th><th>gRPC</th>
+                                        <th>Health</th><th>Dependencies</th><th>Version</th><th>Actions</th>
+                                    </tr></thead>
+                                    <tbody id="services-tbody">
+                                        <tr><td colspan="8" class="text-center text-muted p-4">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                """;
+    }
+
+    private String buildSectionCommunication() {
+        return """
+                    <div id="section-communication" class="section">
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-project-diagram" style="color:#6366f1"></i>
+                                    <span>Service Dependency Topology</span>
+                                </div>
+                            </div>
+                            <div id="topology-grid" class="topology-grid">
+                                <span class="text-muted p-3">Loading topology…</span>
+                            </div>
+                        </div>
+                        <div class="two-col" style="margin-top:12px">
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-network-wired" style="color:#3b82f6"></i>
+                                        <span>NetScope / gRPC Links</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Source</th><th>Target</th><th>gRPC Port</th><th>Protocol</th>
+                                        </tr></thead>
+                                        <tbody id="netscope-tbody">
+                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="card2">
+                                    <div class="card-hd">
+                                        <div class="card-hd-l">
+                                            <i class="fas fa-exchange-alt" style="color:#10b981"></i>
+                                            <span>API Gateway</span>
+                                        </div>
+                                    </div>
+                                    <div class="card-bd p-3" id="gateway-info">
+                                        <span class="text-muted">Loading…</span>
+                                    </div>
+                                </div>
+                                <div class="card2">
+                                    <div class="card-hd">
+                                        <div class="card-hd-l">
+                                            <i class="fas fa-satellite-dish" style="color:#f59e0b"></i>
+                                            <span>Service Discovery</span>
+                                        </div>
+                                    </div>
+                                    <div class="card-bd p-3" id="discovery-info">
+                                        <span class="text-muted">Loading…</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                """;
+    }
+
+    private String buildSectionData() {
+        return """
+                    <div id="section-data" class="section">
+                        <div class="stats-row" style="grid-template-columns:repeat(3,1fr)">
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#ede9fe">
+                                    <i class="fas fa-sitemap" style="color:#7c3aed"></i>
+                                </div>
+                                <div class="stat-val" id="data-saga-count">—</div>
+                                <div class="stat-lbl">Saga Definitions</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#dbeafe">
+                                    <i class="fas fa-database" style="color:#1d4ed8"></i>
+                                </div>
+                                <div class="stat-val" id="data-svc-count">—</div>
+                                <div class="stat-lbl">Services with DB</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-ic" style="background:#dcfce7">
+                                    <i class="fas fa-cogs" style="color:#15803d"></i>
+                                </div>
+                                <div class="stat-val" id="data-orch-health">—</div>
+                                <div class="stat-lbl">Saga Orchestrator</div>
+                            </div>
+                        </div>
+                        <div class="two-col">
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-sitemap" style="color:#6366f1"></i>
+                                        <span>Saga Definitions</span>
+                                    </div>
+                                    <button class="btn btn-outline-secondary btn-sm"
+                                            onclick="loadSagaInstances()">
+                                        View Instances
+                                    </button>
+                                </div>
+                                <div class="card-bd table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Saga ID</th><th>Service</th><th>Steps</th><th>Compensation</th>
+                                        </tr></thead>
+                                        <tbody id="sagas-tbody">
+                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-database" style="color:#f59e0b"></i>
+                                        <span>Database Health</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Service</th><th>Schemas</th><th>Health</th>
+                                        </tr></thead>
+                                        <tbody id="databases-tbody">
+                                            <tr><td colspan="3" class="text-muted p-3">Loading…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card2" style="margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-inbox" style="color:#10b981"></i>
+                                    <span>Outbox Events</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3" id="outbox-info">
+                                <span class="text-muted">Loading…</span>
+                            </div>
+                        </div>
+                    </div>
+                """;
+    }
+
+    private String buildSectionObservability() {
+        return """
+                    <div id="section-observability" class="section">
+                        <div class="row g-3 mb-3" id="metrics-cards">
+                            <div class="col-12 text-center text-muted p-4">Loading metrics…</div>
+                        </div>
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-chart-bar" style="color:#6366f1"></i>
+                                    <span>Service Health Metrics</span>
+                                </div>
+                                <button class="btn btn-primary btn-sm" onclick="loadMetrics()">
+                                    <i class="fas fa-sync-alt"></i> Refresh
+                                </button>
+                            </div>
+                            <div class="card-bd table-wrap">
+                                <table class="table table-sm mb-0">
+                                    <thead><tr>
+                                        <th>Service</th><th>Health</th><th>Response P99</th>
+                                        <th>Error Rate</th><th>Uptime</th>
+                                    </tr></thead>
+                                    <tbody id="metrics-tbody">
+                                        <tr><td colspan="5" class="text-muted p-4 text-center">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card2" style="margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-broadcast-tower" style="color:#3b82f6"></i>
+                                    <span>OpenTelemetry Configuration</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <div class="text-muted mb-1" style="font-size:11.5px">OTLP Endpoint</div>
+                                        <div class="cmd-box">${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}</div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="text-muted mb-1" style="font-size:11.5px">Jaeger UI</div>
+                                        <div class="cmd-box">
+                                            <a href="http://localhost:16686" target="_blank"
+                                               style="color:#4ade80;text-decoration:none">
+                                                http://localhost:16686
+                                                <i class="fas fa-external-link-alt" style="font-size:10px;margin-left:4px"></i>
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p class="text-muted mt-2 mb-0" style="font-size:12px">
+                                    All services export spans via OTLP/gRPC to Jaeger.
+                                    Correlation IDs propagated via W3C <code>traceparent</code> + <code>X-Correlation-Id</code>.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                """;
+    }
+
+    private String buildSectionAlerts() {
+        return """
+                    <div id="section-alerts" class="section">
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-exclamation-triangle" style="color:#f59e0b"></i>
+                                    <span>Active Alerts</span>
+                                    <span class="badge bg-danger ms-1" id="active-alert-count">0</span>
+                                </div>
+                                <button class="btn btn-primary btn-sm" onclick="loadAlerts()">
+                                    <i class="fas fa-sync-alt"></i> Refresh
+                                </button>
+                            </div>
+                            <div class="card-bd table-wrap">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead><tr>
+                                        <th>Time</th><th>Service</th><th>Severity</th><th>Message</th><th>Action</th>
+                                    </tr></thead>
+                                    <tbody id="active-alerts-tbody">
+                                        <tr><td colspan="5" class="text-center text-muted p-4">No active alerts</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card2" style="margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-history" style="color:var(--t2)"></i>
+                                    <span>Alert History</span>
+                                </div>
+                            </div>
+                            <div class="card-bd table-wrap">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead><tr>
+                                        <th>Time</th><th>Service</th><th>Severity</th><th>Message</th><th>Status</th>
+                                    </tr></thead>
+                                    <tbody id="alert-history-tbody">
+                                        <tr><td colspan="5" class="text-center text-muted p-4">No alerts recorded</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card2" style="margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-sliders-h" style="color:#3b82f6"></i>
+                                    <span>Alert Rules</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3" id="alert-config-info">
+                                <span class="text-muted">Loading…</span>
+                            </div>
+                        </div>
+                    </div>
+                """;
+    }
+
+    private String buildSectionTracesLogs() {
+        return """
+                    <div id="section-traces" class="section">
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-route" style="color:#6366f1"></i>
+                                    <span>Distributed Trace Search</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3">
+                                <div class="row g-2 mb-3">
+                                    <div class="col-md-5">
+                                        <input type="text" class="form-control form-control-sm"
+                                               id="trace-correlation-id"
+                                               placeholder="Correlation ID (X-Correlation-Id)">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <select class="form-select form-select-sm" id="trace-service-select">
+                                            <option value="">— All Services —</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <button class="btn btn-primary btn-sm w-100" onclick="searchTraces()">
+                                            <i class="fas fa-search"></i> Search
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Trace ID</th><th>Service</th><th>Duration</th>
+                                            <th>Spans</th><th>Jaeger</th>
+                                        </tr></thead>
+                                        <tbody id="traces-tbody">
+                                            <tr><td colspan="5" class="text-center text-muted p-4">
+                                                Enter a Correlation ID or service to search
+                                            </td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="mt-2">
+                                    <a href="http://localhost:16686" target="_blank"
+                                       style="font-size:12px;color:#3b82f6;text-decoration:none">
+                                        <i class="fas fa-external-link-alt me-1"></i>Open Jaeger UI
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="section-logs" class="section">
+                        <div class="card2">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-file-alt" style="color:var(--t2)"></i>
+                                    <span>Log Viewer</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3">
+                                <div class="row g-2 mb-3">
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm"
+                                               id="log-correlation-id" placeholder="Correlation ID">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <select class="form-select form-select-sm" id="log-service-select">
+                                            <option value="">— All Services —</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <select class="form-select form-select-sm" id="log-level-select">
+                                            <option value="">All Levels</option>
+                                            <option>INFO</option><option>WARN</option>
+                                            <option>ERROR</option><option>DEBUG</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button class="btn btn-primary btn-sm w-100" onclick="searchLogs(0)">
+                                            <i class="fas fa-search"></i> Search
+                                        </button>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button class="btn btn-outline-secondary btn-sm w-100" onclick="loadLogStats()">
+                                            <i class="fas fa-chart-pie"></i> Stats
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="table-wrap">
+                                    <table class="table table-sm table-hover mb-2" style="font-size:.82rem">
+                                        <thead><tr>
+                                            <th>Time</th><th>Service</th><th>Level</th>
+                                            <th>Correlation ID</th><th>Message</th>
+                                        </tr></thead>
+                                        <tbody id="logs-tbody">
+                                            <tr><td colspan="5" class="text-center text-muted p-4">
+                                                Use filters above to search logs
+                                            </td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div id="log-pagination" class="d-flex gap-2 flex-wrap"></div>
+                            </div>
+                        </div>
+                        <div class="card2" id="log-stats-card" style="display:none;margin-top:12px">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-chart-pie"></i>
+                                    <span>Log Statistics</span>
+                                </div>
+                            </div>
+                            <div class="card-bd p-3" id="log-stats-content"></div>
+                        </div>
+                    </div>
+                """;
+    }
+
+    private String buildSectionSettings() {
+        return """
+                    <div id="section-settings" class="section">
+                        <div class="settings-tabs">
+                            <button class="tab-btn active" onclick="showSettingsTab('users')">
+                                <i class="fas fa-users me-1"></i>Users
+                            </button>
+                            <button class="tab-btn" onclick="showSettingsTab('configuration')">
+                                <i class="fas fa-sliders-h me-1"></i>Configuration
+                            </button>
+                            <button class="tab-btn" onclick="showSettingsTab('notifications')">
+                                <i class="fas fa-bell me-1"></i>Notifications
+                            </button>
+                            <button class="tab-btn" onclick="showSettingsTab('general')">
+                                <i class="fas fa-wrench me-1"></i>General
+                            </button>
+                        </div>
+
+                        <div id="settings-pane-users" class="settings-pane active">
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-users" style="color:#6366f1"></i>
+                                        <span>User Management</span>
+                                    </div>
+                                    <button class="btn btn-primary btn-sm"
+                                            data-bs-toggle="modal" data-bs-target="#addUserModal">
+                                        <i class="fas fa-plus"></i> Add User
+                                    </button>
+                                </div>
+                                <div class="card-bd table-wrap">
+                                    <table class="table table-sm table-hover mb-0">
+                                        <thead><tr>
+                                            <th>Username</th><th>Roles</th><th>Status</th>
+                                            <th>Last Login</th><th>Created</th><th>Actions</th>
+                                        </tr></thead>
+                                        <tbody id="users-tbody">
+                                            <tr><td colspan="6" class="text-muted p-4 text-center">Loading…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="settings-pane-configuration" class="settings-pane">
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-network-wired" style="color:#3b82f6"></i>
+                                        <span>Port Mapping</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd table-wrap">
+                                    <table class="table table-sm mb-0">
+                                        <thead><tr>
+                                            <th>Service</th><th>HTTP Port</th><th>gRPC Port</th>
+                                            <th>Outbox</th><th>Commands</th>
+                                        </tr></thead>
+                                        <tbody id="config-ports-tbody">
+                                            <tr><td colspan="5" class="text-muted p-3">Loading…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="card2" style="margin-top:12px">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-code" style="color:var(--t2)"></i>
+                                        <span>Environment Variables</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd p-2">
+                                    <div class="accordion" id="env-accordion">
+                                        <div class="text-muted p-3">Loading…</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="settings-pane-notifications" class="settings-pane">
+                            <div class="card2">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-bell" style="color:#f59e0b"></i>
+                                        <span>Alert Channels</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd p-3" id="notification-config-content">
+                                    <span class="text-muted">Loading…</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="settings-pane-general" class="settings-pane">
+                            <div class="card2" style="max-width:560px">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-wrench" style="color:var(--t2)"></i>
+                                        <span>General Settings</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd p-4">
+                                    <form onsubmit="updateSettings(event)">
+                                        <div class="mb-3">
+                                            <label class="form-label">Site Name</label>
+                                            <input type="text" class="form-control" id="setting-site-name"
+                                                   value="FractalX Admin">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Theme</label>
+                                            <select class="form-select" id="setting-theme">
+                                                <option value="light">Light</option>
+                                                <option value="dark">Dark</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Session Timeout (minutes)</label>
+                                            <input type="number" class="form-control"
+                                                   id="setting-session-timeout" value="30" min="5" max="1440">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Default Alert Email</label>
+                                            <input type="email" class="form-control" id="setting-alert-email"
+                                                   placeholder="alerts@example.com">
+                                        </div>
+                                        <div class="mb-4 form-check">
+                                            <input type="checkbox" class="form-check-input" id="setting-maintenance">
+                                            <label class="form-check-label" for="setting-maintenance"
+                                                   style="font-weight:400">Maintenance Mode</label>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-3">
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="fas fa-save"></i> Save Settings
+                                            </button>
+                                            <span id="settings-save-status" class="text-muted"
+                                                  style="font-size:12px;display:none">
+                                                <i class="fas fa-check" style="color:#10b981"></i> Saved
+                                            </span>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                """;
+    }
+
+    // ---- MODALS -------------------------------------------------------------
+
+    private String buildModals() {
+        return """
+                <div class="modal fade" id="serviceDetailModal" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    <i class="fas fa-server me-2" style="color:#6366f1"></i>
+                                    <span id="svc-detail-title">Service Detail</span>
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body" id="svc-detail-body">Loading…</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal fade" id="lifecycleModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    <i class="fas fa-terminal me-2"></i>
+                                    Lifecycle &mdash; <span id="lc-service-name"></span>
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="text-muted mb-3" style="font-size:12.5px">
+                                    Run these commands from your project directory where
+                                    <code>docker-compose.yml</code> resides.
+                                </p>
+                                <div id="lifecycle-commands"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal fade" id="addUserModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    <i class="fas fa-user-plus me-2" style="color:#6366f1"></i>Add User
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label class="form-label">Username</label>
+                                    <input type="text" class="form-control" id="new-username">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Password</label>
+                                    <input type="password" class="form-control" id="new-password">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Role</label>
+                                    <select class="form-select" id="new-role">
+                                        <option value="ROLE_ADMIN">Admin</option>
+                                        <option value="ROLE_OPERATOR">Operator</option>
+                                        <option value="ROLE_VIEWER" selected>Viewer</option>
+                                    </select>
+                                </div>
+                                <span id="add-user-error" class="text-danger" style="font-size:12.5px"></span>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary"
+                                        data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-primary"
+                                        onclick="createUser()">Create User</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal fade" id="changePasswordModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    Change Password &mdash; <span id="cp-username"></span>
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="hidden" id="cp-user">
+                                <div class="mb-3">
+                                    <label class="form-label">New Password</label>
+                                    <input type="password" class="form-control" id="cp-new-password">
+                                </div>
+                                <span id="cp-error" class="text-danger" style="font-size:12.5px"></span>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary"
+                                        data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-outline-warning"
+                                        onclick="submitPasswordChange()">Change Password</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """;
+    }
+
+    // ---- SCRIPTS: navigation + overview -------------------------------------
+
+    private String buildScriptsNavAndOverview() {
+        return """
+                let currentSection = 'overview';
+
+                function showSection(name) {
+                    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+                    document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.remove('active'));
+                    document.getElementById('section-' + name).classList.add('active');
+                    document.getElementById('nav-' + name).classList.add('active');
+                    document.getElementById('page-title').textContent =
+                        name.charAt(0).toUpperCase() + name.slice(1);
+                    currentSection = name;
+                    refreshCurrent();
+                }
+
+                function refreshCurrent() {
+                    const fn = {
+                        overview: loadOverview, services: loadServicesAll,
+                        communication: loadCommunicationData, data: loadDataConsistency,
+                        observability: loadMetrics, alerts: loadAlerts,
+                        traces: loadTraceServices, logs: loadLogServices,
+                        settings: loadSettingsSection
+                    };
+                    if (fn[currentSection]) fn[currentSection]();
+                    document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
+                }
+
+                function loadOverview() {
+                    fetch('/api/services/all')
+                        .then(r => r.json()).then(services => {
+                            let up = 0, down = 0;
+                            const tbody = document.getElementById('overview-tbody');
+                            tbody.innerHTML = '';
+                            services.forEach(s => {
+                                const h = s.health || 'UNKNOWN';
+                                if (h === 'UP') up++; else down++;
+                                tbody.innerHTML += `<tr>
+                                    <td><strong>${s.meta.name}</strong></td>
+                                    <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'}">${h}</span></td>
+                                    <td>${s.meta.port || '-'}</td>
+                                    <td><span class="badge bg-light text-dark">${s.meta.type}</span></td>
+                                    <td>
+                                        <button class="btn btn-xs btn-outline-primary btn-sm py-0 px-1"
+                                            onclick="showServiceDetailModal('${s.meta.name}')">Detail</button>
+                                        <button class="btn btn-xs btn-outline-secondary btn-sm py-0 px-1"
+                                            onclick="showLifecycleModal('${s.meta.name}')">Commands</button>
+                                    </td>
+                                </tr>`;
+                            });
+                            document.getElementById('ov-total').textContent = services.length;
+                            document.getElementById('ov-up').textContent = up;
+                            document.getElementById('ov-down').textContent = down;
+                        }).catch(() => {
+                            document.getElementById('overview-tbody').innerHTML =
+                                '<tr><td colspan="5" class="text-danger text-center p-3">Failed to load services</td></tr>';
+                        });
+                    fetch('/api/alerts/active')
+                        .then(r => r.json())
+                        .then(a => document.getElementById('ov-alerts').textContent = a.length)
+                        .catch(() => {});
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: services --------------------------------------------------
+
+    private String buildScriptsServices() {
+        return """
+                let allServicesData = [];
+
+                function loadServicesAll() {
+                    fetch('/api/services/all')
+                        .then(r => r.json()).then(services => {
+                            allServicesData = services;
+                            renderServicesTable(services);
+                        }).catch(() => {
+                            document.getElementById('services-tbody').innerHTML =
+                                '<tr><td colspan="8" class="text-danger">Failed to load</td></tr>';
+                        });
+                }
+
+                function renderServicesTable(services) {
+                    const tbody = document.getElementById('services-tbody');
+                    tbody.innerHTML = '';
+                    services.forEach(s => {
+                        const m = s.meta;
+                        const h = s.health || 'UNKNOWN';
+                        const dep = m.deployment ? m.deployment.version || '?' : '?';
+                        const depStr = (m.dependencies && m.dependencies.length)
+                            ? m.dependencies.join(', ') : '<span class="text-muted">none</span>';
+                        tbody.innerHTML += `<tr>
+                            <td><strong>${m.name}</strong></td>
+                            <td><span class="badge bg-light text-dark small">${m.type}</span></td>
+                            <td>${m.port || '-'}</td>
+                            <td>${m.grpcPort || '-'}</td>
+                            <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'} small">${h}</span></td>
+                            <td><small>${depStr}</small></td>
+                            <td><small>v${dep}</small></td>
+                            <td>
+                                <button class="btn btn-xs btn-outline-primary btn-sm py-0 px-1 me-1"
+                                    onclick="showServiceDetailModal('${m.name}')">
+                                    <i class="fas fa-info-circle"></i>
+                                </button>
+                                <button class="btn btn-xs btn-outline-secondary btn-sm py-0 px-1"
+                                    onclick="showLifecycleModal('${m.name}')">
+                                    <i class="fas fa-terminal"></i>
+                                </button>
+                            </td>
+                        </tr>`;
+                    });
+                }
+
+                function filterServicesTable(q) {
+                    const filtered = allServicesData.filter(s =>
+                        s.meta.name.toLowerCase().includes(q.toLowerCase()) ||
+                        s.meta.type.toLowerCase().includes(q.toLowerCase()));
+                    renderServicesTable(filtered);
+                }
+
+                function showServiceDetailModal(name) {
+                    document.getElementById('svc-detail-title').textContent = name;
+                    document.getElementById('svc-detail-body').innerHTML = '<div class="text-muted">Loading...</div>';
+                    const modal = new bootstrap.Modal(document.getElementById('serviceDetailModal'));
+                    modal.show();
+                    fetch('/api/services/' + name + '/detail')
+                        .then(r => r.json()).then(d => {
+                            const m = d.meta;
+                            const h = d.health || {};
+                            const dep = d.deployment || {};
+                            const stages = dep.stages || [];
+                            const stageHtml = stages.map(s =>
+                                `<span class="badge bg-success me-1">${s.name} \u2713</span>`).join('');
+                            document.getElementById('svc-detail-body').innerHTML = `
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <h6 class="text-muted mb-1">Service Info</h6>
+                                        <table class="table table-sm">
+                                            <tr><th>Name</th><td>${m.name}</td></tr>
+                                            <tr><th>Type</th><td>${m.type}</td></tr>
+                                            <tr><th>HTTP Port</th><td>${m.port}</td></tr>
+                                            <tr><th>gRPC Port</th><td>${m.grpcPort || '-'}</td></tr>
+                                            <tr><th>Package</th><td><small>${m.packageName || '-'}</small></td></tr>
+                                        </table>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h6 class="text-muted mb-1">Health</h6>
+                                        <pre class="bg-light p-2 rounded small" style="max-height:120px;overflow:auto">${JSON.stringify(h, null, 2)}</pre>
+                                    </div>
+                                </div>
+                                <h6 class="text-muted mb-1 mt-2">Deployment Stages</h6>
+                                <div>${stageHtml || '<span class="text-muted small">No stage data</span>'}</div>
+                            `;
+                        }).catch(() => {
+                            document.getElementById('svc-detail-body').innerHTML =
+                                '<div class="text-danger">Failed to load service detail</div>';
+                        });
+                }
+
+                function showLifecycleModal(name) {
+                    document.getElementById('lc-service-name').textContent = name;
+                    document.getElementById('lifecycle-commands').innerHTML = '<div class="text-muted">Loading...</div>';
+                    const modal = new bootstrap.Modal(document.getElementById('lifecycleModal'));
+                    modal.show();
+                    fetch('/api/services/' + name + '/commands')
+                        .then(r => r.json()).then(cmds => {
+                            let html = '';
+                            for (const [action, cmd] of Object.entries(cmds)) {
+                                html += `<div class="mb-2">
+                                    <small class="text-muted text-uppercase">${action}</small>
+                                    <div class="cmd-box" title="Click to copy" onclick="copyText(this)">${cmd}</div>
+                                </div>`;
+                            }
+                            document.getElementById('lifecycle-commands').innerHTML = html;
+                        }).catch(() => {
+                            document.getElementById('lifecycle-commands').innerHTML =
+                                '<div class="text-danger">Failed to load commands</div>';
+                        });
+                }
+
+                function copyText(el) {
+                    navigator.clipboard.writeText(el.textContent.trim()).then(() => {
+                        el.style.background = '#166534';
+                        setTimeout(() => el.style.background = '', 1000);
+                    });
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: communication ---------------------------------------------
+
+    private String buildScriptsCommunication() {
+        return """
+                function loadCommunicationData() {
+                    fetch('/api/communication/topology')
+                        .then(r => r.json()).then(data => drawTopologyGrid(data))
+                        .catch(() => document.getElementById('topology-grid').innerHTML =
+                            '<div class="text-danger p-3">Failed to load topology</div>');
+
+                    fetch('/api/communication/netscope')
+                        .then(r => r.json()).then(data => {
+                            const tbody = document.getElementById('netscope-tbody');
+                            tbody.innerHTML = '';
+                            if (!data.length) {
+                                tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No NetScope links</td></tr>';
+                                return;
+                            }
+                            data.forEach(svc => {
+                                (svc.dependencies || []).forEach(dep => {
+                                    tbody.innerHTML += `<tr>
+                                        <td>${svc.service}</td><td>${dep.name}</td>
+                                        <td><code>${dep.grpcPort}</code></td><td>${dep.protocol}</td>
+                                    </tr>`;
+                                });
+                            });
+                        }).catch(() => {});
+
+                    fetch('/api/communication/gateway/health')
+                        .then(r => r.json()).then(h => {
+                            const status = h.status || 'UNKNOWN';
+                            document.getElementById('gateway-info').innerHTML = `
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <span class="badge ${status==='UP'?'badge-up':'badge-down'} fs-6">${status}</span>
+                                    <span class="text-muted small">API Gateway (port 8080)</span>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" onclick="loadGatewayMetrics()">
+                                    <i class="fas fa-chart-bar me-1"></i>View Metrics
+                                </button>`;
+                        }).catch(() => {
+                            document.getElementById('gateway-info').innerHTML =
+                                '<span class="badge badge-down">DOWN</span> <small class="text-muted">Gateway unavailable</small>';
+                        });
+
+                    fetch('/api/communication/discovery/stats')
+                        .then(r => r.json()).then(d => {
+                            document.getElementById('discovery-info').innerHTML = `
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <span class="badge ${d.status==='UP'?'badge-up':'badge-down'} fs-6">${d.status}</span>
+                                    <span class="text-muted small">fractalx-registry (port 8761)</span>
+                                </div>
+                                <div class="small">
+                                    <strong>${d.count || 0}</strong> services registered
+                                    <span class="text-muted ms-2">${d.registryUrl || ''}</span>
+                                </div>`;
+                        }).catch(() => {
+                            document.getElementById('discovery-info').innerHTML =
+                                '<span class="badge badge-down">DOWN</span> <small class="text-muted">Registry unavailable</small>';
+                        });
+                }
+
+                function drawTopologyGrid(data) {
+                    const container = document.getElementById('topology-grid');
+                    container.innerHTML = '';
+                    (data.nodes || []).forEach(node => {
+                        const deps = (data.edges || [])
+                            .filter(e => e.source === node.id)
+                            .map(e => e.target).join(', ');
+                        const div = document.createElement('div');
+                        div.className = 'topo-node ' + (node.type || '');
+                        div.innerHTML = `
+                            <div class="fw-semibold">${node.label || node.id}</div>
+                            <div class="node-type">${node.type}</div>
+                            <div class="node-port">:${node.port}</div>
+                            ${deps ? '<div class="mt-1 small text-muted">\u2192 ' + deps + '</div>' : ''}
+                        `;
+                        container.appendChild(div);
+                    });
+                }
+
+                function loadGatewayMetrics() {
+                    fetch('/api/communication/gateway/metrics')
+                        .then(r => r.json()).then(m => alert(JSON.stringify(m, null, 2)))
+                        .catch(() => alert('Gateway metrics unavailable'));
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: data consistency ------------------------------------------
+
+    private String buildScriptsData() {
+        return """
+                function loadDataConsistency() {
+                    fetch('/api/data/overview')
+                        .then(r => r.json()).then(d => {
+                            document.getElementById('data-saga-count').textContent = d.totalSagas || 0;
+                            document.getElementById('data-svc-count').textContent = d.totalServices || 0;
+                            const orch = d.sagaOrchestrator || {};
+                            document.getElementById('data-orch-health').innerHTML =
+                                `<span class="badge ${(orch.health||'DOWN')==='UP'?'badge-up':'badge-down'}">${orch.health||'DOWN'}</span>`;
+                        }).catch(() => {});
+
+                    fetch('/api/data/sagas')
+                        .then(r => r.json()).then(sagas => {
+                            const tbody = document.getElementById('sagas-tbody');
+                            tbody.innerHTML = '';
+                            if (!sagas.length) {
+                                tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No saga definitions</td></tr>';
+                                return;
+                            }
+                            sagas.forEach(s => {
+                                tbody.innerHTML += `<tr>
+                                    <td><code>${s.sagaId}</code></td>
+                                    <td>${s.orchestratedBy}</td>
+                                    <td>${(s.steps||[]).length} steps</td>
+                                    <td>${(s.compensationSteps||[]).length > 0 ?
+                                        '<span class="badge bg-success">Yes</span>' :
+                                        '<span class="badge bg-secondary">No</span>'}</td>
+                                </tr>`;
+                            });
+                        }).catch(() => {
+                            document.getElementById('sagas-tbody').innerHTML =
+                                '<tr><td colspan="4" class="text-muted">No sagas configured</td></tr>';
+                        });
+
+                    fetch('/api/data/databases')
+                        .then(r => r.json()).then(dbs => {
+                            const tbody = document.getElementById('databases-tbody');
+                            tbody.innerHTML = '';
+                            dbs.forEach(db => {
+                                const h = db.health || 'UNKNOWN';
+                                tbody.innerHTML += `<tr>
+                                    <td>${db.service}</td>
+                                    <td><small>${db.schemas || '-'}</small></td>
+                                    <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'} small">${h}</span></td>
+                                </tr>`;
+                            });
+                        }).catch(() => {
+                            document.getElementById('databases-tbody').innerHTML =
+                                '<tr><td colspan="3" class="text-muted">DB health unavailable</td></tr>';
+                        });
+
+                    fetch('/api/data/outbox')
+                        .then(r => r.json()).then(data => {
+                            let html = '<div class="row g-2">';
+                            data.forEach(ob => {
+                                html += `<div class="col-md-3">
+                                    <div class="stat-card p-2 text-center">
+                                        <div class="fw-semibold small">${ob.service}</div>
+                                        <div class="text-muted small">${ob.metrics ? 'Available' : 'N/A'}</div>
+                                    </div>
+                                </div>`;
+                            });
+                            document.getElementById('outbox-info').innerHTML = html + '</div>';
+                        }).catch(() => {
+                            document.getElementById('outbox-info').innerHTML =
+                                '<span class="text-muted">Outbox data unavailable</span>';
+                        });
+                }
+
+                function loadSagaInstances() {
+                    fetch('/api/data/sagas/instances')
+                        .then(r => r.json()).then(d => alert(JSON.stringify(d, null, 2)))
+                        .catch(() => alert('Saga orchestrator unavailable'));
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: observability + alerts ------------------------------------
+
+    private String buildScriptsObservabilityAndAlerts() {
+        return """
+                function loadMetrics() {
+                    fetch('/api/observability/metrics')
+                        .then(r => r.json()).then(data => {
+                            const tbody = document.getElementById('metrics-tbody');
+                            const cards = document.getElementById('metrics-cards');
+                            tbody.innerHTML = '';
+                            cards.innerHTML = '';
+                            Object.entries(data).forEach(([svc, m]) => {
+                                const health  = m.health || 'UNKNOWN';
+                                const p99     = m.response_time_p99 != null ? m.response_time_p99 + 'ms' : '-';
+                                const errRate = m.error_rate        != null ? m.error_rate + '%'      : '-';
+                                const uptime  = m.uptime_percent    != null ? m.uptime_percent + '%'  : '-';
+                                tbody.innerHTML += `<tr>
+                                    <td>${svc}</td>
+                                    <td><span class="badge ${health==='UP'?'badge-up':health==='DOWN'?'badge-down':'badge-unknown'}">${health}</span></td>
+                                    <td>${p99}</td><td>${errRate}</td><td>${uptime}</td>
+                                </tr>`;
+                                cards.innerHTML += `<div class="col-sm-6 col-lg-3">
+                                    <div class="stat-card text-center">
+                                        <div class="fw-semibold mb-1">${svc}</div>
+                                        <span class="badge ${health==='UP'?'badge-up':health==='DOWN'?'badge-down':'badge-unknown'} fs-6">${health}</span>
+                                    </div>
+                                </div>`;
+                            });
+                            if (!Object.keys(data).length) {
+                                tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No metrics available</td></tr>';
+                            }
+                        }).catch(() => {
+                            document.getElementById('metrics-tbody').innerHTML =
+                                '<tr><td colspan="5" class="text-danger">Metrics unavailable</td></tr>';
+                        });
+                }
+
+                let alertStream = null;
+
+                function loadAlerts() {
+                    fetch('/api/alerts/active')
+                        .then(r => r.json()).then(alerts => {
+                            const tbody = document.getElementById('active-alerts-tbody');
+                            tbody.innerHTML = '';
+                            document.getElementById('active-alert-count').textContent = alerts.length;
+                            updateAlertBadge(alerts.length);
+                            if (!alerts.length) {
+                                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No active alerts</td></tr>';
+                                return;
+                            }
+                            alerts.forEach(a => {
+                                const sev = a.severity || 'INFO';
+                                tbody.innerHTML += `<tr>
+                                    <td><small>${a.timestamp || ''}</small></td>
+                                    <td>${a.service}</td>
+                                    <td><span class="badge ${sev==='CRITICAL'?'bg-danger':sev==='WARNING'?'bg-warning':'bg-info'}">${sev}</span></td>
+                                    <td><small>${a.message || ''}</small></td>
+                                    <td><button class="btn btn-xs btn-sm btn-outline-success py-0"
+                                            onclick="resolveAlert('${a.id}')">Resolve</button></td>
+                                </tr>`;
+                            });
+                        }).catch(() => {});
+
+                    fetch('/api/alerts?size=20')
+                        .then(r => r.json()).then(alerts => {
+                            const tbody = document.getElementById('alert-history-tbody');
+                            tbody.innerHTML = '';
+                            if (!alerts.length) {
+                                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No alerts recorded</td></tr>';
+                                return;
+                            }
+                            alerts.forEach(a => {
+                                const sev = a.severity || 'INFO';
+                                tbody.innerHTML += `<tr>
+                                    <td><small>${a.timestamp || ''}</small></td>
+                                    <td>${a.service}</td>
+                                    <td><span class="badge ${sev==='CRITICAL'?'bg-danger':sev==='WARNING'?'bg-warning':'bg-info'}">${sev}</span></td>
+                                    <td><small>${a.message || ''}</small></td>
+                                    <td>${a.resolved ?
+                                        '<span class="badge bg-success">Resolved</span>' :
+                                        '<span class="badge bg-warning">Active</span>'}</td>
+                                </tr>`;
+                            });
+                        }).catch(() => {});
+
+                    fetch('/api/alerts/config')
+                        .then(r => r.json()).then(cfg => {
+                            const rules = cfg.rules || [];
+                            let html = '<div class="mb-2"><strong>Rules:</strong> ' + rules.length + ' configured</div>';
+                            html += '<div class="row g-2">';
+                            rules.forEach(r => {
+                                html += `<div class="col-md-4">
+                                    <div class="stat-card p-2">
+                                        <div class="fw-semibold small">${r.name}</div>
+                                        <div class="text-muted" style="font-size:.78rem">
+                                            Condition: ${r.condition} | Severity: ${r.severity}
+                                        </div>
+                                    </div>
+                                </div>`;
+                            });
+                            html += '</div>';
+                            document.getElementById('alert-config-info').innerHTML = html;
+                        }).catch(() => {});
+
+                    if (!alertStream) connectAlertStream();
+                }
+
+                function resolveAlert(id) {
+                    fetch('/api/alerts/' + id + '/resolve', {method:'POST'})
+                        .then(() => loadAlerts()).catch(() => {});
+                }
+
+                function connectAlertStream() {
+                    if (!window.EventSource) return;
+                    alertStream = new EventSource('/api/alerts/stream');
+                    alertStream.addEventListener('alert', e => {
+                        loadAlerts();
+                        const a = JSON.parse(e.data);
+                        console.log('[ALERT]', a.severity, a.service, a.message);
+                    });
+                    alertStream.onerror = () => {
+                        alertStream.close();
+                        alertStream = null;
+                        setTimeout(connectAlertStream, 10000);
+                    };
+                }
+
+                function updateAlertBadge(count) {
+                    const badge = document.getElementById('alert-badge');
+                    badge.textContent = count;
+                    badge.style.display = count > 0 ? '' : 'none';
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: traces + logs + settings + init --------------------------
+
+    private String buildScriptsTracesLogsSettings() {
+        return buildScriptsTracesLogs2()
+            + buildScriptsSettings2()
+            + buildScriptsInit2();
+    }
+
+    private String buildScriptsTracesLogs2() {
+        return """
+                function loadTraceServices() {
+                    fetch('/api/services/all')
+                        .then(r => r.json()).then(services => {
+                            const sel = document.getElementById('trace-service-select');
+                            services.forEach(s => {
+                                const o = document.createElement('option');
+                                o.value = o.textContent = s.meta.name;
+                                sel.appendChild(o);
+                            });
+                        }).catch(() => {});
+                }
+
+                function searchTraces() {
+                    const cid    = document.getElementById('trace-correlation-id').value.trim();
+                    const svc    = document.getElementById('trace-service-select').value;
+                    const params = new URLSearchParams();
+                    if (cid) params.set('correlationId', cid);
+                    if (svc) params.set('service', svc);
+                    params.set('limit', '20');
+                    fetch('/api/traces?' + params)
+                        .then(r => r.json()).then(data => {
+                            const tbody = document.getElementById('traces-tbody');
+                            tbody.innerHTML = '';
+                            const traces = data.data || data || [];
+                            if (!traces.length) {
+                                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No traces found</td></tr>';
+                                return;
+                            }
+                            traces.forEach(t => {
+                                const traceId = t.traceID || t.traceId || '';
+                                const svcName = t.processes ? Object.values(t.processes)[0]?.serviceName || '-' : '-';
+                                const dur     = t.duration ? (t.duration / 1000).toFixed(2) + 'ms' : '-';
+                                const spans   = t.spans ? t.spans.length : '-';
+                                tbody.innerHTML += `<tr>
+                                    <td><code style="font-size:.75rem">${traceId.substring(0,16)}...</code></td>
+                                    <td>${svcName}</td><td>${dur}</td><td>${spans}</td>
+                                    <td><a href="http://localhost:16686/trace/${traceId}" target="_blank"
+                                           class="btn btn-xs btn-sm btn-outline-info py-0">
+                                        <i class="fas fa-external-link-alt"></i></a></td>
+                                </tr>`;
+                            });
+                        }).catch(() => {
+                            document.getElementById('traces-tbody').innerHTML =
+                                '<tr><td colspan="5" class="text-warning">Jaeger unavailable or no traces found</td></tr>';
+                        });
+                }
+
+                let currentLogPage = 0;
+
+                function loadLogServices() {
+                    fetch('/api/logs/services')
+                        .then(r => r.json()).then(services => {
+                            const sel = document.getElementById('log-service-select');
+                            sel.innerHTML = '<option value="">-- All Services --</option>';
+                            services.forEach(s => {
+                                const o = document.createElement('option');
+                                o.value = o.textContent = s;
+                                sel.appendChild(o);
+                            });
+                        }).catch(() => {});
+                }
+
+                function searchLogs(page) {
+                    currentLogPage = page;
+                    const cid   = document.getElementById('log-correlation-id').value.trim();
+                    const svc   = document.getElementById('log-service-select').value;
+                    const level = document.getElementById('log-level-select').value;
+                    const params = new URLSearchParams({page, size: 50});
+                    if (cid)   params.set('correlationId', cid);
+                    if (svc)   params.set('service', svc);
+                    if (level) params.set('level', level);
+                    fetch('/api/logs?' + params)
+                        .then(r => r.json()).then(logs => {
+                            const tbody = document.getElementById('logs-tbody');
+                            tbody.innerHTML = '';
+                            if (!logs.length) {
+                                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No logs found</td></tr>';
+                                renderLogPagination(page, 0);
+                                return;
+                            }
+                            logs.forEach(l => {
+                                const lvl = l.level || 'INFO';
+                                tbody.innerHTML += `<tr>
+                                    <td><small class="text-muted">${l.receivedAt || ''}</small></td>
+                                    <td><small>${l.service || ''}</small></td>
+                                    <td><span class="badge ${lvl==='ERROR'?'bg-danger':lvl==='WARN'?'bg-warning':'bg-secondary'} small">${lvl}</span></td>
+                                    <td><code style="font-size:.72rem">${(l.correlationId||'').substring(0,12)}</code></td>
+                                    <td><small>${l.message || ''}</small></td>
+                                </tr>`;
+                            });
+                            renderLogPagination(page, logs.length);
+                        }).catch(() => {
+                            document.getElementById('logs-tbody').innerHTML =
+                                '<tr><td colspan="5" class="text-danger">Log service unavailable</td></tr>';
+                        });
+                }
+
+                function renderLogPagination(page, count) {
+                    const div = document.getElementById('log-pagination');
+                    div.innerHTML = '';
+                    if (page > 0) {
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-sm btn-outline-secondary';
+                        btn.textContent = '\u2190 Previous';
+                        btn.onclick = () => searchLogs(page - 1);
+                        div.appendChild(btn);
+                    }
+                    if (count >= 50) {
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-sm btn-outline-primary';
+                        btn.textContent = 'Next \u2192';
+                        btn.onclick = () => searchLogs(page + 1);
+                        div.appendChild(btn);
+                    }
+                }
+
+                function loadLogStats() {
+                    fetch('/api/logs/stats')
+                        .then(r => r.json()).then(stats => {
+                            const card    = document.getElementById('log-stats-card');
+                            const content = document.getElementById('log-stats-content');
+                            card.style.display = '';
+                            let html = '<div class="row g-2">';
+                            Object.entries(stats).forEach(([svc, s]) => {
+                                html += `<div class="col-md-3"><div class="stat-card p-2">
+                                    <div class="fw-semibold small">${svc}</div>
+                                    <div class="small">Total: ${s.total || 0} | Errors: <span class="text-danger">${s.errors || 0}</span></div>
+                                </div></div>`;
+                            });
+                            content.innerHTML = html + '</div>';
+                        }).catch(() => {});
+                }
+                """;
+    }
+
+    private String buildScriptsSettings2() {
+        return """
+                function loadSettingsSection() {
+                    loadUsers(); loadConfig(); loadNotificationConfig(); loadGeneralSettings(); loadCurrentUser();
+                }
+
+                function showSettingsTab(tab) {
+                    document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.getElementById('settings-pane-' + tab).classList.add('active');
+                    event.target.classList.add('active');
+                }
+
+                function loadUsers() {
+                    fetch('/api/users')
+                        .then(r => r.json()).then(users => {
+                            const tbody = document.getElementById('users-tbody');
+                            tbody.innerHTML = '';
+                            users.forEach(u => {
+                                tbody.innerHTML += `<tr>
+                                    <td><strong>${u.username}</strong></td>
+                                    <td><small>${(u.roles || []).join(', ')}</small></td>
+                                    <td>${u.active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
+                                    <td><small>${u.lastLoginAt || 'Never'}</small></td>
+                                    <td><small>${u.createdAt || ''}</small></td>
+                                    <td>
+                                        <button class="btn btn-xs btn-sm btn-outline-warning py-0 me-1"
+                                            onclick="openChangePassword('${u.username}')"><i class="fas fa-key"></i></button>
+                                        <button class="btn btn-xs btn-sm btn-outline-danger py-0"
+                                            onclick="deleteUser('${u.username}')"><i class="fas fa-trash"></i></button>
+                                    </td>
+                                </tr>`;
+                            });
+                        }).catch(() => {
+                            document.getElementById('users-tbody').innerHTML =
+                                '<tr><td colspan="6" class="text-danger">Failed to load users</td></tr>';
+                        });
+                }
+
+                function createUser() {
+                    const username = document.getElementById('new-username').value.trim();
+                    const password = document.getElementById('new-password').value;
+                    const role     = document.getElementById('new-role').value;
+                    const errEl    = document.getElementById('add-user-error');
+                    errEl.textContent = '';
+                    if (!username || !password) { errEl.textContent = 'Username and password required'; return; }
+                    fetch('/api/users', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({username, password, roles: [role]})
+                    }).then(r => r.json()).then(res => {
+                        if (res.error) { errEl.textContent = res.error; return; }
+                        bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();
+                        loadUsers();
+                    }).catch(() => errEl.textContent = 'Request failed');
+                }
+
+                function deleteUser(username) {
+                    if (!confirm('Delete user ' + username + '?')) return;
+                    fetch('/api/users/' + username, {method:'DELETE'}).then(() => loadUsers()).catch(() => {});
+                }
+
+                function openChangePassword(username) {
+                    document.getElementById('cp-username').textContent = username;
+                    document.getElementById('cp-user').value = username;
+                    document.getElementById('cp-new-password').value = '';
+                    document.getElementById('cp-error').textContent = '';
+                    new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
+                }
+
+                function submitPasswordChange() {
+                    const username    = document.getElementById('cp-user').value;
+                    const newPassword = document.getElementById('cp-new-password').value;
+                    if (!newPassword) { document.getElementById('cp-error').textContent = 'Password required'; return; }
+                    fetch('/api/users/' + username + '/password', {
+                        method: 'PUT', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({newPassword})
+                    }).then(r => {
+                        if (r.ok) bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
+                        else document.getElementById('cp-error').textContent = 'Failed to change password';
+                    }).catch(() => document.getElementById('cp-error').textContent = 'Request failed');
+                }
+
+                function loadConfig() {
+                    fetch('/api/config/ports')
+                        .then(r => r.json()).then(ports => {
+                            const tbody = document.getElementById('config-ports-tbody');
+                            tbody.innerHTML = '';
+                            ports.forEach(p => {
+                                tbody.innerHTML += `<tr>
+                                    <td><strong>${p.name}</strong></td>
+                                    <td><code>${p.httpPort}</code></td>
+                                    <td><code>${p.grpcPort || '-'}</code></td>
+                                    <td>${p.hasOutbox ? '<i class="fas fa-check text-success"></i>' : '<span class="text-muted">-</span>'}</td>
+                                    <td><button class="btn btn-xs btn-sm btn-outline-secondary py-0"
+                                            onclick="showLifecycleModal('${p.name}')">
+                                        <i class="fas fa-terminal me-1"></i>Commands</button></td>
+                                </tr>`;
+                            });
+                        }).catch(() => {});
+
+                    fetch('/api/config/environment')
+                        .then(r => r.json()).then(env => {
+                            const acc = document.getElementById('env-accordion');
+                            acc.innerHTML = '';
+                            Object.entries(env).forEach(([svc, vars], idx) => {
+                                const rows = Object.entries(vars || {}).map(([k,v]) =>
+                                    `<tr><td class="text-muted small">${k}</td><td><code class="small">${v}</code></td></tr>`
+                                ).join('');
+                                acc.innerHTML += `<div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed py-2 small" type="button"
+                                            data-bs-toggle="collapse" data-bs-target="#env-${idx}">${svc}</button>
+                                    </h2>
+                                    <div id="env-${idx}" class="accordion-collapse collapse">
+                                        <div class="accordion-body p-2">
+                                            <table class="table table-sm mb-0">${rows}</table>
+                                        </div>
+                                    </div>
+                                </div>`;
+                            });
+                        }).catch(() => {});
+                }
+
+                function loadNotificationConfig() {
+                    fetch('/api/alerts/config')
+                        .then(r => r.json()).then(cfg => {
+                            const channels = cfg.channels || {};
+                            let html = '<div class="row g-2">';
+                            Object.entries(channels).forEach(([name, ch]) => {
+                                const enabled = ch.enabled || false;
+                                html += `<div class="col-md-3"><div class="stat-card p-2">
+                                    <div class="fw-semibold small text-capitalize">${name}</div>
+                                    <span class="badge ${enabled?'bg-success':'bg-secondary'}">${enabled?'Enabled':'Disabled'}</span>
+                                </div></div>`;
+                            });
+                            html += '</div><p class="mt-2 small text-muted">Edit <code>alerting.yml</code> to enable channels.</p>';
+                            document.getElementById('notification-config-content').innerHTML = html;
+                        }).catch(() => {
+                            document.getElementById('notification-config-content').innerHTML =
+                                '<span class="text-muted">Alert config unavailable</span>';
+                        });
+                }
+
+                function loadGeneralSettings() {
+                    fetch('/api/settings')
+                        .then(r => r.json()).then(s => {
+                            document.getElementById('setting-site-name').value       = s.siteName || '';
+                            document.getElementById('setting-theme').value           = s.theme || 'light';
+                            document.getElementById('setting-session-timeout').value = s.sessionTimeoutMin || 30;
+                            document.getElementById('setting-alert-email').value     = s.defaultAlertEmail || '';
+                            document.getElementById('setting-maintenance').checked   = s.maintenanceMode || false;
+                        }).catch(() => {});
+                }
+
+                function updateSettings(e) {
+                    e.preventDefault();
+                    const settings = {
+                        siteName:          document.getElementById('setting-site-name').value,
+                        theme:             document.getElementById('setting-theme').value,
+                        sessionTimeoutMin: parseInt(document.getElementById('setting-session-timeout').value),
+                        defaultAlertEmail: document.getElementById('setting-alert-email').value,
+                        maintenanceMode:   document.getElementById('setting-maintenance').checked
+                    };
+                    fetch('/api/settings', {
+                        method: 'PUT', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(settings)
+                    }).then(() => {
+                        const status = document.getElementById('settings-save-status');
+                        status.style.display = '';
+                        setTimeout(() => status.style.display = 'none', 2000);
+                    }).catch(() => {});
+                }
+
+                function loadCurrentUser() {
+                    fetch('/api/auth/profile')
+                        .then(r => r.json())
+                        .then(p => { if (p.username) document.getElementById('current-user').textContent = p.username; })
+                        .catch(() => {});
+                }
+                """;
+    }
+
+    private String buildScriptsInit2() {
+        return """
+                document.addEventListener('DOMContentLoaded', () => {
+                    loadOverview();
+                    connectAlertStream();
+                    setInterval(() => updateAlertBadge(
+                        parseInt(document.getElementById('active-alert-count').textContent) || 0), 30000);
+                });
+                """;
+    }
+
+    // ---- SCRIPTS: mobile sidebar --------------------------------------------
+
+    private String buildScriptsMobileNav() {
+        return """
+                function openSidebar() {
+                    document.getElementById('sidebar').classList.add('open');
+                    document.getElementById('sb-overlay').classList.add('open');
+                }
+                function closeSidebar() {
+                    document.getElementById('sidebar').classList.remove('open');
+                    document.getElementById('sb-overlay').classList.remove('open');
+                }
+                """;
+    }
+}

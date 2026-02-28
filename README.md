@@ -139,7 +139,7 @@ Add the FractalX annotations dependency:
 
 ```xml
 <dependency>
-    <groupId>com.fractalx</groupId>
+    <groupId>org.fractalx</groupId>
     <artifactId>fractalx-annotations</artifactId>
     <version>0.3.2-SNAPSHOT</version>
 </dependency>
@@ -188,7 +188,7 @@ mvn fractalx:decompose
 Or with explicit version:
 
 ```bash
-mvn com.fractalx:fractalx-maven-plugin:0.3.2-SNAPSHOT:decompose
+mvn org.fractalx:fractalx-maven-plugin:0.3.2-SNAPSHOT:decompose
 ```
 
 Generated services appear under:
@@ -210,7 +210,7 @@ target/generated-services/
 │   └── src/main/
 │       ├── java/
 │       │   ├── com/example/order/     # Copied + transformed source
-│       │   └── com/fractalx/generated/orderservice/
+│       │   └── org/fractalx/generated/orderservice/
 │       │       ├── OtelConfig.java         # OpenTelemetry SDK (OTLP → Jaeger)
 │       │       └── ServiceHealthConfig.java # TCP HealthIndicators per dependency
 │       └── resources/
@@ -221,7 +221,7 @@ target/generated-services/
 ├── fractalx-gateway/           # API Gateway + GatewayMetricsFilter
 ├── logger-service/             # Centralized log ingestion (port 9099)
 ├── admin-service/              # Operations dashboard (port 9090)
-│   └── src/main/java/com/fractalx/admin/
+│   └── src/main/java/org/fractalx/admin/
 │       ├── observability/
 │       │   ├── AlertSeverity.java
 │       │   ├── AlertRule.java
