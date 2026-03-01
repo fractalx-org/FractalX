@@ -36,7 +36,7 @@ public class GatewayRouteLocatorGenerator {
                             builder.routes()
                                 .route("%s-static", r -> r.path("/api/%s/**")
                                     .uri("http://localhost:%d"))
-                                .build().getRoutes().forEach(routes::add);
+                                .build().getRoutes().toIterable().forEach(routes::add);
                     """.formatted(m.getServiceName(), path, m.getPort()));
         }
 
@@ -134,6 +134,7 @@ public class GatewayRouteLocatorGenerator {
                                         .route(name, r -> r.path("/api/" + prefix + "/**").uri(uri))
                                         .build()
                                         .getRoutes()
+                                        .toIterable()
                                         .forEach(routes::add);
                                 log.debug("Live route: /api/{}/** -> {}", prefix, uri);
                             }
