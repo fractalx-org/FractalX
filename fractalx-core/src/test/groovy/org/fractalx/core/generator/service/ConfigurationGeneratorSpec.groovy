@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.service
 
+import org.fractalx.core.config.FractalxConfig
 import org.fractalx.core.generator.GenerationContext
 import org.fractalx.core.model.FractalModule
 import spock.lang.Specification
@@ -41,7 +42,7 @@ class ConfigurationGeneratorSpec extends Specification {
     private GenerationContext ctx(FractalModule m, List<FractalModule> all = [m]) {
         def resourcesDir = serviceRoot.resolve("src/main/resources")
         Files.createDirectories(resourcesDir)
-        new GenerationContext(m, serviceRoot, serviceRoot, all)
+        new GenerationContext(m, serviceRoot, serviceRoot, all, FractalxConfig.defaults())
     }
 
     private String base()   { Files.readString(serviceRoot.resolve("src/main/resources/application.yml")) }

@@ -11,22 +11,24 @@ A static decomposition framework that converts modular monolithic Spring Boot ap
 3. [Prerequisites](#3-prerequisites)
 4. [Build](#4-build)
 5. [Annotate Your Monolith](#5-annotate-your-monolith)
-6. [Run Decomposition](#6-run-decomposition)
-7. [Generated Output](#7-generated-output)
-8. [Start Generated Services](#8-start-generated-services)
-9. [Docker Deployment](#9-docker-deployment)
-10. [API Gateway](#10-api-gateway)
-11. [Service Discovery](#11-service-discovery)
-12. [Gateway Security](#12-gateway-security)
-13. [Resilience](#13-resilience)
-14. [Data Consistency](#14-data-consistency)
-15. [Observability & Monitoring](#15-observability--monitoring)
-16. [Admin Dashboard](#16-admin-dashboard)
-17. [Test Endpoints](#17-test-endpoints)
-18. [Configuration Reference](#18-configuration-reference)
-19. [Troubleshooting](#19-troubleshooting)
-20. [Contributing](#20-contributing)
-21. [License](#21-license)
+6. [Configure Before Decomposition](#6-configure-before-decomposition)
+7. [Run Decomposition](#7-run-decomposition)
+8. [Generated Output](#8-generated-output)
+9. [Start Generated Services](#9-start-generated-services)
+10. [Docker Deployment](#10-docker-deployment)
+11. [API Gateway](#11-api-gateway)
+12. [Service Discovery](#12-service-discovery)
+13. [Gateway Security](#13-gateway-security)
+14. [Resilience](#14-resilience)
+15. [Data Consistency](#15-data-consistency)
+16. [Observability & Monitoring](#16-observability--monitoring)
+17. [Admin Dashboard](#17-admin-dashboard)
+18. [Static Verification](#18-static-verification)
+19. [Test Endpoints](#19-test-endpoints)
+20. [Configuration Reference](#20-configuration-reference)
+21. [Troubleshooting](#21-troubleshooting)
+22. [Contributing](#22-contributing)
+23. [License](#23-license)
 
 ---
 
@@ -178,7 +180,55 @@ public OrderResult placeOrder(OrderRequest req) { ... }
 
 ---
 
-## 6. Run Decomposition
+---
+
+## 6. Configure Before Decomposition
+
+Create a `fractalx-config.yml` file alongside your monolith's `application.yml` (i.e. in `src/main/resources/`) before running `fractalx:decompose`. FractalX reads this file at generation time and bakes the configured values directly into all generated services — no manual editing of generated files is needed.
+
+```yaml
+fractalx:
+  registry:
+    url: http://my-registry-host:8761        # baked into FRACTALX_REGISTRY_URL fallback
+  logger:
+    url: http://my-logger-host:9099          # baked into FRACTALX_LOGGER_URL fallback
+  otel:
+    endpoint: http://my-jaeger-host:4317     # baked into OTEL_EXPORTER_OTLP_ENDPOINT fallback
+  gateway:
+    port: 9999                               # gateway server port
+    cors:
+      allowed-origins: "http://myapp.com,http://localhost:3000"
+    security:
+      oauth2:
+        jwk-set-uri: http://auth-host:8080/realms/fractalx/protocol/openid-connect/certs
+  admin:
+    port: 9090                               # admin service server port
+    datasource:
+      url: jdbc:mysql://localhost:3306/admin_db
+      username: admin_user
+      password: secret
+  services:
+    order-service:
+      port: 8081
+      datasource:
+        url: jdbc:mysql://localhost:3306/order_db
+        username: root
+        password: secret
+    payment-service:
+      port: 8082
+      datasource:
+        url: jdbc:postgresql://localhost:5432/payment_db
+        username: postgres
+        password: secret
+```
+
+Values fall back to defaults if the key is absent (registry `http://localhost:8761`, logger `http://localhost:9099`, etc.). The source monolith's `application.yml` and `application.properties` are also consulted as a secondary fallback.
+
+After generation, the admin portal exposes the baked-in platform config at `GET /api/config/runtime` and allows in-memory overrides (`PUT /api/config/runtime/{key}`) without restarting.
+
+---
+
+## 7. Run Decomposition
 
 ```bash
 cd your-app
@@ -191,6 +241,21 @@ Or with explicit version:
 mvn org.fractalx:fractalx-maven-plugin:0.3.2-SNAPSHOT:decompose
 ```
 
+### Verify generated output (optional)
+
+```bash
+mvn fractalx:verify
+```
+
+This runs multi-level static analysis on the generated services without starting them:
+
+| Level | Checks |
+|-------|--------|
+| 1 | Structural — required files exist, package structure is valid |
+| 2 | NetScope compatibility — client/server interfaces are compatible |
+| 3 | Port conflicts, cross-boundary imports, REST API conventions, Dockerfile structure |
+| 4 | Advanced — service dependency graph, SQL schema, transaction boundaries, secret leaks, config property coverage |
+
 Generated services appear under:
 
 ```bash
@@ -199,7 +264,7 @@ target/generated-services/
 
 ---
 
-## 7. Generated Output
+## 8. Generated Output
 
 ```
 target/generated-services/
@@ -241,7 +306,7 @@ target/generated-services/
 
 ---
 
-## 8. Start Generated Services
+## 9. Start Generated Services
 
 ### One command (recommended)
 
@@ -284,7 +349,7 @@ cd admin-service && mvn spring-boot:run
 
 ---
 
-## 9. Docker Deployment
+## 10. Docker Deployment
 
 A `docker-compose.yml` is generated at the root of the output directory. It includes all services plus the full observability stack.
 
@@ -315,7 +380,7 @@ mvn spring-boot:run
 
 ---
 
-## 10. API Gateway
+## 11. API Gateway
 
 The gateway runs at **http://localhost:9999** and provides a single entry point for all services.
 
@@ -349,7 +414,7 @@ Routes are resolved **dynamically** from `fractalx-registry` at startup and refr
 
 ---
 
-## 11. Service Discovery
+## 12. Service Discovery
 
 `fractalx-registry` is a lightweight REST-based service registry generated alongside your services.
 
@@ -380,7 +445,7 @@ The registry polls each service's `/actuator/health` every 15 seconds and evicts
 
 ---
 
-## 12. Gateway Security
+## 13. Gateway Security
 
 All security mechanisms are **disabled by default**. Enable them selectively in `fractalx-gateway/src/main/resources/application.yml` or via environment variables.
 
@@ -448,7 +513,7 @@ Exposed response headers include `X-Request-Id`, `X-Correlation-Id`, `X-Auth-Met
 
 ---
 
-## 13. Resilience
+## 14. Resilience
 
 ### Per-service Resilience4j (generated in each service)
 
@@ -495,7 +560,7 @@ fractalx:
 
 ---
 
-## 14. Data Consistency
+## 15. Data Consistency
 
 FractalX generates a full data isolation and consistency stack per service:
 
@@ -535,7 +600,7 @@ The `fractalx.admin.datasource` block configures the admin service's own databas
 
 ---
 
-## 15. Observability & Monitoring
+## 16. Observability & Monitoring
 
 FractalX generates a complete observability stack automatically — no instrumentation code to write.
 
@@ -665,7 +730,7 @@ management:
 
 ---
 
-## 16. Admin Dashboard
+## 17. Admin Dashboard
 
 The admin service runs at **http://localhost:9090**. Access it with the default credentials `admin / admin`.
 
@@ -735,33 +800,110 @@ The schema (`V1__admin_schema.sql`) is compatible with H2, MySQL 8+, and Postgre
 
 ### Dashboard sections
 
-| Section | Description |
-|---------|-------------|
-| **Dashboard** | Service count summary card + live alert badge + services status table |
-| **Services** | All registered services from the registry |
-| **Observability** | Per-service metrics cards: health status, response p99, error rate, uptime % |
-| **Alerts** | Active alert table (with one-click resolve) + full history + real-time SSE feed |
-| **Traces** | Search traces by Correlation ID or service; links through to Jaeger UI |
-| **Logs** | Paginated log viewer with filters: correlationId, service, level |
+| Group | Section | Description |
+|-------|---------|-------------|
+| Overview | **Overview** | 6 KPI cards (services, healthy, unhealthy, alerts, RPS, CPU) + services health table + recent incidents widget + activity timeline |
+| Overview | **Services** | All registered services from the registry with health indicators |
+| Architecture | **Communication** | NetScope gRPC connection graph; upstream/downstream per service |
+| Architecture | **Data Consistency** | Saga state, outbox event backlog, cross-service FK validation status |
+| Architecture | **Network Map** | Canvas force-directed graph of the live service mesh with health overlay |
+| Monitoring | **Observability** | Per-service metrics: health, response p99, error rate, uptime % |
+| Monitoring | **Alerts** | Active alert table (one-click resolve) + full history + real-time SSE feed |
+| Monitoring | **Traces** | Search traces by Correlation ID or service; links through to Jaeger UI |
+| Monitoring | **Logs** | Paginated log viewer with filters: correlationId, service, level |
+| Monitoring | **Analytics** | Historical metrics charts: RPS trends, CPU/memory, error rates per service |
+| Developer | **API Explorer** | 3-panel: service selector · endpoint list (grouped) · request/response with auth presets, path param inputs, response tabs, localStorage history |
+| Developer | **gRPC Browser** | Service list with gRPC ports, connection map, TCP ping tool (latency), upstream/downstream deps |
+| Developer | **Config Editor** | Per-service env var table, in-memory override editor, hot-reload (`/actuator/refresh`) |
+| Operations | **Incidents** | Create/update/resolve incidents (P1–P4 severity, OPEN / INVESTIGATING / RESOLVED) |
+| Operations | **Settings** | Admin user management, site settings, theme |
 
 ### REST API endpoints
+
+#### Topology & health
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/dashboard` | Thymeleaf HTML dashboard |
-| `GET` | `/api/topology` | JSON service dependency graph (nodes + edges) |
+| `GET` | `/api/topology` | Service dependency graph (nodes + edges) |
 | `GET` | `/api/health/summary` | Live health status map for all services |
-| `GET` | `/api/services` | Proxies fractalx-registry `/services` |
+| `GET` | `/api/services/all` | All registered services (registry proxy) |
+
+#### Observability
+
+| Method | Path | Description |
+|--------|------|-------------|
 | `GET` | `/api/observability/metrics` | Per-service snapshot: health, p99 latency, error rate, uptime % |
 | `GET` | `/api/traces?correlationId=&service=&limit=` | Jaeger trace proxy — search by correlation ID |
 | `GET` | `/api/traces/{traceId}` | Jaeger trace proxy — single trace detail |
+| `GET` | `/api/logs?correlationId=&service=&level=&page=&size=` | Logger-service proxy — paginated log query |
+| `GET` | `/api/analytics/overview` | Platform-wide analytics: avg RPS, CPU, error rates |
+| `GET` | `/api/analytics/service/{name}` | Historical metrics for one service |
+
+#### Alerts
+
+| Method | Path | Description |
+|--------|------|-------------|
 | `GET` | `/api/alerts?page=&size=&severity=&service=` | Paginated alert history |
 | `GET` | `/api/alerts/active` | Unresolved alerts only |
 | `POST` | `/api/alerts/{id}/resolve` | Manually resolve an alert |
 | `GET` | `/api/alerts/stream` | SSE feed — real-time alert push |
 | `GET` | `/api/alerts/config` | Current alert rule configuration |
 | `PUT` | `/api/alerts/config/rules` | Update alert rules list |
-| `GET` | `/api/logs?correlationId=&service=&level=&page=&size=` | Logger-service proxy — paginated log query |
+
+#### Communication & architecture
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/communication/topology` | NetScope connection map (used by Network Map) |
+| `GET` | `/api/communication/netscope` | Raw gRPC client/server pairs |
+| `GET` | `/api/sagas` | All detected saga definitions |
+| `GET` | `/api/sagas/{id}/status` | Status of running saga instances |
+
+#### gRPC Browser
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/grpc/services` | Services with active gRPC ports |
+| `GET` | `/api/grpc/connections` | All gRPC connections |
+| `POST` | `/api/grpc/ping` | TCP probe: `{host, port}` → `{reachable, latencyMs}` |
+| `GET` | `/api/grpc/{service}/deps` | Upstream/downstream gRPC deps for one service |
+
+#### Configuration
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/config/services` | All service configurations (ports, schemas, env vars) |
+| `GET` | `/api/config/services/{name}` | Single service configuration |
+| `GET` | `/api/config/environment` | Env vars grouped by service |
+| `GET` | `/api/config/ports` | HTTP + gRPC port mapping |
+| `GET` | `/api/config/commands/{name}` | Docker Compose lifecycle commands |
+| `GET` | `/api/config/runtime` | Platform config baked at generation time + current overrides + effective values |
+| `PUT` | `/api/config/runtime/{key}` | Store an in-memory override `{"value":"..."}` |
+| `DELETE` | `/api/config/runtime/{key}` | Revert key to generation-time default |
+| `GET` | `/api/config/runtime/diff` | Keys whose effective value differs from the generation default |
+| `GET` | `/api/config/editor/all` | All service configs (via ServiceConfigStore) |
+| `POST` | `/api/config/editor/override` | Store env-var override `{service, key, value}` |
+| `POST` | `/api/config/editor/reload/{service}` | Trigger `/actuator/refresh` on a service |
+
+#### Incidents
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/incidents` | All incidents, sorted by created desc |
+| `GET` | `/api/incidents/open` | OPEN + INVESTIGATING only |
+| `POST` | `/api/incidents` | Create `{title, description, severity, affectedService}` |
+| `PUT` | `/api/incidents/{id}/status` | Update status `{status, notes}` |
+| `DELETE` | `/api/incidents/{id}` | Resolve / delete |
+
+#### User management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/users` | List all admin users |
+| `POST` | `/api/users` | Create a user |
+| `PUT` | `/api/users/{id}` | Update a user |
+| `DELETE` | `/api/users/{id}` | Delete a user |
 
 ### Topology response example
 
@@ -781,7 +923,48 @@ The schema (`V1__admin_schema.sql`) is compatible with H2, MySQL 8+, and Postgre
 
 ---
 
-## 17. Test Endpoints
+## 18. Static Verification
+
+Run `mvn fractalx:verify` against any generated output directory to catch issues before starting services:
+
+```bash
+cd your-app
+mvn fractalx:verify
+```
+
+Results are printed to the console using `[PASS]` / `[FAIL]` / `[WARN]` markers. The build fails on any critical finding.
+
+### Verification levels
+
+**Level 1 — Structural**
+- Required files exist: `pom.xml`, main application class, `application.yml`
+- Package structure matches the declared `@DecomposableModule` package
+
+**Level 2 — NetScope compatibility**
+- Each `@NetScopeClient` interface has a matching `@NetworkPublic` server-side bean
+- Method signatures are compatible across the gRPC boundary
+
+**Level 3 — Port, boundary, API conventions, Dockerfile**
+- No two services share the same HTTP or gRPC port
+- No cross-boundary JPA repository usage
+- All `@RestController` classes have a class-level `@RequestMapping`
+- No typed (`@RequestMapping(method=…)`) vs shorthand mixing
+- Dockerfile is present, not single-stage, not running as root, no remote `ADD`, no `:latest` base image
+
+**Level 4 — Advanced analysis**
+- Service dependency graph is acyclic (no circular NetScope dependencies)
+- SQL schema files are syntactically valid
+- No `@Transactional` write operations behind a `GET` mapping
+- No secrets or API keys hardcoded in source files
+- All `@Value("${key}")` property references are covered by `application*.yml` / `.properties`
+
+**Opt-in levels**
+- **Level 5** — Compilation check (`mvn compile` on each service)
+- **Level 6** — Smoke test generation (creates a `SmokeTest.groovy` per service)
+
+---
+
+## 19. Test Endpoints
 
 ### Health checks
 
@@ -878,7 +1061,7 @@ curl -X POST http://localhost:9999/api/orders \
 
 ---
 
-## 18. Configuration Reference
+## 20. Configuration Reference
 
 ### `application.yml` (base — common to all profiles)
 
@@ -949,7 +1132,7 @@ All values from environment variables. Activated with `SPRING_PROFILES_ACTIVE=do
 
 ---
 
-## 19. Troubleshooting
+## 21. Troubleshooting
 
 ### Services fail to start — "Could not register with fractalx-registry"
 
@@ -1035,7 +1218,7 @@ curl -v http://localhost:9999/api/orders 2>&1 | grep -i "correlation\|trace\|req
 
 ---
 
-## 20. Contributing
+## 22. Contributing
 
 - Fork the repository
 - Create a branch: `git checkout -b feature/my-change`
@@ -1045,6 +1228,6 @@ curl -v http://localhost:9999/api/orders 2>&1 | grep -i "correlation\|trace\|req
 
 ---
 
-## 21. License
+## 23. License
 
 Licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.

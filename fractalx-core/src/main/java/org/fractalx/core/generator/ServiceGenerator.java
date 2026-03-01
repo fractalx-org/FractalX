@@ -1,5 +1,7 @@
 package org.fractalx.core.generator;
 
+import org.fractalx.core.config.FractalxConfig;
+import org.fractalx.core.config.FractalxConfigReader;
 import org.fractalx.core.datamanagement.DistributedServiceHelper;
 import org.fractalx.core.datamanagement.RepositoryAnalyzer;
 import org.fractalx.core.datamanagement.SagaAnalyzer;
@@ -115,6 +117,8 @@ public class ServiceGenerator {
 
     public void generateServices(List<FractalModule> modules) throws IOException {
         log.info("Starting code generation for {} modules", modules.size());
+        FractalxConfig fractalxConfig = new FractalxConfigReader()
+                .read(sourceRoot.resolve("src/main/resources"));
         Files.createDirectories(outputRoot);
 
         // Run repository boundary analysis before generation (warnings only — never fails)
@@ -130,16 +134,16 @@ public class ServiceGenerator {
         registryServiceGenerator.generate(modules, outputRoot);
 
         for (FractalModule module : modules) {
-            generateService(module, modules);
+            generateService(module, modules, fractalxConfig);
         }
 
         new LoggerServiceGenerator().generate(outputRoot);
 
         if (modules.size() > 1) {
-            generateApiGateway(modules);
+            generateApiGateway(modules, fractalxConfig);
         }
 
-        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot);
+        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig);
 
         // Generate saga orchestrator service if any sagas were detected
         sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
@@ -156,7 +160,8 @@ public class ServiceGenerator {
     // Private helpers
     // -------------------------------------------------------------------------
 
-    private void generateService(FractalModule module, List<FractalModule> allModules) throws IOException {
+    private void generateService(FractalModule module, List<FractalModule> allModules,
+                                  FractalxConfig fractalxConfig) throws IOException {
         log.info("Generating service: {}", module.getServiceName());
 
         Path serviceRoot = outputRoot.resolve(module.getServiceName());
@@ -164,7 +169,8 @@ public class ServiceGenerator {
         Files.createDirectories(serviceRoot.resolve("src/main/resources"));
         Files.createDirectories(serviceRoot.resolve("src/test/java"));
 
-        GenerationContext context = new GenerationContext(module, sourceRoot, serviceRoot, allModules);
+        GenerationContext context = new GenerationContext(
+                module, sourceRoot, serviceRoot, allModules, fractalxConfig);
 
         for (ServiceFileGenerator step : pipeline) {
             step.generate(context);
@@ -173,10 +179,11 @@ public class ServiceGenerator {
         log.info("Generated: {}", module.getServiceName());
     }
 
-    private void generateApiGateway(List<FractalModule> modules) throws IOException {
+    private void generateApiGateway(List<FractalModule> modules,
+                                     FractalxConfig fractalxConfig) throws IOException {
         log.info("Generating API Gateway for {} services", modules.size());
         try {
-            new GatewayGenerator(sourceRoot, outputRoot).generateGateway(modules);
+            new GatewayGenerator(sourceRoot, outputRoot, fractalxConfig).generateGateway(modules);
             log.info("Generated API Gateway — http://localhost:{}", GATEWAY_PORT);
             updateReadmeWithGatewayInfo(modules);
         } catch (Exception e) {

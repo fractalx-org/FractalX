@@ -96,6 +96,13 @@ public class AdminServiceGenerator {
 
     public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot)
             throws IOException {
+        generateAdminService(modules, outputRoot, sourceRoot,
+                org.fractalx.core.config.FractalxConfig.defaults());
+    }
+
+    public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot,
+                                      org.fractalx.core.config.FractalxConfig fractalxConfig)
+            throws IOException {
         log.info("Generating Admin Service...");
 
         Path serviceRoot   = outputRoot.resolve(ADMIN_SERVICE_NAME);
@@ -133,7 +140,7 @@ public class AdminServiceGenerator {
         dataConsistencyGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         userManagementGenerator.generate(srcMainJava, BASE_PACKAGE);
         databaseGenerator.generate(srcMainJava, BASE_PACKAGE);
-        configManagementGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        configManagementGenerator.generate(srcMainJava, BASE_PACKAGE, modules, fractalxConfig);
         analyticsGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         apiExplorerGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         incidentGenerator.generate(srcMainJava, BASE_PACKAGE);

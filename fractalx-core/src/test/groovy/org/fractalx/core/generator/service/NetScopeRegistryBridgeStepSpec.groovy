@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.service
 
+import org.fractalx.core.config.FractalxConfig
 import org.fractalx.core.generator.GenerationContext
 import org.fractalx.core.model.FractalModule
 import spock.lang.Specification
@@ -35,7 +36,7 @@ class NetScopeRegistryBridgeStepSpec extends Specification {
         .build()
 
     private GenerationContext ctx(FractalModule m) {
-        new GenerationContext(m, serviceRoot, serviceRoot, [m])
+        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults())
     }
 
     private Path bridgeFile(String servicePkg) {

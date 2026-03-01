@@ -1,5 +1,6 @@
 package org.fractalx.core.gateway;
 
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,17 +30,20 @@ public class GatewayConfigGenerator {
     public void generateConfig(Path srcMainResources,
                                List<FractalModule> modules,
                                List<RouteDefinition> routes) throws IOException {
+        generateConfig(srcMainResources, modules, routes, FractalxConfig.defaults());
+    }
+
+    public void generateConfig(Path srcMainResources,
+                               List<FractalModule> modules,
+                               List<RouteDefinition> routes,
+                               FractalxConfig cfg) throws IOException {
         log.debug("Generating gateway configuration");
-
-        // Generate application.yml
-        String ymlContent = generateApplicationYml(modules);
-        Path ymlPath = srcMainResources.resolve("application.yml");
-        Files.writeString(ymlPath, ymlContent);
-
+        Files.writeString(srcMainResources.resolve("application.yml"),
+                generateApplicationYml(modules, cfg));
         log.info("✓ Generated gateway configuration");
     }
 
-    private String generateApplicationYml(List<FractalModule> modules) {
+    private String generateApplicationYml(List<FractalModule> modules, FractalxConfig cfg) {
         StringBuilder routesConfig = new StringBuilder();
 
         for (FractalModule module : modules) {
@@ -50,7 +54,7 @@ public class GatewayConfigGenerator {
         StringBuilder ymlBuilder = new StringBuilder();
 
         ymlBuilder.append("server:\n");
-        ymlBuilder.append("  port: ").append(GATEWAY_PORT).append("\n\n");
+        ymlBuilder.append("  port: ").append(cfg.gatewayPort()).append("\n\n");
 
         ymlBuilder.append("spring:\n");
         ymlBuilder.append("  application:\n");
@@ -70,7 +74,7 @@ public class GatewayConfigGenerator {
 
         ymlBuilder.append("fractalx:\n");
         ymlBuilder.append("  registry:\n");
-        ymlBuilder.append("    url: ${FRACTALX_REGISTRY_URL:http://localhost:8761}\n");
+        ymlBuilder.append("    url: ${FRACTALX_REGISTRY_URL:").append(cfg.registryUrl()).append("}\n");
         ymlBuilder.append("  gateway:\n");
         ymlBuilder.append("    security:\n");
         ymlBuilder.append("      # Set enabled: true and configure one or more auth mechanisms below\n");
@@ -81,7 +85,7 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("        jwt-secret: ${JWT_SECRET:fractalx-default-secret-change-in-prod-min-32chars!!}\n");
         ymlBuilder.append("      oauth2:\n");
         ymlBuilder.append("        enabled: ${GATEWAY_OAUTH2_ENABLED:false}\n");
-        ymlBuilder.append("        jwk-set-uri: ${OAUTH2_JWK_URI:http://localhost:8080/realms/fractalx/protocol/openid-connect/certs}\n");
+        ymlBuilder.append("        jwk-set-uri: ${OAUTH2_JWK_URI:").append(cfg.oauth2JwksUri()).append("}\n");
         ymlBuilder.append("      basic:\n");
         ymlBuilder.append("        enabled: ${GATEWAY_BASIC_ENABLED:false}\n");
         ymlBuilder.append("        username: ${GATEWAY_BASIC_USER:fractalx}\n");
@@ -91,7 +95,7 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("        valid-keys:\n");
         ymlBuilder.append("          - ${GATEWAY_API_KEY_1:dev-key-replace-me}\n");
         ymlBuilder.append("    cors:\n");
-        ymlBuilder.append("      allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:4200}\n");
+        ymlBuilder.append("      allowed-origins: ${CORS_ORIGINS:").append(cfg.corsAllowedOrigins()).append("}\n");
         ymlBuilder.append("      allowed-methods: GET,POST,PUT,DELETE,PATCH,OPTIONS\n");
         ymlBuilder.append("      allow-credentials: true\n");
         ymlBuilder.append("    rate-limit:\n");

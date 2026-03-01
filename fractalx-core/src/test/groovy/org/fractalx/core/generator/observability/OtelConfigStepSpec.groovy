@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.observability
 
+import org.fractalx.core.config.FractalxConfig
 import org.fractalx.core.generator.GenerationContext
 import org.fractalx.core.model.FractalModule
 import spock.lang.Specification
@@ -31,7 +32,7 @@ class OtelConfigStepSpec extends Specification {
     private GenerationContext ctx(FractalModule m) {
         Files.createDirectories(serviceRoot.resolve("src/main/java"))
         Files.createDirectories(serviceRoot.resolve("src/main/resources"))
-        new GenerationContext(m, serviceRoot, serviceRoot, [m])
+        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults())
     }
 
     /** OtelConfigStep generates into org.fractalx.generated.<serviceNameLower> */

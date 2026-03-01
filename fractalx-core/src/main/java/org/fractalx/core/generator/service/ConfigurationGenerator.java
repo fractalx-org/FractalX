@@ -27,11 +27,11 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
 
         // Base config (profile-agnostic, references env vars)
         Files.writeString(context.getSrcMainResources().resolve("application.yml"),
-                buildBaseYml(module));
+                buildBaseYml(module, context.getFractalxConfig()));
 
-        // Dev profile (localhost defaults)
+        // Dev profile (localhost defaults sourced from FractalxConfig)
         Files.writeString(context.getSrcMainResources().resolve("application-dev.yml"),
-                buildDevYml(module, context.getAllModules()));
+                buildDevYml(module, context.getAllModules(), context.getFractalxConfig()));
 
         // Docker profile (all env-var driven, container-ready)
         Files.writeString(context.getSrcMainResources().resolve("application-docker.yml"),
@@ -43,7 +43,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
     // -------------------------------------------------------------------------
 
     /** Base application.yml — references env vars, activates dev profile by default. */
-    private String buildBaseYml(FractalModule module) {
+    private String buildBaseYml(FractalModule module, org.fractalx.core.config.FractalxConfig cfg) {
         return """
                 spring:
                   application:
@@ -57,15 +57,15 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                 fractalx:
                   enabled: true
                   registry:
-                    url: ${FRACTALX_REGISTRY_URL:http://localhost:8761}
+                    url: ${FRACTALX_REGISTRY_URL:%s}
                     enabled: true
                     host: ${FRACTALX_REGISTRY_HOST:localhost}
                   observability:
                     tracing: true
                     metrics: true
-                    logger-url: ${FRACTALX_LOGGER_URL:http://localhost:9099/api/logs}
+                    logger-url: ${FRACTALX_LOGGER_URL:%s/api/logs}
                     otel:
-                      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
+                      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:%s}
 
                 netscope:
                   server:
@@ -92,11 +92,13 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     org.fractalx: DEBUG
                     org.fractalx.netscope: DEBUG
                 """.formatted(module.getServiceName(), module.getPort(),
+                cfg.registryUrl(), cfg.loggerUrl(), cfg.otelEndpoint(),
                 module.getPort() + GRPC_PORT_OFFSET);
     }
 
     /** application-dev.yml — localhost hardcoded, H2 in-memory, suitable for local dev. */
-    private String buildDevYml(FractalModule module, List<FractalModule> allModules) {
+    private String buildDevYml(FractalModule module, List<FractalModule> allModules,
+                                org.fractalx.core.config.FractalxConfig cfg) {
         return """
                 # Dev profile — all services run on localhost
                 spring:
@@ -171,7 +173,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
     /** Builds the legacy dev localhost {@code netscope.client.servers} block. */
     private String buildYml(FractalModule module, List<FractalModule> allModules) {
         // kept for backward-compat — not called by generate() anymore
-        return buildBaseYml(module);
+        return buildBaseYml(module, org.fractalx.core.config.FractalxConfig.defaults());
     }
 
     /**
