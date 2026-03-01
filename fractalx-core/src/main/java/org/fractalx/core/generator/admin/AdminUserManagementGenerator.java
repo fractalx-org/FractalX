@@ -392,6 +392,7 @@ class AdminUserManagementGenerator {
                  * so both in-memory (default) and JPA (db profile) stores are transparently supported.
                  */
                 @RestController
+                @RequestMapping("/api/users")
                 @CrossOrigin(origins = "*")
                 public class UserController {
 
