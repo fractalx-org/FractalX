@@ -37,6 +37,8 @@ public class GatewaySecurityGenerator {
     }
 
     private void generateAuthProperties(Path pkg) throws IOException {
+        // Note: "&#42;" is the HTML entity for "*" — prevents "&#42;/" from being
+        // misread as the Javadoc block-comment terminator "*/" inside the <pre> block.
         String content = """
                 package org.fractalx.gateway.security;
 
@@ -53,7 +55,7 @@ public class GatewaySecurityGenerator {
                  *   gateway:
                  *     security:
                  *       enabled: true
-                 *       public-paths: /api/*/public/**, /api/*/auth/**
+                 *       public-paths: /api/&#42;/public/&#42;&#42;, /api/&#42;/auth/&#42;&#42;
                  *       bearer:
                  *         enabled: true
                  *         jwt-secret: my-secret-key-min-32-chars-long!!
@@ -139,6 +141,12 @@ public class GatewaySecurityGenerator {
     }
 
     private void generateSecurityConfig(Path pkg) throws IOException {
+        // The three auth filters (ApiKeyFilter, JwtBearerFilter, BasicAuthGatewayFilter)
+        // implement GlobalFilter + Ordered and are @Component beans. Spring Cloud Gateway
+        // picks them up automatically — they must NOT be passed to addFilterBefore()
+        // because that method expects WebFilter, not GlobalFilter. Authentication rejection
+        // (HTTP 401) is handled directly inside each GlobalFilter implementation.
+        // OAuth2 resource-server support is the only thing wired through Spring Security here.
         String content = """
                 package org.fractalx.gateway.security;
 
@@ -146,7 +154,6 @@ public class GatewaySecurityGenerator {
                 import org.springframework.context.annotation.Bean;
                 import org.springframework.context.annotation.Configuration;
                 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
-                import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
                 import org.springframework.security.config.web.server.ServerHttpSecurity;
                 import org.springframework.security.web.server.SecurityWebFilterChain;
 
@@ -156,18 +163,9 @@ public class GatewaySecurityGenerator {
                 public class GatewaySecurityConfig {
 
                     private final GatewayAuthProperties authProps;
-                    private final JwtBearerFilter jwtBearerFilter;
-                    private final ApiKeyFilter apiKeyFilter;
-                    private final BasicAuthGatewayFilter basicAuthFilter;
 
-                    public GatewaySecurityConfig(GatewayAuthProperties authProps,
-                                                  JwtBearerFilter jwtBearerFilter,
-                                                  ApiKeyFilter apiKeyFilter,
-                                                  BasicAuthGatewayFilter basicAuthFilter) {
+                    public GatewaySecurityConfig(GatewayAuthProperties authProps) {
                         this.authProps = authProps;
-                        this.jwtBearerFilter = jwtBearerFilter;
-                        this.apiKeyFilter = apiKeyFilter;
-                        this.basicAuthFilter = basicAuthFilter;
                     }
 
                     @Bean
@@ -176,28 +174,27 @@ public class GatewaySecurityGenerator {
                             .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                             .formLogin(ServerHttpSecurity.FormLoginSpec::disable);
 
-                        // These paths are always public
+                        // Always public — actuator, discovery, docs, fallback, and configured paths
                         http.authorizeExchange(ex -> ex
                                 .pathMatchers("/actuator/health", "/actuator/info",
                                         "/services/**", "/api-docs/**", "/swagger-ui/**",
                                         "/fallback/**").permitAll()
                                 .pathMatchers(authProps.getPublicPaths()).permitAll()
+                                .anyExchange().permitAll()
                         );
 
-                        if (authProps.isEnabled()) {
-                            // OAuth2 Resource Server — validates JWT from external IdP
-                            if (authProps.getOauth2().isEnabled()) {
-                                http.oauth2ResourceServer(oauth2 -> oauth2
-                                        .jwt(jwt -> jwt.jwkSetUri(authProps.getOauth2().getJwkSetUri())));
-                            }
-                            // Custom auth filters (each self-disables if its mode is inactive)
-                            http.addFilterBefore(apiKeyFilter,    SecurityWebFiltersOrder.AUTHENTICATION);
-                            http.addFilterBefore(basicAuthFilter, SecurityWebFiltersOrder.AUTHENTICATION);
-                            http.addFilterBefore(jwtBearerFilter, SecurityWebFiltersOrder.AUTHENTICATION);
+                        // Auth GlobalFilter beans (auto-registered by Spring Cloud Gateway):
+                        //   JwtBearerFilter (order -90)  — HMAC-SHA256 Bearer JWT
+                        //   ApiKeyFilter (order -95)      — X-Api-Key header / api_key param
+                        //   BasicAuthGatewayFilter (order -85) — HTTP Basic credentials
+                        // These GlobalFilter beans must NOT be passed to addFilterBefore() because
+                        // that method expects WebFilter; Spring Cloud Gateway discovers them automatically.
 
-                            http.authorizeExchange(ex -> ex.anyExchange().authenticated());
-                        } else {
-                            http.authorizeExchange(ex -> ex.anyExchange().permitAll());
+                        // OAuth2 resource-server (external IdP): only active when explicitly enabled.
+                        // Bearer/Basic/ApiKey auth is enforced by the GlobalFilter beans directly.
+                        if (authProps.isEnabled() && authProps.getOauth2().isEnabled()) {
+                            http.oauth2ResourceServer(oauth2 -> oauth2
+                                    .jwt(jwt -> jwt.jwkSetUri(authProps.getOauth2().getJwkSetUri())));
                         }
 
                         return http.build();
@@ -233,6 +230,7 @@ public class GatewaySecurityGenerator {
                  * Validates Bearer JWT tokens signed with HMAC-SHA256.
                  * Active when {@code fractalx.gateway.security.bearer.enabled=true}.
                  * Injects X-User-Id and X-User-Roles headers downstream on success.
+                 * Registered automatically by Spring Cloud Gateway as a GlobalFilter bean.
                  */
                 @Component
                 public class JwtBearerFilter implements GlobalFilter, Ordered {
@@ -305,6 +303,7 @@ public class GatewaySecurityGenerator {
                  * Validates API Key authentication.
                  * Accepts the key via {@code X-Api-Key} header or {@code api_key} query param.
                  * Active when {@code fractalx.gateway.security.api-key.enabled=true}.
+                 * Registered automatically by Spring Cloud Gateway as a GlobalFilter bean.
                  */
                 @Component
                 public class ApiKeyFilter implements GlobalFilter, Ordered {
@@ -374,6 +373,7 @@ public class GatewaySecurityGenerator {
                 /**
                  * Validates HTTP Basic / Simple Auth credentials.
                  * Active when {@code fractalx.gateway.security.basic.enabled=true}.
+                 * Registered automatically by Spring Cloud Gateway as a GlobalFilter bean.
                  */
                 @Component
                 public class BasicAuthGatewayFilter implements GlobalFilter, Ordered {
