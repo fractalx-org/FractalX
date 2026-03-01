@@ -145,10 +145,8 @@ public class GatewayConfigGenerator {
         route.append("              args:\n");
         route.append("                name: ").append(module.getServiceName()).append("\n");
         route.append("                fallbackUri: forward:/fallback/").append(module.getServiceName()).append("\n");
-        route.append("            - name: RequestRateLimiter\n");
-        route.append("              args:\n");
-        route.append("                redis-rate-limiter.replenishRate: 100\n");
-        route.append("                redis-rate-limiter.burstCapacity: 200\n");
+        // Rate limiting is handled globally by RateLimitFilter (GlobalFilter bean) —
+        // do NOT add RequestRateLimiter here; that factory requires Redis and is not registered.
 
         return route.toString();
     }
