@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.resilience
 
+import org.fractalx.core.config.FractalxConfig
 import org.fractalx.core.generator.GenerationContext
 import org.fractalx.core.model.FractalModule
 import spock.lang.Specification
@@ -38,7 +39,7 @@ class ResilienceConfigStepSpec extends Specification {
         Files.createDirectories(resourcesDir)
         // Write a base application.yml so the step can append to it
         Files.writeString(resourcesDir.resolve("application.yml"), "server:\n  port: 8081\n")
-        new GenerationContext(m, serviceRoot, serviceRoot, [m])
+        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults())
     }
 
     private Path configFile() {

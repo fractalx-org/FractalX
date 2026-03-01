@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.admin;
 
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,31 +13,35 @@ import java.util.List;
 /**
  * Generates the configuration management sub-system for the admin service:
  * <ul>
- *   <li>{@code ServiceConfigStore} — baked-in per-service config (ports, env vars, schemas)</li>
- *   <li>{@code ConfigController}   — REST API to view service configurations and lifecycle commands</li>
+ *   <li>{@code ServiceConfigStore}      — baked-in per-service config (ports, env vars, schemas)</li>
+ *   <li>{@code ConfigController}        — REST API to view service configurations and lifecycle commands</li>
+ *   <li>{@code RuntimeConfigController} — REST API to view/override platform-level config at runtime</li>
  * </ul>
  */
 class AdminConfigManagementGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(AdminConfigManagementGenerator.class);
 
-    void generate(Path srcMainJava, String basePackage, List<FractalModule> modules) throws IOException {
+    void generate(Path srcMainJava, String basePackage, List<FractalModule> modules,
+                  FractalxConfig fractalxConfig) throws IOException {
         Path pkg = AdminPackageUtil.createPackagePath(srcMainJava, basePackage + ".svcconfig");
 
-        generateServiceConfigStore(pkg, modules);
+        generateServiceConfigStore(pkg, modules, fractalxConfig);
         generateConfigController(pkg);
+        generateRuntimeConfigController(pkg, fractalxConfig);
 
         log.debug("Generated admin config management components");
     }
 
     // -------------------------------------------------------------------------
 
-    private void generateServiceConfigStore(Path pkg, List<FractalModule> modules) throws IOException {
+    private void generateServiceConfigStore(Path pkg, List<FractalModule> modules,
+                                            FractalxConfig fractalxConfig) throws IOException {
         StringBuilder configEntries = new StringBuilder();
 
         for (FractalModule m : modules) {
             String schemas = buildListLiteral(m.getOwnedSchemas());
-            String envVars = buildEnvVarsLiteral(m);
+            String envVars = buildEnvVarsLiteral(m, fractalxConfig);
             boolean hasOutbox = m.getDependencies() != null && !m.getDependencies().isEmpty();
 
             configEntries.append(String.format(
@@ -45,10 +50,16 @@ class AdminConfigManagementGenerator {
                     m.getPackageName(), m.getClassName(),
                     hasOutbox, schemas, envVars));
         }
-        // Infra services
-        configEntries.append("        new ServiceConfig(\"fractalx-registry\", 8761, 0, \"\", \"\", false, false, List.of(), Map.of(\"SPRING_PROFILES_ACTIVE\",\"docker\")),\n");
-        configEntries.append("        new ServiceConfig(\"api-gateway\",       8080, 0, \"\", \"\", false, false, List.of(), Map.of(\"SPRING_PROFILES_ACTIVE\",\"docker\")),\n");
-        configEntries.append("        new ServiceConfig(\"admin-service\",     9090, 0, \"\", \"\", false, false, List.of(), Map.of(\"SPRING_PROFILES_ACTIVE\",\"docker\",\"JAEGER_QUERY_URL\",\"http://jaeger:16686\",\"FRACTALX_LOGGER_URL\",\"http://logger-service:9099/api/logs\")),\n");
+        // Infra services — ports from fractalxConfig where applicable
+        configEntries.append(String.format(
+                "        new ServiceConfig(\"fractalx-registry\", 8761, 0, \"\", \"\", false, false, List.of(), Map.of(\"SPRING_PROFILES_ACTIVE\",\"docker\",\"FRACTALX_REGISTRY_URL\",\"%s\")),\n",
+                fractalxConfig.registryUrl()));
+        configEntries.append(String.format(
+                "        new ServiceConfig(\"api-gateway\",       %d, 0, \"\", \"\", false, false, List.of(), Map.of(\"SPRING_PROFILES_ACTIVE\",\"docker\")),\n",
+                fractalxConfig.gatewayPort()));
+        configEntries.append(String.format(
+                "        new ServiceConfig(\"admin-service\",     %d, 0, \"\", \"\", false, false, List.of(), Map.of(\"SPRING_PROFILES_ACTIVE\",\"docker\",\"FRACTALX_LOGGER_URL\",\"%s\")),\n",
+                fractalxConfig.adminPort(), fractalxConfig.loggerUrl()));
         configEntries.append("        new ServiceConfig(\"logger-service\",    9099, 0, \"\", \"\", false, false, List.of(), Map.of(\"SPRING_PROFILES_ACTIVE\",\"docker\"))\n");
 
         String content = """
@@ -191,6 +202,108 @@ class AdminConfigManagementGenerator {
         Files.writeString(pkg.resolve("ConfigController.java"), content);
     }
 
+    private void generateRuntimeConfigController(Path pkg, FractalxConfig cfg) throws IOException {
+        String content = """
+                package org.fractalx.admin.svcconfig;
+
+                import org.springframework.http.ResponseEntity;
+                import org.springframework.web.bind.annotation.*;
+
+                import java.util.*;
+                import java.util.concurrent.ConcurrentHashMap;
+
+                /**
+                 * Exposes the platform-level configuration baked in at generation time and allows
+                 * in-memory overrides that are visible to the admin dashboard.
+                 *
+                 * <pre>
+                 * GET    /api/config/runtime          — generation defaults + current overrides + effective values
+                 * PUT    /api/config/runtime/{key}    — set an in-memory override (body: {"value":"..."})
+                 * DELETE /api/config/runtime/{key}    — remove override (revert to generation default)
+                 * GET    /api/config/runtime/diff     — list keys that differ from generation defaults
+                 * </pre>
+                 *
+                 * <p>Overrides are stored in memory only and reset on service restart.
+                 * To make changes permanent, update the source application.yml / fractalx-config.yml
+                 * and re-run {@code mvn fractalx:decompose}.
+                 */
+                @RestController
+                @RequestMapping("/api/config/runtime")
+                @CrossOrigin(origins = "*")
+                public class RuntimeConfigController {
+
+                    /** Values captured from the pre-decomposed application config at generation time. */
+                    private static final Map<String, String> GENERATION_DEFAULTS;
+                    static {
+                        Map<String, String> m = new LinkedHashMap<>();
+                        m.put("registryUrl",        "%s");
+                        m.put("loggerUrl",          "%s");
+                        m.put("otelEndpoint",       "%s");
+                        m.put("gatewayPort",        "%d");
+                        m.put("adminPort",          "%d");
+                        m.put("corsAllowedOrigins", "%s");
+                        m.put("oauth2JwksUri",      "%s");
+                        GENERATION_DEFAULTS = Collections.unmodifiableMap(m);
+                    }
+
+                    /** In-memory overrides — reset on service restart. */
+                    private final Map<String, String> overrides = new ConcurrentHashMap<>();
+
+                    /** Returns defaults, current overrides, and the effective merged view. */
+                    @GetMapping
+                    public ResponseEntity<Map<String, Object>> getRuntimeConfig() {
+                        Map<String, String> effective = new LinkedHashMap<>(GENERATION_DEFAULTS);
+                        effective.putAll(overrides);
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.put("generationDefaults", GENERATION_DEFAULTS);
+                        result.put("overrides", overrides);
+                        result.put("effective", effective);
+                        return ResponseEntity.ok(result);
+                    }
+
+                    /** Stores an in-memory override for a config key. */
+                    @PutMapping("/{key}")
+                    public ResponseEntity<Map<String, String>> setOverride(
+                            @PathVariable("key") String key,
+                            @RequestBody Map<String, String> body) {
+                        String value = body.getOrDefault("value", "");
+                        overrides.put(key, value);
+                        return ResponseEntity.ok(Map.of("key", key, "value", value, "status", "overridden"));
+                    }
+
+                    /** Removes an in-memory override, reverting to the generation-time default. */
+                    @DeleteMapping("/{key}")
+                    public ResponseEntity<Map<String, String>> removeOverride(
+                            @PathVariable("key") String key) {
+                        overrides.remove(key);
+                        return ResponseEntity.ok(Map.of("key", key, "status", "reset-to-default"));
+                    }
+
+                    /** Returns keys whose current effective value differs from the generation default. */
+                    @GetMapping("/diff")
+                    public ResponseEntity<List<Map<String, String>>> getDiff() {
+                        List<Map<String, String>> diffs = new ArrayList<>();
+                        for (Map.Entry<String, String> entry : overrides.entrySet()) {
+                            String def = GENERATION_DEFAULTS.getOrDefault(entry.getKey(), "(not set)");
+                            if (!def.equals(entry.getValue())) {
+                                Map<String, String> row = new LinkedHashMap<>();
+                                row.put("key",      entry.getKey());
+                                row.put("default",  def);
+                                row.put("override", entry.getValue());
+                                diffs.add(row);
+                            }
+                        }
+                        return ResponseEntity.ok(diffs);
+                    }
+                }
+                """.formatted(
+                cfg.registryUrl(), cfg.loggerUrl(), cfg.otelEndpoint(),
+                cfg.gatewayPort(), cfg.adminPort(),
+                cfg.corsAllowedOrigins(), cfg.oauth2JwksUri());
+
+        Files.writeString(pkg.resolve("RuntimeConfigController.java"), content);
+    }
+
     // -------------------------------------------------------------------------
 
     private String buildListLiteral(List<String> items) {
@@ -204,13 +317,13 @@ class AdminConfigManagementGenerator {
         return sb.toString();
     }
 
-    private String buildEnvVarsLiteral(FractalModule m) {
+    private String buildEnvVarsLiteral(FractalModule m, FractalxConfig cfg) {
         StringBuilder sb = new StringBuilder("Map.of(");
         sb.append("\"SPRING_PROFILES_ACTIVE\",\"docker\"");
-        sb.append(", \"OTEL_EXPORTER_OTLP_ENDPOINT\",\"http://jaeger:4317\"");
+        sb.append(", \"OTEL_EXPORTER_OTLP_ENDPOINT\",\"").append(cfg.otelEndpoint()).append("\"");
         sb.append(", \"OTEL_SERVICE_NAME\",\"").append(m.getServiceName()).append("\"");
-        sb.append(", \"FRACTALX_REGISTRY_URL\",\"http://fractalx-registry:8761\"");
-        sb.append(", \"FRACTALX_LOGGER_URL\",\"http://logger-service:9099/api/logs\"");
+        sb.append(", \"FRACTALX_REGISTRY_URL\",\"").append(cfg.registryUrl()).append("\"");
+        sb.append(", \"FRACTALX_LOGGER_URL\",\"").append(cfg.loggerUrl()).append("\"");
 
         // Per-dependency host + gRPC port env vars (only first few to avoid Map.of() limit of 10)
         if (m.getDependencies() != null) {

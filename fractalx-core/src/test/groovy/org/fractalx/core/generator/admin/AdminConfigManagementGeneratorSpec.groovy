@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.admin
 
+import org.fractalx.core.config.FractalxConfig
 import org.fractalx.core.model.FractalModule
 import spock.lang.Specification
 import spock.lang.TempDir
@@ -39,19 +40,20 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     static final String BASE = "org.fractalx.admin"
 
-    def "generates two files in the svcconfig package (not config)"() {
+    def "generates three files in the svcconfig package (not config)"() {
         when:
-        generator.generate(srcMainJava, BASE, [order, payment])
+        generator.generate(srcMainJava, BASE, [order, payment], FractalxConfig.defaults())
         def pkg = srcMainJava.resolve("org/fractalx/admin/svcconfig")
 
         then:
         Files.exists(pkg.resolve("ServiceConfigStore.java"))
         Files.exists(pkg.resolve("ConfigController.java"))
+        Files.exists(pkg.resolve("RuntimeConfigController.java"))
     }
 
     def "does NOT use the config package (avoids SecurityConfig/WebConfig collision)"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         !Files.exists(srcMainJava.resolve("org/fractalx/admin/config/ServiceConfigStore.java"))
@@ -61,7 +63,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ServiceConfigStore is in org.fractalx.admin.svcconfig package"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         configStore().contains("package org.fractalx.admin.svcconfig")
@@ -69,7 +71,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ServiceConfigStore is annotated @Component"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         configStore().contains("@Component")
@@ -77,7 +79,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ServiceConfigStore defines ServiceConfig record with all fields"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configStore()
 
         then:
@@ -99,7 +101,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ServiceConfigStore bakes in module service entry with correct ports"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configStore()
 
         then:
@@ -111,7 +113,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ServiceConfigStore marks hasOutbox true for service with dependencies"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configStore()
 
         then:
@@ -121,7 +123,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ServiceConfigStore always includes 4 infra service entries"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configStore()
 
         then:
@@ -131,19 +133,20 @@ class AdminConfigManagementGeneratorSpec extends Specification {
         content.contains('"logger-service"')
     }
 
-    def "ServiceConfigStore admin-service entry includes JAEGER and LOGGER env vars"() {
+    def "ServiceConfigStore admin-service entry includes FRACTALX_LOGGER_URL env var"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configStore()
 
         then:
-        content.contains("JAEGER_QUERY_URL") || content.contains("jaeger")
-        content.contains("FRACTALX_LOGGER_URL") || content.contains("logger-service")
+        // admin-service entry carries FRACTALX_LOGGER_URL from fractalx-config
+        content.contains("admin-service")
+        content.contains("FRACTALX_LOGGER_URL") || content.contains("logger")
     }
 
     def "ServiceConfigStore env vars include OTEL env vars for modules"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configStore()
 
         then:
@@ -152,7 +155,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ServiceConfigStore exposes getAll, count, findByName, getMicroservices"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configStore()
 
         then:
@@ -164,7 +167,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ServiceConfigStore uses static List.of for CONFIGS"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         configStore().contains("private static final List<ServiceConfig> CONFIGS = List.of(")
@@ -174,7 +177,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ConfigController is in org.fractalx.admin.svcconfig package"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         configController().contains("package org.fractalx.admin.svcconfig")
@@ -182,7 +185,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ConfigController is a @RestController mapped to /api/config"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configController()
 
         then:
@@ -192,7 +195,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ConfigController has GET /api/config/services endpoint"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         configController().contains('"/services"') || configController().contains("services")
@@ -200,7 +203,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ConfigController has GET /api/config/environment endpoint"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         configController().contains("environment") || configController().contains("envVars")
@@ -208,7 +211,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ConfigController has GET /api/config/ports endpoint"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         configController().contains("ports") || configController().contains("Ports")
@@ -216,7 +219,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ConfigController has GET /api/config/commands endpoint for lifecycle"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
         def content = configController()
 
         then:
@@ -225,7 +228,7 @@ class AdminConfigManagementGeneratorSpec extends Specification {
 
     def "ConfigController injects ServiceConfigStore"() {
         when:
-        generator.generate(srcMainJava, BASE, [order])
+        generator.generate(srcMainJava, BASE, [order], FractalxConfig.defaults())
 
         then:
         configController().contains("ServiceConfigStore")

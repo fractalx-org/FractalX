@@ -1,5 +1,6 @@
 package org.fractalx.core.gateway;
 
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,10 +21,16 @@ public class GatewayGenerator {
 
     private final Path sourceRoot;
     private final Path outputRoot;
+    private final FractalxConfig fractalxConfig;
 
     public GatewayGenerator(Path sourceRoot, Path outputRoot) {
+        this(sourceRoot, outputRoot, FractalxConfig.defaults());
+    }
+
+    public GatewayGenerator(Path sourceRoot, Path outputRoot, FractalxConfig fractalxConfig) {
         this.sourceRoot = sourceRoot;
         this.outputRoot = outputRoot;
+        this.fractalxConfig = fractalxConfig;
     }
 
     /**
@@ -65,7 +72,7 @@ public class GatewayGenerator {
 
         // Step 4: Generate configuration
         GatewayConfigGenerator configGen = new GatewayConfigGenerator();
-        configGen.generateConfig(srcMainResources, modules, allRoutes);
+        configGen.generateConfig(srcMainResources, modules, allRoutes, fractalxConfig);
 
         // Step 5: Generate documentation
         ApiDocumentationGenerator docGen = new ApiDocumentationGenerator();
