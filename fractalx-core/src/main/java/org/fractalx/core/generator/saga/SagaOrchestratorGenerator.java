@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.saga;
 
+import org.fractalx.core.datamanagement.DataReadmeGenerator;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.MethodParam;
 import org.fractalx.core.model.SagaDefinition;
@@ -96,6 +97,9 @@ public class SagaOrchestratorGenerator {
         // ── Controller ───────────────────────────────────────────────────────
         writeFile(packagePath(basePkg, "controller"), "SagaController.java",
                 buildSagaController(sagas));
+
+        // ── README ────────────────────────────────────────────────────────────
+        new DataReadmeGenerator().generateSagaOrchestratorReadme(sagas, modules, serviceRoot);
 
         log.info("Generated saga orchestrator: {} (HTTP :{})", ORCHESTRATOR_NAME, ORCHESTRATOR_PORT);
     }
@@ -728,10 +732,28 @@ public class SagaOrchestratorGenerator {
             }
         }
 
+        // Build the full imports block: NetScopeClient + any standard-library types used in
+        // method signatures (BigDecimal, LocalDate, UUID, etc.).
+        StringBuilder importsB = new StringBuilder();
+        importsB.append("import org.fractalx.netscope.client.annotation.NetScopeClient;\n");
+        Set<String> addedFqns = new java.util.LinkedHashSet<>();
+        for (MethodParam mp : sagaMethodParams) {
+            for (String token : mp.getType().replaceAll("[<>,?\\[\\]]", " ").split("\\s+")) {
+                token = token.trim();
+                if (token.isEmpty()) continue;
+                String fqn = javaImportFor(token);
+                if (fqn != null && addedFqns.add(fqn)) {
+                    importsB.append("import ").append(fqn).append(";\n");
+                }
+            }
+        }
+        // stripTrailing so the template's blank line before /** is the only separator
+        String importsStr = importsB.toString().stripTrailing();
+
         return """
                 package %s.client;
 
-                import org.fractalx.netscope.client.annotation.NetScopeClient;
+                %s
 
                 /**
                  * NetScope client for %s.
@@ -744,6 +766,7 @@ public class SagaOrchestratorGenerator {
                 }
                 """.formatted(
                 BASE_PACKAGE,
+                importsStr,
                 beanType, targetServiceName, grpcPort,
                 targetServiceName, beanType,
                 beanType,
