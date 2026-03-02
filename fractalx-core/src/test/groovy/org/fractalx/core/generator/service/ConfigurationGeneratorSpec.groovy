@@ -42,7 +42,7 @@ class ConfigurationGeneratorSpec extends Specification {
     private GenerationContext ctx(FractalModule m, List<FractalModule> all = [m]) {
         def resourcesDir = serviceRoot.resolve("src/main/resources")
         Files.createDirectories(resourcesDir)
-        new GenerationContext(m, serviceRoot, serviceRoot, all, FractalxConfig.defaults())
+        new GenerationContext(m, serviceRoot, serviceRoot, all, FractalxConfig.defaults(), [])
     }
 
     private String base()   { Files.readString(serviceRoot.resolve("src/main/resources/application.yml")) }

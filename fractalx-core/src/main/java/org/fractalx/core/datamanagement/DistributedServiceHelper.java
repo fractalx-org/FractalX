@@ -1,11 +1,13 @@
 package org.fractalx.core.datamanagement;
 
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.model.SagaDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Central orchestrator for applying distributed systems capabilities to each
@@ -47,11 +49,13 @@ public class DistributedServiceHelper {
     /**
      * Upgrades a generated service by applying all distributed systems features.
      *
-     * @param module      the module being upgraded
-     * @param sourceRoot  the monolith source root (for reading original DB config)
-     * @param serviceRoot the generated service root directory
+     * @param module          the module being upgraded
+     * @param sourceRoot      the monolith source root (for reading original DB config)
+     * @param serviceRoot     the generated service root directory
+     * @param sagaDefinitions all sagas detected in the monolith (may be empty)
      */
-    public void upgradeService(FractalModule module, Path sourceRoot, Path serviceRoot) throws IOException {
+    public void upgradeService(FractalModule module, Path sourceRoot, Path serviceRoot,
+                               List<SagaDefinition> sagaDefinitions) throws IOException {
         Path srcMainJava      = serviceRoot.resolve("src/main/java");
         Path srcMainResources = serviceRoot.resolve("src/main/resources");
 
@@ -86,7 +90,7 @@ public class DistributedServiceHelper {
         referenceValidatorGen.generateReferenceValidator(module, serviceRoot);
 
         // 7. Generate DATA_README.md
-        dataReadmeGen.generateServiceDataReadme(module, serviceRoot, driverClass);
+        dataReadmeGen.generateServiceDataReadme(module, serviceRoot, driverClass, sagaDefinitions);
 
         log.info("   ✓ [Distributed] Upgrade complete for {}", module.getServiceName());
     }
