@@ -130,6 +130,16 @@ public class PomGenerator implements ServiceFileGenerator {
                     <build>
                         <plugins>
                             <plugin>
+                                <groupId>org.apache.maven.plugins</groupId>
+                                <artifactId>maven-compiler-plugin</artifactId>
+                                <version>3.11.0</version>
+                                <configuration>
+                                    <!-- Required by Spring 6.1+ for @PathVariable/@RequestParam name inference
+                                         and by Spring Data JPA for @Query named parameter binding -->
+                                    <parameters>true</parameters>
+                                </configuration>
+                            </plugin>
+                            <plugin>
                                 <groupId>org.springframework.boot</groupId>
                                 <artifactId>spring-boot-maven-plugin</artifactId>
                                 <version>${spring-boot.version}</version>

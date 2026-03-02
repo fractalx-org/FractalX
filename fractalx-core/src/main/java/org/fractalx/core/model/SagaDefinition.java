@@ -1,6 +1,7 @@
 package org.fractalx.core.model;
 
 import java.util.List;
+import java.util.ArrayList;
 
 /**
  * Captures the full definition of a distributed saga detected during source analysis.
@@ -39,6 +40,13 @@ public final class SagaDefinition {
     /** Human-readable description from {@code @DistributedSaga#description()}. */
     private final String description;
 
+    /**
+     * The parameters of the {@code @DistributedSaga}-annotated method itself.
+     * Used to generate a typed payload DTO that the orchestrator can deserialize
+     * from the JSON body passed to {@code start(String payload)}.
+     */
+    private final List<MethodParam> sagaMethodParams;
+
     public SagaDefinition(String sagaId,
                           String ownerServiceName,
                           String ownerClassName,
@@ -46,7 +54,8 @@ public final class SagaDefinition {
                           List<SagaStep> steps,
                           String compensationMethod,
                           long timeoutMs,
-                          String description) {
+                          String description,
+                          List<MethodParam> sagaMethodParams) {
         this.sagaId             = sagaId;
         this.ownerServiceName   = ownerServiceName;
         this.ownerClassName     = ownerClassName;
@@ -55,16 +64,18 @@ public final class SagaDefinition {
         this.compensationMethod = compensationMethod;
         this.timeoutMs          = timeoutMs;
         this.description        = description;
+        this.sagaMethodParams   = List.copyOf(sagaMethodParams);
     }
 
-    public String getSagaId()            { return sagaId; }
-    public String getOwnerServiceName()  { return ownerServiceName; }
-    public String getOwnerClassName()    { return ownerClassName; }
-    public String getMethodName()        { return methodName; }
-    public List<SagaStep> getSteps()     { return steps; }
-    public String getCompensationMethod(){ return compensationMethod; }
-    public long getTimeoutMs()           { return timeoutMs; }
-    public String getDescription()       { return description; }
+    public String getSagaId()                    { return sagaId; }
+    public String getOwnerServiceName()          { return ownerServiceName; }
+    public String getOwnerClassName()            { return ownerClassName; }
+    public String getMethodName()                { return methodName; }
+    public List<SagaStep> getSteps()             { return steps; }
+    public String getCompensationMethod()        { return compensationMethod; }
+    public long getTimeoutMs()                   { return timeoutMs; }
+    public String getDescription()               { return description; }
+    public List<MethodParam> getSagaMethodParams(){ return sagaMethodParams; }
 
     /** Derives a PascalCase class name from the sagaId. Example: {@code "place-order-saga" → "PlaceOrderSaga"}. */
     public String toClassName() {

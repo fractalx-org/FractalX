@@ -44,11 +44,17 @@ public class RelationshipDecoupler {
      */
     public void transform(Path serviceRoot, FractalModule module) {
         try {
-            // Identify entities defined within this service
-            Set<String> localEntities = findLocalEntityNames(serviceRoot);
+            String modulePackage = module.getPackageName() != null ? module.getPackageName() : "";
 
-            // Identify entities referenced but not defined locally
-            Set<String> remoteEntities = findRemoteEntities(serviceRoot, localEntities);
+            // Identify entities defined within this service's OWN package only.
+            // Using the module package as a filter prevents stale copied model classes
+            // (e.g. Payment.java / Product.java copied in a previous generation run) from
+            // being mistakenly classified as local, which would suppress decoupling.
+            Set<String> localEntities = findLocalEntityNames(serviceRoot, modulePackage);
+
+            // Identify entities referenced but not defined locally.
+            // Restrict the scan to the module's own files for the same reason.
+            Set<String> remoteEntities = findRemoteEntities(serviceRoot, localEntities, modulePackage);
 
             if (remoteEntities.isEmpty()) {
                 log.info("✅ [Data] No remote entity references found for {}. Data is fully local.", module.getServiceName());
@@ -77,9 +83,15 @@ public class RelationshipDecoupler {
     }
 
     /**
-     * Scans source files to identify @Entity classes defined locally.
+     * Scans source files to identify @Entity classes defined within {@code modulePackage}.
+     *
+     * <p>The package filter is critical when regenerating without a clean build: copied
+     * model classes from other modules (e.g. {@code Payment.java}, {@code Product.java})
+     * may already be present in the service directory from a previous generation run.
+     * Without filtering they would be counted as local, causing remote relationships
+     * to go un-decoupled.
      */
-    private Set<String> findLocalEntityNames(Path root) throws IOException {
+    private Set<String> findLocalEntityNames(Path root, String modulePackage) throws IOException {
         Set<String> local = new HashSet<>();
 
         try (Stream<Path> paths = Files.walk(root)) {
@@ -88,6 +100,14 @@ public class RelationshipDecoupler {
                     Optional<CompilationUnit> cuOpt = javaParser.parse(path).getResult();
                     if (cuOpt.isEmpty()) return;
                     CompilationUnit cu = cuOpt.get();
+
+                    // Only count entities that belong to this module's package
+                    if (!modulePackage.isBlank()) {
+                        String filePkg = cu.getPackageDeclaration()
+                                .map(pd -> pd.getNameAsString())
+                                .orElse("");
+                        if (!filePkg.startsWith(modulePackage)) return;
+                    }
 
                     for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
                         if (hasAnnotation(c, "Entity")) {
@@ -102,9 +122,13 @@ public class RelationshipDecoupler {
     }
 
     /**
-     * Identifies entity types used in relationships that are not present in the local entity set.
+     * Identifies entity types used in relationships by module-owned entities that are
+     * not themselves defined locally.  Only files within {@code modulePackage} are scanned
+     * to prevent stale copied model classes from introducing false positives.
      */
-    private Set<String> findRemoteEntities(Path root, Set<String> localEntities) throws IOException {
+    private Set<String> findRemoteEntities(Path root,
+                                            Set<String> localEntities,
+                                            String modulePackage) throws IOException {
         Set<String> referenced = new HashSet<>();
 
         try (Stream<Path> paths = Files.walk(root)) {
@@ -113,6 +137,14 @@ public class RelationshipDecoupler {
                     Optional<CompilationUnit> cuOpt = javaParser.parse(path).getResult();
                     if (cuOpt.isEmpty()) return;
                     CompilationUnit cu = cuOpt.get();
+
+                    // Restrict scan to files in the module's own package
+                    if (!modulePackage.isBlank()) {
+                        String filePkg = cu.getPackageDeclaration()
+                                .map(pd -> pd.getNameAsString())
+                                .orElse("");
+                        if (!filePkg.startsWith(modulePackage)) return;
+                    }
 
                     for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
                         if (!hasAnnotation(c, "Entity")) continue;
@@ -225,8 +257,6 @@ public class RelationshipDecoupler {
         CompilationUnit cu = cuOpt.get();
         boolean modified = false;
 
-        modified |= removeRemoteImports(cu, remoteEntities);
-
         for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
             if (hasAnnotation(c, "Entity")) {
                 modified |= transformEntityClass(c, remoteEntities);
@@ -234,6 +264,11 @@ public class RelationshipDecoupler {
         }
 
         modified |= transformServiceLogic(cu, remoteEntities, requestIndex);
+
+        // Remove imports for remote entity types only when they are no longer referenced
+        // after all transformations. This preserves imports for entity objects that remain
+        // as service-call results (e.g. Payment payment = paymentServiceClient.processPayment(...)).
+        modified |= removeRemoteImports(cu, remoteEntities);
 
         if (modified) {
             Files.writeString(javaFile, cu.toString());
@@ -418,32 +453,43 @@ public class RelationshipDecoupler {
         for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
             Set<String> localNames = new HashSet<>();
             Map<String, String> remoteVarToIdVar = new HashMap<>();
+            // Vars that hold remote entities returned from service calls — keep as objects,
+            // but setter calls on them need to be rewritten to use .getId()
+            Set<String> remoteEntityServiceVars = new HashSet<>();
 
             method.getParameters().forEach(p -> localNames.add(p.getNameAsString()));
 
             // 1) Update local variable declarations (Entity e -> String eId)
+            //    Skip vars initialized from method calls — those are service call results
+            //    that should remain as entity objects, not be demoted to String IDs.
             for (VariableDeclarator vd : method.findAll(VariableDeclarator.class)) {
                 String typeName = simpleTypeName(vd.getType());
-                if (typeName != null && remoteEntities.contains(typeName)) {
-                    String oldName = vd.getNameAsString();
-                    String newName = oldName.endsWith("Id") ? oldName : oldName + "Id";
+                if (typeName == null || !remoteEntities.contains(typeName)) continue;
 
-                    vd.setType("String");
-                    vd.setName(newName);
-
-                    if (vd.getInitializer().isPresent() && vd.getInitializer().get().isObjectCreationExpr()) {
-                        ObjectCreationExpr oce = vd.getInitializer().get().asObjectCreationExpr();
-                        String createdType = simpleTypeName(oce.getType());
-                        if (createdType != null && remoteEntities.contains(createdType)) {
-                            vd.setInitializer(new NullLiteralExpr());
-                        }
-                    }
-
-                    remoteVarToIdVar.put(oldName, newName);
-                    localNames.add(newName);
-
-                    modified = true;
+                if (vd.getInitializer().isPresent() && vd.getInitializer().get().isMethodCallExpr()) {
+                    // e.g. Payment payment = paymentService.processPayment(...) — keep as entity
+                    remoteEntityServiceVars.add(vd.getNameAsString());
+                    continue;
                 }
+
+                String oldName = vd.getNameAsString();
+                String newName = oldName.endsWith("Id") ? oldName : oldName + "Id";
+
+                vd.setType("String");
+                vd.setName(newName);
+
+                if (vd.getInitializer().isPresent() && vd.getInitializer().get().isObjectCreationExpr()) {
+                    ObjectCreationExpr oce = vd.getInitializer().get().asObjectCreationExpr();
+                    String createdType = simpleTypeName(oce.getType());
+                    if (createdType != null && remoteEntities.contains(createdType)) {
+                        vd.setInitializer(new NullLiteralExpr());
+                    }
+                }
+
+                remoteVarToIdVar.put(oldName, newName);
+                localNames.add(newName);
+
+                modified = true;
             }
 
             // 2) Update setId calls (e.setId(x) -> eId = x)
@@ -499,6 +545,21 @@ public class RelationshipDecoupler {
                     }
                     call.setArgument(0, requestAccessor.get());
                     modified = true;
+                    continue;
+                }
+
+                // Case C: Variable holds a remote entity returned from a service call.
+                // Rename setter to *Id and convert the entity's Long @Id to String.
+                // e.g. order.setPayment(payment) → order.setPaymentId(String.valueOf(payment.getId()))
+                // String.valueOf() is used (vs .toString()) to avoid NPE on null IDs.
+                if (remoteEntityServiceVars.contains(argName)) {
+                    if (!call.getNameAsString().endsWith("Id")) {
+                        call.setName(call.getNameAsString() + "Id");
+                    }
+                    MethodCallExpr getIdCall = new MethodCallExpr(new NameExpr(argName), "getId");
+                    call.setArgument(0, new MethodCallExpr(
+                            new NameExpr("String"), "valueOf", new NodeList<>(getIdCall)));
+                    modified = true;
                 }
             }
         }
@@ -543,15 +604,25 @@ public class RelationshipDecoupler {
     }
 
     /**
-     * Removes imports for remote entity types.
+     * Removes imports for remote entity types that are no longer referenced in the file.
+     *
+     * <p>This must run after all AST transformations so that the reference check reflects
+     * the final state of the file. Types that are still used (e.g. a {@code Payment}
+     * variable returned from a service call) retain their import; types whose fields
+     * were converted to String IDs lose theirs.
      */
     private boolean removeRemoteImports(CompilationUnit cu, Set<String> remoteEntities) {
         boolean modified = false;
 
+        // Collect every ClassOrInterfaceType still present after transformation
+        Set<String> stillReferenced = new HashSet<>();
+        cu.findAll(ClassOrInterfaceType.class)
+                .forEach(t -> stillReferenced.add(t.getNameAsString()));
+
         List<ImportDeclaration> toRemove = new ArrayList<>();
         for (ImportDeclaration imp : cu.getImports()) {
             String last = imp.getName().getIdentifier();
-            if (remoteEntities.contains(last)) {
+            if (remoteEntities.contains(last) && !stillReferenced.contains(last)) {
                 toRemove.add(imp);
             }
         }

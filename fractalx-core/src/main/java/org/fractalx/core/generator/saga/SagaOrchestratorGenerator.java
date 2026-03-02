@@ -1,6 +1,7 @@
 package org.fractalx.core.generator.saga;
 
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.model.MethodParam;
 import org.fractalx.core.model.SagaDefinition;
 import org.fractalx.core.model.SagaStep;
 import org.slf4j.Logger;
@@ -66,7 +67,7 @@ public class SagaOrchestratorGenerator {
         // ── Infrastructure files ─────────────────────────────────────────────
         writePom(serviceRoot, modules);
         writeApplicationClass(srcMainJava);
-        writeApplicationYml(resourcesDir);
+        writeApplicationYml(resourcesDir, modules, sagas);
         writeFlywayMigration(resourcesDir);
 
         // ── Shared model ─────────────────────────────────────────────────────
@@ -80,11 +81,15 @@ public class SagaOrchestratorGenerator {
             writeFile(packagePath(basePkg, "service"), serviceClass + ".java",
                     buildSagaService(saga));
 
-            // Generate NetScope client interface for each participating service
+            // Generate one NetScope client interface per unique bean type,
+            // aggregating all forward + compensation methods for that bean
+            java.util.Map<String, List<SagaStep>> stepsByBean = new java.util.LinkedHashMap<>();
             for (SagaStep step : saga.getSteps()) {
-                String clientName = step.getBeanType() + "Client";
-                writeFile(packagePath(basePkg, "client"), clientName + ".java",
-                        buildNetScopeClient(step, modules));
+                stepsByBean.computeIfAbsent(step.getBeanType(), k -> new ArrayList<>()).add(step);
+            }
+            for (java.util.Map.Entry<String, List<SagaStep>> entry : stepsByBean.entrySet()) {
+                writeFile(packagePath(basePkg, "client"), entry.getKey() + "Client.java",
+                        buildNetScopeClient(entry.getKey(), entry.getValue(), modules, saga.getSagaMethodParams()));
             }
         }
 
@@ -173,6 +178,14 @@ public class SagaOrchestratorGenerator {
                     <build>
                         <plugins>
                             <plugin>
+                                <groupId>org.apache.maven.plugins</groupId>
+                                <artifactId>maven-compiler-plugin</artifactId>
+                                <version>3.11.0</version>
+                                <configuration>
+                                    <parameters>true</parameters>
+                                </configuration>
+                            </plugin>
+                            <plugin>
                                 <groupId>org.springframework.boot</groupId>
                                 <artifactId>spring-boot-maven-plugin</artifactId>
                                 <version>${spring-boot.version}</version>
@@ -210,49 +223,65 @@ public class SagaOrchestratorGenerator {
                 """.formatted(BASE_PACKAGE, BASE_PACKAGE));
     }
 
-    private void writeApplicationYml(Path resourcesDir) throws IOException {
+    private void writeApplicationYml(Path resourcesDir,
+                                      List<FractalModule> modules,
+                                      List<SagaDefinition> sagas) throws IOException {
+        // Collect the set of service names that participate in any saga
+        Set<String> participatingServices = new java.util.LinkedHashSet<>();
+        for (SagaDefinition saga : sagas) {
+            for (SagaStep step : saga.getSteps()) {
+                participatingServices.add(step.getTargetServiceName());
+            }
+        }
+
+        // Build the netscope.client.servers block with concrete gRPC ports
+        StringBuilder serversBlock = new StringBuilder();
+        for (String serviceName : participatingServices) {
+            int grpcPort = modules.stream()
+                    .filter(m -> m.getServiceName().equals(serviceName))
+                    .map(m -> m.getPort() + 10000)
+                    .findFirst()
+                    .orElse(19000);
+            serversBlock.append("      ").append(serviceName).append(":\n");
+            serversBlock.append("        host: localhost\n");
+            serversBlock.append("        port: ").append(grpcPort).append("\n");
+        }
+
         writeFile(resourcesDir, "application.yml",
-                """
-                spring:
-                  application:
-                    name: fractalx-saga-orchestrator
-                  datasource:
-                    url: jdbc:h2:mem:saga_db
-                    driver-class-name: org.h2.Driver
-                    username: sa
-                    password:
-                    hikari:
-                      maximum-pool-size: 5
-                      minimum-idle: 2
-                  jpa:
-                    hibernate:
-                      ddl-auto: update
-                    show-sql: false
-                  h2:
-                    console:
-                      enabled: true
-                  flyway:
-                    enabled: true
-                    locations: classpath:db/migration
-
-                server:
-                  port: 8099
-
-                netscope:
-                  client:
-                    # TODO: Add participating service gRPC addresses here.
-                    # Format:  servers.<service-name>.host / port
-                    # Example:
-                    #   servers:
-                    #     payment-service:
-                    #       host: localhost
-                    #       port: 18082
-
-                logging:
-                  level:
-                    org.fractalx: INFO
-                    org.fractalx.netscope: DEBUG
-                """);
+                "spring:\n"
+                + "  application:\n"
+                + "    name: fractalx-saga-orchestrator\n"
+                + "  datasource:\n"
+                + "    url: jdbc:h2:mem:saga_db\n"
+                + "    driver-class-name: org.h2.Driver\n"
+                + "    username: sa\n"
+                + "    password:\n"
+                + "    hikari:\n"
+                + "      maximum-pool-size: 5\n"
+                + "      minimum-idle: 2\n"
+                + "  jpa:\n"
+                + "    hibernate:\n"
+                + "      ddl-auto: validate\n"
+                + "    show-sql: false\n"
+                + "  h2:\n"
+                + "    console:\n"
+                + "      enabled: true\n"
+                + "  flyway:\n"
+                + "    enabled: true\n"
+                + "    locations: classpath:db/migration\n"
+                + "\n"
+                + "server:\n"
+                + "  port: 8099\n"
+                + "\n"
+                + "netscope:\n"
+                + "  client:\n"
+                + "    servers:\n"
+                + serversBlock
+                + "\n"
+                + "logging:\n"
+                + "  level:\n"
+                + "    org.fractalx: INFO\n"
+                + "    org.fractalx.netscope: DEBUG\n");
     }
 
     private void writeFlywayMigration(Path resourcesDir) throws IOException {
@@ -412,7 +441,16 @@ public class SagaOrchestratorGenerator {
     // =========================================================================
 
     private String buildSagaService(SagaDefinition saga) {
-        String className = saga.toClassName() + "SagaService";
+        String className    = saga.toClassName() + "SagaService";
+        String payloadClass = saga.toClassName() + "Payload";
+        List<MethodParam> params = saga.getSagaMethodParams();
+
+        // Build a name→type lookup for resolving call-site args to typed params
+        java.util.Map<String, String> paramTypeMap = new java.util.LinkedHashMap<>();
+        for (MethodParam p : params) {
+            paramTypeMap.put(p.getName(), p.getType());
+        }
+
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
         sb.append("import ").append(BASE_PACKAGE).append(".model.*;\n");
@@ -424,22 +462,26 @@ public class SagaOrchestratorGenerator {
                 .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
         clientImports.forEach(imp -> sb.append("import ").append(imp).append(";\n"));
 
-        sb.append("""
-                import org.slf4j.Logger;
-                import org.slf4j.LoggerFactory;
-                import org.springframework.stereotype.Service;
-                import org.springframework.transaction.annotation.Transactional;
-                import java.util.UUID;
+        sb.append("import com.fasterxml.jackson.databind.ObjectMapper;\n");
+        sb.append("import org.slf4j.Logger;\n");
+        sb.append("import org.slf4j.LoggerFactory;\n");
+        sb.append("import org.springframework.stereotype.Service;\n");
+        sb.append("import org.springframework.transaction.annotation.Transactional;\n");
+        sb.append("import java.util.UUID;\n");
 
-                """);
+        // Emit imports for non-trivial payload field types
+        for (MethodParam p : params) {
+            String fqn = javaImportFor(p.getType());
+            if (fqn != null) sb.append("import ").append(fqn).append(";\n");
+        }
+        sb.append("\n");
 
         sb.append("/**\n");
         sb.append(" * Orchestrator for the '").append(saga.getSagaId()).append("' saga.\n");
         if (!saga.getDescription().isBlank()) {
             sb.append(" * ").append(saga.getDescription()).append("\n");
         }
-        sb.append(" *\n");
-        sb.append(" * <p>Steps (in execution order):\n");
+        sb.append(" *\n * <p>Steps (in execution order):\n");
         for (SagaStep step : saga.getSteps()) {
             sb.append(" * <ol><li>").append(step.getTargetServiceName()).append(" → ")
               .append(step.getMethodName());
@@ -450,14 +492,13 @@ public class SagaOrchestratorGenerator {
         }
         sb.append(" *\n * Auto-generated by FractalX.\n */\n");
 
-        sb.append("@Service\n");
-        sb.append("@Transactional\n");
+        sb.append("@Service\n@Transactional\n");
         sb.append("public class ").append(className).append(" {\n\n");
 
         sb.append("    private static final Logger log = LoggerFactory.getLogger(")
           .append(className).append(".class);\n\n");
 
-        // Field injection for each unique client
+        // Fields
         Set<String> injectedClients = new java.util.LinkedHashSet<>();
         for (SagaStep step : saga.getSteps()) {
             String clientType = step.getBeanType() + "Client";
@@ -466,17 +507,22 @@ public class SagaOrchestratorGenerator {
                 sb.append("    private final ").append(clientType).append(" ").append(fieldName).append(";\n");
             }
         }
-        sb.append("    private final SagaInstanceRepository sagaRepository;\n\n");
+        sb.append("    private final SagaInstanceRepository sagaRepository;\n");
+        sb.append("    private final ObjectMapper objectMapper;\n\n");
 
         // Constructor
         sb.append("    public ").append(className).append("(");
         List<String> ctorParams = new ArrayList<>();
+        Set<String> seenCtorTypes = new java.util.LinkedHashSet<>();
         for (SagaStep step : saga.getSteps()) {
             String clientType = step.getBeanType() + "Client";
             String fieldName  = Character.toLowerCase(clientType.charAt(0)) + clientType.substring(1);
-            ctorParams.add(clientType + " " + fieldName);
+            if (seenCtorTypes.add(clientType)) {
+                ctorParams.add(clientType + " " + fieldName);
+            }
         }
         ctorParams.add("SagaInstanceRepository sagaRepository");
+        ctorParams.add("ObjectMapper objectMapper");
         sb.append(String.join(", ", ctorParams)).append(") {\n");
         Set<String> assigned = new java.util.LinkedHashSet<>();
         for (SagaStep step : saga.getSteps()) {
@@ -487,15 +533,27 @@ public class SagaOrchestratorGenerator {
             }
         }
         sb.append("        this.sagaRepository = sagaRepository;\n");
+        sb.append("        this.objectMapper = objectMapper;\n");
         sb.append("    }\n\n");
 
-        // start() method
+        // start() method — deserializes payload, runs steps with typed args
         sb.append("    /**\n");
         sb.append("     * Starts a new saga execution.\n");
-        sb.append("     * @param payload JSON-serialized input (caller responsibility to serialize)\n");
+        sb.append("     * @param payload JSON body matching {@link ").append(payloadClass).append("}\n");
         sb.append("     * @return correlationId to track this execution\n");
         sb.append("     */\n");
         sb.append("    public String start(String payload) {\n");
+
+        if (!params.isEmpty()) {
+            sb.append("        ").append(payloadClass).append(" p;\n");
+            sb.append("        try {\n");
+            sb.append("            p = objectMapper.readValue(payload, ").append(payloadClass).append(".class);\n");
+            sb.append("        } catch (Exception e) {\n");
+            sb.append("            throw new IllegalArgumentException(\"Invalid payload for saga '")
+              .append(saga.getSagaId()).append("': \" + e.getMessage(), e);\n");
+            sb.append("        }\n\n");
+        }
+
         sb.append("        SagaInstance instance = new SagaInstance();\n");
         sb.append("        instance.setSagaId(\"").append(saga.getSagaId()).append("\");\n");
         sb.append("        instance.setCorrelationId(UUID.randomUUID().toString());\n");
@@ -508,7 +566,6 @@ public class SagaOrchestratorGenerator {
         sb.append("        try {\n");
         sb.append("            instance.setStatus(SagaStatus.IN_PROGRESS);\n");
 
-        // Forward steps
         for (SagaStep step : saga.getSteps()) {
             String clientField = Character.toLowerCase(step.getBeanType().charAt(0))
                                + step.getBeanType().substring(1) + "Client";
@@ -517,9 +574,9 @@ public class SagaOrchestratorGenerator {
             sb.append("            instance.setCurrentStep(\"")
               .append(step.getTargetServiceName()).append(":").append(step.getMethodName()).append("\");\n");
             sb.append("            sagaRepository.save(instance);\n");
-            sb.append("            // TODO: map payload to actual method parameters\n");
-            sb.append("            ").append(clientField).append(".").append(step.getMethodName())
-              .append("(/* TODO: parameters from payload */);\n");
+            sb.append("            ").append(clientField).append(".").append(step.getMethodName()).append("(");
+            sb.append(buildCallArgs(step.getCallArguments(), paramTypeMap, params));
+            sb.append(");\n");
         }
 
         sb.append("\n            instance.setStatus(SagaStatus.DONE);\n");
@@ -531,13 +588,16 @@ public class SagaOrchestratorGenerator {
         sb.append("            log.error(\"Saga '").append(saga.getSagaId())
           .append("' failed at step={}\", instance.getCurrentStep(), e);\n");
         sb.append("            instance.setErrorMessage(e.getMessage());\n");
-        sb.append("            compensate(instance);\n");
+        sb.append("            compensate(instance");
+        if (!params.isEmpty()) sb.append(", p");
+        sb.append(");\n");
         sb.append("        }\n\n");
         sb.append("        return instance.getCorrelationId();\n");
         sb.append("    }\n\n");
 
         // compensate() method
-        sb.append("    private void compensate(SagaInstance instance) {\n");
+        String compensateParam = params.isEmpty() ? "" : ", " + payloadClass + " p";
+        sb.append("    private void compensate(SagaInstance instance").append(compensateParam).append(") {\n");
         sb.append("        instance.setStatus(SagaStatus.COMPENSATING);\n");
         sb.append("        sagaRepository.save(instance);\n\n");
         sb.append("        // Compensation runs in reverse step order\n");
@@ -552,7 +612,10 @@ public class SagaOrchestratorGenerator {
                 sb.append("            // Compensate: ").append(step.getTargetServiceName())
                   .append(" → ").append(step.getCompensationMethodName()).append("\n");
                 sb.append("            ").append(clientField).append(".")
-                  .append(step.getCompensationMethodName()).append("(/* TODO: parameters */);\n");
+                  .append(step.getCompensationMethodName()).append("(");
+                // Use same arguments as forward step for compensation
+                sb.append(buildCallArgs(step.getCallArguments(), paramTypeMap, params));
+                sb.append(");\n");
                 sb.append("        } catch (Exception compensationEx) {\n");
                 sb.append("            log.error(\"Compensation step '")
                   .append(step.getCompensationMethodName())
@@ -565,21 +628,105 @@ public class SagaOrchestratorGenerator {
         sb.append("        sagaRepository.save(instance);\n");
         sb.append("        log.warn(\"Saga '").append(saga.getSagaId())
           .append("' compensated and marked FAILED correlationId={}\", instance.getCorrelationId());\n");
-        sb.append("    }\n}\n");
+        sb.append("    }\n\n");
 
+        // Payload DTO record — mirrors the parent saga method's parameter list
+        if (!params.isEmpty()) {
+            sb.append("    /**\n");
+            sb.append("     * Typed payload DTO for the '").append(saga.getSagaId()).append("' saga.\n");
+            sb.append("     * Serialise this as JSON and POST to {@code /saga/")
+              .append(saga.getSagaId()).append("/start}.\n");
+            sb.append("     */\n");
+            sb.append("    public record ").append(payloadClass).append("(\n");
+            List<String> recordComponents = new ArrayList<>();
+            for (MethodParam mp : params) {
+                recordComponents.add("            " + mp.getType() + " " + mp.getName());
+            }
+            sb.append(String.join(",\n", recordComponents));
+            sb.append("\n    ) {}\n");
+        }
+
+        sb.append("}\n");
         return sb.toString();
+    }
+
+    /**
+     * Builds the argument list string for a step call.
+     * If args were captured from the call site, emits {@code p.argName()} accessors.
+     * Falls back to positional params from the saga method signature if no args were captured.
+     */
+    private String buildCallArgs(List<String> callArgs,
+                                  java.util.Map<String, String> paramTypeMap,
+                                  List<MethodParam> sagaParams) {
+        if (callArgs.isEmpty()) {
+            // No captured args — emit positional references to all saga params
+            if (sagaParams.isEmpty()) return "/* TODO: add parameters */";
+            return sagaParams.stream()
+                    .map(p -> "p." + p.getName() + "()")
+                    .collect(java.util.stream.Collectors.joining(", "));
+        }
+        // Map each captured arg expression: if it's a known param name, use p.name(), else emit as-is
+        return callArgs.stream()
+                .map(arg -> paramTypeMap.containsKey(arg) ? "p." + arg + "()" : arg)
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    /**
+     * Returns the fully-qualified import for a simple Java type name, or null
+     * if the type doesn't need an explicit import (primitive wrappers, String, etc.).
+     */
+    private String javaImportFor(String simpleType) {
+        return switch (simpleType) {
+            case "BigDecimal"     -> "java.math.BigDecimal";
+            case "LocalDate"      -> "java.time.LocalDate";
+            case "LocalDateTime"  -> "java.time.LocalDateTime";
+            case "ZonedDateTime"  -> "java.time.ZonedDateTime";
+            case "UUID"           -> "java.util.UUID";
+            case "List"           -> "java.util.List";
+            case "Map"            -> "java.util.Map";
+            default               -> null; // String, Long, Integer, Double, Boolean — no import needed
+        };
     }
 
     // =========================================================================
     // NetScope client in orchestrator
     // =========================================================================
 
-    private String buildNetScopeClient(SagaStep step, List<FractalModule> modules) {
+    private String buildNetScopeClient(String beanType,
+                                        List<SagaStep> steps,
+                                        List<FractalModule> modules,
+                                        List<MethodParam> sagaMethodParams) {
+        String targetServiceName = steps.get(0).getTargetServiceName();
         int grpcPort = modules.stream()
-                .filter(m -> m.getServiceName().equals(step.getTargetServiceName()))
+                .filter(m -> m.getServiceName().equals(targetServiceName))
                 .map(m -> m.getPort() + 10000)
                 .findFirst()
                 .orElse(19000);
+
+        // Build name→type lookup from the parent saga method's params
+        java.util.Map<String, String> paramTypeMap = new java.util.LinkedHashMap<>();
+        for (MethodParam p : sagaMethodParams) {
+            paramTypeMap.put(p.getName(), p.getType());
+        }
+
+        // Emit one typed method declaration per unique forward + compensation method
+        Set<String> seen = new java.util.LinkedHashSet<>();
+        StringBuilder methods = new StringBuilder();
+        for (SagaStep step : steps) {
+            if (seen.add(step.getMethodName())) {
+                methods.append("\n    // Forward step\n");
+                methods.append("    void ").append(step.getMethodName()).append("(");
+                methods.append(buildTypedParamList(step.getCallArguments(), paramTypeMap, sagaMethodParams));
+                methods.append(");\n");
+            }
+            if (step.hasCompensation() && seen.add(step.getCompensationMethodName())) {
+                methods.append("\n    // Compensation for ").append(step.getMethodName()).append("\n");
+                methods.append("    void ").append(step.getCompensationMethodName()).append("(");
+                // Compensation uses same params as the forward step
+                methods.append(buildTypedParamList(step.getCallArguments(), paramTypeMap, sagaMethodParams));
+                methods.append(");\n");
+            }
+        }
 
         return """
                 package %s.client;
@@ -590,26 +737,40 @@ public class SagaOrchestratorGenerator {
                  * NetScope client for %s.
                  * Connects to %s on gRPC port %d.
                  * Generated by FractalX Saga Orchestrator Generator.
-                 *
-                 * TODO: Add method signatures matching the %s bean's public methods.
                  */
                 @NetScopeClient(server = "%s", beanName = "%s")
                 public interface %sClient {
-
-                    // TODO: Declare methods matching the remote %s bean.
-                    // Example:
-                    //   boolean %s(/* parameters */);
-
+                %s
                 }
                 """.formatted(
                 BASE_PACKAGE,
-                step.getBeanType(), step.getTargetServiceName(), grpcPort,
-                step.getBeanType(),
-                step.getTargetServiceName(), step.getBeanType(),
-                step.getBeanType(),
-                step.getBeanType(),
-                step.getMethodName()
+                beanType, targetServiceName, grpcPort,
+                targetServiceName, beanType,
+                beanType,
+                methods
         );
+    }
+
+    /**
+     * Builds a typed parameter list string for a method declaration.
+     * Resolves each argument name to its type from the parent saga method params.
+     * Example: {@code ["productId", "quantity"]} → {@code "Long productId, Integer quantity"}.
+     */
+    private String buildTypedParamList(List<String> argNames,
+                                        java.util.Map<String, String> paramTypeMap,
+                                        List<MethodParam> sagaParams) {
+        if (argNames.isEmpty()) {
+            if (sagaParams.isEmpty()) return "";
+            return sagaParams.stream()
+                    .map(p -> p.getType() + " " + p.getName())
+                    .collect(java.util.stream.Collectors.joining(", "));
+        }
+        List<String> parts = new ArrayList<>();
+        for (String arg : argNames) {
+            String type = paramTypeMap.getOrDefault(arg, "Object /* unknown type */");
+            parts.add(type + " " + arg);
+        }
+        return String.join(", ", parts);
     }
 
     // =========================================================================

@@ -2,6 +2,7 @@ package org.fractalx.core.datamanagement;
 
 import org.fractalx.core.generator.service.NetScopeClientGenerator;
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.model.MethodParam;
 import org.fractalx.core.model.SagaDefinition;
 import org.fractalx.core.model.SagaStep;
 import com.github.javaparser.JavaParser;
@@ -9,6 +10,7 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MemberValuePair;
 import com.github.javaparser.ast.expr.MethodCallExpr;
@@ -123,6 +125,12 @@ public class SagaAnalyzer {
         String packageName  = cu.getPackageDeclaration().map(p -> p.getNameAsString()).orElse("");
         String ownerService = findOwnerService(packageName, modules);
 
+        // Extract the saga method's own parameters for payload DTO generation
+        List<MethodParam> sagaMethodParams = new ArrayList<>();
+        for (Parameter p : method.getParameters()) {
+            sagaMethodParams.add(new MethodParam(p.getType().asString(), p.getNameAsString()));
+        }
+
         // Detect ordered cross-module calls within this method body
         List<SagaStep> steps = detectSteps(method, crossModuleFields, modules);
 
@@ -134,7 +142,8 @@ public class SagaAnalyzer {
                 steps,
                 compensationMethod,
                 timeout,
-                description
+                description,
+                sagaMethodParams
         );
     }
 
@@ -189,7 +198,14 @@ public class SagaAnalyzer {
             String targetService    = NetScopeClientGenerator.beanTypeToServiceName(beanType);
             String compensationName = deriveCompensationName(calledMethod, beanType, method, modules);
 
-            steps.add(new SagaStep(beanType, targetService, calledMethod, compensationName));
+            // Capture the actual argument expressions used in the call.
+            // These are typically parameter names from the parent saga method,
+            // which lets the generator emit typed calls instead of TODO stubs.
+            List<String> callArgs = call.getArguments().stream()
+                    .map(arg -> arg.toString())
+                    .collect(java.util.stream.Collectors.toList());
+
+            steps.add(new SagaStep(beanType, targetService, calledMethod, compensationName, callArgs));
         });
 
         return steps;

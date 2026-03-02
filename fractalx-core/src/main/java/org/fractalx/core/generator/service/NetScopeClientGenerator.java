@@ -14,8 +14,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -62,13 +66,16 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
         }
 
         int grpcPort = targetModule.getPort() + 10000;
-        List<CrossModuleCall> methods = extractPublicMethods(beanType, context.getSourceRoot(), targetServiceName);
+        Set<String> requiredImports = new LinkedHashSet<>();
+        List<CrossModuleCall> methods = extractPublicMethods(beanType, context.getSourceRoot(), targetServiceName, requiredImports);
+
+        copyRequiredModelClasses(requiredImports, context.getSourceRoot(), context.getSrcMainJava());
 
         String interfaceName = beanType + "Client";
         Files.writeString(
                 packagePath.resolve(interfaceName + ".java"),
                 buildClientInterface(context.getModule().getPackageName(), interfaceName,
-                        beanType, targetServiceName, grpcPort, methods)
+                        beanType, targetServiceName, grpcPort, methods, requiredImports)
         );
 
         log.info("Generated NetScope client interface: {} → {} (gRPC :{})",
@@ -84,7 +91,9 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
      * with JavaParser, and returns a {@link CrossModuleCall} for every public
      * non-static method.
      */
-    private List<CrossModuleCall> extractPublicMethods(String beanType, Path sourceRoot, String targetServiceName) {
+    private List<CrossModuleCall> extractPublicMethods(String beanType, Path sourceRoot,
+                                                       String targetServiceName,
+                                                       Set<String> requiredImports) {
         List<CrossModuleCall> calls = new ArrayList<>();
 
         try {
@@ -100,6 +109,23 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
             CompilationUnit cu = new JavaParser().parse(sourceFile.get()).getResult().orElse(null);
             if (cu == null) return calls;
 
+            // Build simple-name → FQN map from the source file's own imports
+            Map<String, String> importMap = new HashMap<>();
+            cu.getImports().forEach(imp -> {
+                if (!imp.isAsterisk() && !imp.isStatic()) {
+                    String fqn = imp.getNameAsString();
+                    String simpleName = fqn.substring(fqn.lastIndexOf('.') + 1);
+                    importMap.put(simpleName, fqn);
+                }
+            });
+
+            // Same-package types are never imported in their own source file.
+            // Resolve them by scanning the source file's directory.
+            Path sourceFileDir = sourceFile.get().getParent();
+            String packageName = cu.getPackageDeclaration()
+                    .map(pd -> pd.getNameAsString())
+                    .orElse("");
+
             cu.findAll(ClassOrInterfaceDeclaration.class).stream()
                     .filter(c -> c.getNameAsString().equals(beanType))
                     .findFirst()
@@ -109,6 +135,13 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
                                     List<String> params = method.getParameters().stream()
                                             .map(p -> p.getType().asString() + " " + p.getNameAsString())
                                             .collect(Collectors.toList());
+
+                                    collectTypeImports(method.getType().asString(), importMap,
+                                            requiredImports, sourceFileDir, packageName);
+                                    method.getParameters().forEach(p ->
+                                            collectTypeImports(p.getType().asString(), importMap,
+                                                    requiredImports, sourceFileDir, packageName));
+
                                     calls.add(new CrossModuleCall(
                                             beanType,
                                             targetServiceName,
@@ -127,6 +160,69 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
         return calls;
     }
 
+    /**
+     * Resolves type tokens (including generics like {@code List<Product>}) to their
+     * FQNs and adds them to {@code requiredImports}.
+     *
+     * <p>First checks {@code importMap} (explicit imports in the source file).
+     * Falls back to a same-directory lookup for types in the same package as the
+     * source bean — those are never imported in their own file.
+     */
+    private void collectTypeImports(String typeStr, Map<String, String> importMap,
+                                    Set<String> requiredImports,
+                                    Path sourceFileDir, String packageName) {
+        for (String token : typeStr.replaceAll("[<>,?\\[\\]]", " ").split("\\s+")) {
+            token = token.trim();
+            if (token.isEmpty()) continue;
+            String fqn = importMap.get(token);
+            if (fqn != null) {
+                requiredImports.add(fqn);
+            } else if (sourceFileDir != null && !packageName.isEmpty()) {
+                // Same-package class — not imported, but lives next to the source file
+                Path candidate = sourceFileDir.resolve(token + ".java");
+                if (Files.exists(candidate)) {
+                    requiredImports.add(packageName + "." + token);
+                }
+            }
+        }
+    }
+
+    /**
+     * Copies model class files (non-JDK, non-Spring, non-FractalX) referenced in
+     * {@code requiredImports} from the monolith source root into the consuming
+     * service's {@code src/main/java}, preserving the original package structure.
+     */
+    private void copyRequiredModelClasses(Set<String> requiredImports, Path sourceRoot,
+                                          Path destSrcMain) {
+        for (String fqn : requiredImports) {
+            // Skip JDK, Jakarta EE, Spring, and FractalX framework packages.
+            // The Files.exists() check below is the real gate — framework classes
+            // won't be present in the monolith's src/main/java and are silently skipped.
+            if (fqn.startsWith("java.")
+                    || fqn.startsWith("javax.")
+                    || fqn.startsWith("jakarta.")
+                    || fqn.startsWith("org.springframework.")
+                    || fqn.startsWith("org.fractalx.")) {
+                continue;
+            }
+            // Derive relative path, e.g. com.fractalx.testapp.inventory.Product → .../Product.java
+            String relativePath = fqn.replace('.', '/') + ".java";
+            Path src = sourceRoot.resolve(relativePath);
+            if (!Files.exists(src)) continue;
+
+            Path dest = destSrcMain.resolve(relativePath);
+            try {
+                Files.createDirectories(dest.getParent());
+                if (!Files.exists(dest)) {
+                    Files.copy(src, dest);
+                    log.info("Copied model class {} → {}", fqn, dest);
+                }
+            } catch (IOException e) {
+                log.warn("Could not copy model class {}: {}", fqn, e.getMessage());
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Source generation
     // -------------------------------------------------------------------------
@@ -136,10 +232,15 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
                                         String beanType,
                                         String targetServiceName,
                                         int grpcPort,
-                                        List<CrossModuleCall> methods) {
+                                        List<CrossModuleCall> methods,
+                                        Set<String> requiredImports) {
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(packageName).append(";\n\n");
-        sb.append("import org.fractalx.netscope.client.annotation.NetScopeClient;\n\n");
+        sb.append("import org.fractalx.netscope.client.annotation.NetScopeClient;\n");
+        for (String imp : new java.util.TreeSet<>(requiredImports)) {
+            sb.append("import ").append(imp).append(";\n");
+        }
+        sb.append("\n");
         sb.append("/**\n");
         sb.append(" * NetScope client interface for ").append(beanType).append(".\n");
         sb.append(" * Connects to ").append(targetServiceName).append(" on gRPC port ").append(grpcPort).append(".\n");

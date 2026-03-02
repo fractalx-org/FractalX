@@ -186,7 +186,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
             return "";
         }
 
-        StringBuilder sb = new StringBuilder("  client:\n    servers:\n");
+        StringBuilder sb = new StringBuilder("netscope:\n  client:\n    servers:\n");
         for (String beanType : deps) {
             String targetServiceName = NetScopeClientGenerator.beanTypeToServiceName(beanType);
             allModules.stream()

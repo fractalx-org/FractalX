@@ -30,7 +30,9 @@ public class AutomaticRequestLogger {
         String methodName = joinPoint.getSignature().getName();
         String className = joinPoint.getTarget().getClass().getSimpleName();
         Object[] args = joinPoint.getArgs();
-        String correlationId = MDC.get("correlationId"); // Capture Trace ID explicitly
+        // Check X-Correlation-Id first (set by filter), then fall back to Micrometer's traceId MDC key
+        String correlationId = MDC.get("correlationId");
+        if (correlationId == null) correlationId = MDC.get("traceId");
 
         log.info("[AUTO-LOG] [CorrelationId:{}] Entering {}.{}() with args: {}",
                 correlationId != null ? correlationId : "N/A",
@@ -44,6 +46,7 @@ public class AutomaticRequestLogger {
         String methodName = joinPoint.getSignature().getName();
         String className = joinPoint.getTarget().getClass().getSimpleName();
         String correlationId = MDC.get("correlationId");
+        if (correlationId == null) correlationId = MDC.get("traceId");
 
         log.info("[AUTO-LOG] [CorrelationId:{}] Exiting {}.{}() returned: {}",
                 correlationId != null ? correlationId : "N/A",

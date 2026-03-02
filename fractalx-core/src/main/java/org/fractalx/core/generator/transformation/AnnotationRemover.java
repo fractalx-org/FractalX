@@ -4,6 +4,7 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +33,8 @@ public class AnnotationRemover {
     );
 
     private static final List<String> FRACTALX_IMPORT_PREFIXES = List.of(
-            "org.fractalx.annotations"
+            "org.fractalx.annotations",
+            "com.fractalx.annotations"
     );
 
     private final JavaParser javaParser;
@@ -68,6 +70,8 @@ public class AnnotationRemover {
 
     private boolean removeAnnotations(CompilationUnit cu) {
         boolean modified = false;
+
+        // Class-level annotations (e.g. @DecomposableModule, @ServiceBoundary)
         for (ClassOrInterfaceDeclaration classDecl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
             List<AnnotationExpr> toRemove = new ArrayList<>();
             for (AnnotationExpr annotation : classDecl.getAnnotations()) {
@@ -77,11 +81,28 @@ public class AnnotationRemover {
             }
             for (AnnotationExpr annotation : toRemove) {
                 if (classDecl.remove(annotation)) {
-                    log.debug("Removed @{} from {}", annotation.getNameAsString(), classDecl.getNameAsString());
+                    log.debug("Removed @{} from class {}", annotation.getNameAsString(), classDecl.getNameAsString());
                     modified = true;
                 }
             }
         }
+
+        // Method-level annotations (e.g. @DistributedSaga on business methods)
+        for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
+            List<AnnotationExpr> toRemove = new ArrayList<>();
+            for (AnnotationExpr annotation : method.getAnnotations()) {
+                if (FRACTALX_ANNOTATIONS.contains(annotation.getNameAsString())) {
+                    toRemove.add(annotation);
+                }
+            }
+            for (AnnotationExpr annotation : toRemove) {
+                if (method.remove(annotation)) {
+                    log.debug("Removed @{} from method {}", annotation.getNameAsString(), method.getNameAsString());
+                    modified = true;
+                }
+            }
+        }
+
         return modified;
     }
 
