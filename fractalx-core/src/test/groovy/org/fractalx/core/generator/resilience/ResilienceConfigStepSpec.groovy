@@ -39,7 +39,7 @@ class ResilienceConfigStepSpec extends Specification {
         Files.createDirectories(resourcesDir)
         // Write a base application.yml so the step can append to it
         Files.writeString(resourcesDir.resolve("application.yml"), "server:\n  port: 8081\n")
-        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults())
+        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults(), [])
     }
 
     private Path configFile() {

@@ -36,7 +36,7 @@ class NetScopeRegistryBridgeStepSpec extends Specification {
         .build()
 
     private GenerationContext ctx(FractalModule m) {
-        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults())
+        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults(), [])
     }
 
     private Path bridgeFile(String servicePkg) {

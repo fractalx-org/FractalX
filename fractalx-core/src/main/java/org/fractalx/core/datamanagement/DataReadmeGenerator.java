@@ -20,7 +20,9 @@ public class DataReadmeGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(DataReadmeGenerator.class);
 
-    public void generateServiceDataReadme(FractalModule module, Path serviceRoot, String driverClassName) {
+    public void generateServiceDataReadme(FractalModule module, Path serviceRoot,
+                                          String driverClassName,
+                                          List<SagaDefinition> sagaDefinitions) {
         log.info("   📝 Generating Data README for '{}'...", module.getServiceName());
 
         StringBuilder md = new StringBuilder();
@@ -28,11 +30,11 @@ public class DataReadmeGenerator {
         String dbType = detectDbType(driverClassName);
         String dbUrlDisplay = detectDbUrlPattern(module, dbType);
 
-        // 1. Header
+        // ── Header ────────────────────────────────────────────────────────────
         md.append("# 🗄️ Data Architecture: ").append(module.getServiceName()).append("\n\n");
         md.append("This service has been upgraded by FractalX to support **Distributed Data Isolation**.\n\n");
 
-        // 2. Database Configuration
+        // ── 1. Database Configuration ─────────────────────────────────────────
         md.append("## 1. Database Configuration\n");
         md.append("This service follows the **Database-per-Service** pattern.\n\n");
         md.append("| Property | Value |\n");
@@ -46,21 +48,22 @@ public class DataReadmeGenerator {
             md.append("> - Data is lost when the service stops.\n");
             md.append("> - To use MySQL/Postgres, see the **Configuration Guide** below.\n\n");
         } else {
-            md.append("> **✅ Production Mode:** This service is configured to use an external database (").append(dbType).append(").\n\n");
+            md.append("> **✅ Production Mode:** This service is configured to use an external database (")
+              .append(dbType).append(").\n\n");
         }
 
-        // 3. Decoupling Strategy
+        // ── 2. Decoupling Strategy ────────────────────────────────────────────
         md.append("## 2. Decoupling Strategy\n");
         md.append("Cross-service relationships have been transformed at the Java level to remove hard Foreign Key constraints.\n\n");
         md.append("- **Local Entities**: Relationships inside this service (e.g., `@OneToMany`) are preserved. Foreign Keys exist.\n");
         md.append("- **Remote Entities**: Relationships to other services were converted to IDs (e.g., `Customer customer` → `String customerId`).\n\n");
 
-        // 4. Dependencies
+        // ── 3. Injected Dependencies ──────────────────────────────────────────
         md.append("## 3. Injected Dependencies\n");
         md.append("FractalX automatically injected the following driver into `pom.xml`:\n");
         md.append("- **Driver Class**: `").append(driverClassName != null ? driverClassName : "org.h2.Driver").append("`\n\n");
 
-        // 5. How to Verify
+        // ── 4. How to Verify ──────────────────────────────────────────────────
         md.append("## 4. How to Verify\n");
         md.append("1. Start the service: `mvn spring-boot:run`\n");
         md.append("2. Check logs for `Hibernate: create table ...`\n");
@@ -70,10 +73,9 @@ public class DataReadmeGenerator {
         }
         md.append("\n");
 
-        // 6. Configuration Guide
+        // ── 5. Configuration Guide ────────────────────────────────────────────
         md.append("## 5. Configuration Guide\n");
         md.append("To switch this service to a physical database (MySQL/PostgreSQL), add the following block to your **Monolith's** `application.yml` before decomposition:\n\n");
-
         md.append("```yaml\n");
         md.append("fractalx:\n");
         md.append("  modules:\n");
@@ -89,13 +91,147 @@ public class DataReadmeGenerator {
         md.append("          ddl-auto: update\n");
         md.append("```\n");
 
+        // ── 6. Distributed Saga Participation (only when relevant) ────────────
+        appendSagaSection(md, module, sagaDefinitions);
+
         // Write file inside the SERVICE ROOT
         try {
-            Path readmePath = serviceRoot.resolve("DATA_README.md");
-            Files.writeString(readmePath, md.toString());
+            Files.writeString(serviceRoot.resolve("DATA_README.md"), md.toString());
         } catch (IOException e) {
             log.error("Failed to generate Data README for " + module.getServiceName(), e);
         }
+    }
+
+    /**
+     * Appends Section 6 "Distributed Saga Participation" if this service is involved
+     * in any saga — either as the owner (annotated with {@code @DistributedSaga}) or
+     * as a participant whose methods are called by the orchestrator.
+     */
+    private void appendSagaSection(StringBuilder md, FractalModule module,
+                                   List<SagaDefinition> sagaDefinitions) {
+        String svc = module.getServiceName();
+
+        // Classify this service's involvement in every saga
+        List<SagaDefinition> ownedSagas = sagaDefinitions.stream()
+                .filter(s -> s.getOwnerServiceName().equals(svc))
+                .toList();
+
+        List<SagaDefinition> participantSagas = sagaDefinitions.stream()
+                .filter(s -> !s.getOwnerServiceName().equals(svc)
+                        && s.getSteps().stream().anyMatch(step -> step.getTargetServiceName().equals(svc)))
+                .toList();
+
+        if (ownedSagas.isEmpty() && participantSagas.isEmpty()) {
+            return; // Service is not involved in any saga — skip section entirely
+        }
+
+        int total = ownedSagas.size() + participantSagas.size();
+        md.append("\n## 6. Distributed Saga Participation\n\n");
+        md.append("This service participates in **").append(total).append("** distributed saga(s) ");
+        md.append("coordinated by `fractalx-saga-orchestrator` running on **port 8099**.\n\n");
+        md.append("> **How it works:** The saga orchestrator calls each participating service ");
+        md.append("via **NetScope gRPC** in a defined sequence. ");
+        md.append("If any step fails, the orchestrator calls compensation methods ");
+        md.append("in **reverse order** to roll back changes.\n\n");
+
+        // ── Owned sagas ───────────────────────────────────────────────────────
+        for (SagaDefinition saga : ownedSagas) {
+            md.append("### `").append(saga.getSagaId()).append("` — **Owner** 👑\n\n");
+            if (!saga.getDescription().isBlank()) {
+                md.append("> ").append(saga.getDescription()).append("\n\n");
+            }
+            md.append("This service **owns** this saga. The `@DistributedSaga` annotation was found ");
+            md.append("in `").append(saga.getOwnerClassName()).append(".").append(saga.getMethodName())
+              .append("()` and the orchestrator service was auto-generated from it.\n\n");
+
+            md.append("**To trigger this saga**, POST to the orchestrator instead of calling services directly:\n\n");
+            md.append("```bash\n");
+            md.append("curl -X POST http://localhost:8099/saga/").append(saga.getSagaId()).append("/start \\\n");
+            md.append("  -H \"Content-Type: application/json\" \\\n");
+            md.append("  -d '").append(buildCurlSample(saga.getSagaMethodParams())).append("'\n");
+            md.append("```\n\n");
+
+            if (!saga.getSagaMethodParams().isEmpty()) {
+                md.append("**Payload fields** (`").append(saga.toClassName()).append("Payload`):\n\n");
+                md.append("| Field | Type |\n");
+                md.append("| :--- | :--- |\n");
+                for (MethodParam p : saga.getSagaMethodParams()) {
+                    md.append("| `").append(p.getName()).append("` | `").append(p.getType()).append("` |\n");
+                }
+                md.append("\n");
+            }
+
+            md.append("**Execution sequence managed by the orchestrator:**\n\n");
+            int i = 1;
+            for (SagaStep step : saga.getSteps()) {
+                md.append(i++).append(". `").append(step.getTargetServiceName()).append("` → `")
+                  .append(step.getMethodName()).append("()`");
+                if (step.hasCompensation()) {
+                    md.append("  ↩ compensate: `").append(step.getCompensationMethodName()).append("()`");
+                }
+                md.append("\n");
+            }
+            md.append("\n");
+
+            md.append("> **⚠️ Important:** Do **not** call `")
+              .append(saga.getSteps().get(0).getBeanType())
+              .append("` or other saga participants directly in your business logic. ");
+            md.append("The orchestrator now manages the full call sequence, state tracking, and rollback.\n\n");
+        }
+
+        // ── Participant sagas ─────────────────────────────────────────────────
+        for (SagaDefinition saga : participantSagas) {
+            int grpcPort = module.getPort() + 10000;
+            md.append("### `").append(saga.getSagaId()).append("` — **Participant** 🔗\n\n");
+            if (!saga.getDescription().isBlank()) {
+                md.append("> ").append(saga.getDescription()).append("\n\n");
+            }
+            md.append("The saga orchestrator calls this service's methods via **NetScope gRPC on port ")
+              .append(grpcPort).append("**.\n\n");
+
+            // Collect only this service's steps
+            List<SagaStep> mySteps = saga.getSteps().stream()
+                    .filter(step -> step.getTargetServiceName().equals(svc))
+                    .toList();
+
+            md.append("| Step # | Forward Call | Compensation | Triggered When |\n");
+            md.append("| :---: | :--- | :--- | :--- |\n");
+            int stepNum = 1;
+            for (SagaStep s : saga.getSteps()) {
+                if (s.getTargetServiceName().equals(svc)) {
+                    md.append("| ").append(stepNum).append(" | `").append(s.getMethodName()).append("()` | ");
+                    if (s.hasCompensation()) {
+                        md.append("`").append(s.getCompensationMethodName()).append("()`");
+                    } else {
+                        md.append("—");
+                    }
+                    md.append(" | Step ").append(stepNum).append(" of the saga |\n");
+                }
+                stepNum++;
+            }
+            md.append("\n");
+
+            md.append("**What to expect at runtime:**\n\n");
+            md.append("- The orchestrator serialises the saga payload and dispatches calls over gRPC.\n");
+            md.append("- Parameters are extracted from the original saga payload and matched by name.\n");
+            if (mySteps.stream().anyMatch(SagaStep::hasCompensation)) {
+                md.append("- If this service throws an exception, the orchestrator will invoke ");
+                md.append("the corresponding **compensation method** to undo the side-effect.\n");
+            }
+            md.append("\n");
+
+            md.append("**Track the saga execution that called this service:**\n\n");
+            md.append("```bash\n");
+            md.append("# The correlationId is returned when the saga owner starts the saga\n");
+            md.append("curl http://localhost:8099/saga/status/<correlationId>\n");
+            md.append("```\n\n");
+        }
+
+        // ── Shared note ───────────────────────────────────────────────────────
+        md.append("**List all active sagas:**\n\n");
+        md.append("```bash\n");
+        md.append("curl http://localhost:8099/saga\n");
+        md.append("```\n");
     }
 
     private String detectDbType(String driver) {

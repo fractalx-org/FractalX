@@ -102,7 +102,8 @@ public class ServiceGenerator {
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
                 context -> distributedServiceHelper.upgradeService(
-                        context.getModule(), context.getSourceRoot(), context.getServiceRoot()),
+                        context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
+                        context.getSagaDefinitions()),
                 new OtelConfigStep(),
                 new HealthMetricsStep(),
                 new ServiceRegistrationStep(),
@@ -134,7 +135,7 @@ public class ServiceGenerator {
         registryServiceGenerator.generate(modules, outputRoot);
 
         for (FractalModule module : modules) {
-            generateService(module, modules, fractalxConfig);
+            generateService(module, modules, fractalxConfig, sagaDefinitions);
         }
 
         new LoggerServiceGenerator().generate(outputRoot);
@@ -161,7 +162,8 @@ public class ServiceGenerator {
     // -------------------------------------------------------------------------
 
     private void generateService(FractalModule module, List<FractalModule> allModules,
-                                  FractalxConfig fractalxConfig) throws IOException {
+                                  FractalxConfig fractalxConfig,
+                                  List<SagaDefinition> sagaDefinitions) throws IOException {
         log.info("Generating service: {}", module.getServiceName());
 
         Path serviceRoot = outputRoot.resolve(module.getServiceName());
@@ -170,7 +172,7 @@ public class ServiceGenerator {
         Files.createDirectories(serviceRoot.resolve("src/test/java"));
 
         GenerationContext context = new GenerationContext(
-                module, sourceRoot, serviceRoot, allModules, fractalxConfig);
+                module, sourceRoot, serviceRoot, allModules, fractalxConfig, sagaDefinitions);
 
         for (ServiceFileGenerator step : pipeline) {
             step.generate(context);
