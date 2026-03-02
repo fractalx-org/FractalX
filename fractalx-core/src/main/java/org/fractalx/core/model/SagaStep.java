@@ -1,5 +1,7 @@
 package org.fractalx.core.model;
 
+import java.util.List;
+
 /**
  * Represents one step in a distributed saga — a single cross-module method call
  * with an optional compensation counterpart.
@@ -25,20 +27,31 @@ public final class SagaStep {
      */
     private final String compensationMethodName;
 
+    /**
+     * The argument expressions from the call-site in the saga method body.
+     * Usually these are parameter names from the parent saga method
+     * (e.g., {@code ["productId", "quantity"]} for {@code reserveStock(productId, quantity)}).
+     * Used by the generator to wire actual arguments instead of TODO stubs.
+     */
+    private final List<String> callArguments;
+
     public SagaStep(String beanType,
                     String targetServiceName,
                     String methodName,
-                    String compensationMethodName) {
-        this.beanType              = beanType;
-        this.targetServiceName     = targetServiceName;
-        this.methodName            = methodName;
+                    String compensationMethodName,
+                    List<String> callArguments) {
+        this.beanType               = beanType;
+        this.targetServiceName      = targetServiceName;
+        this.methodName             = methodName;
         this.compensationMethodName = compensationMethodName;
+        this.callArguments          = List.copyOf(callArguments);
     }
 
     public String getBeanType()               { return beanType; }
     public String getTargetServiceName()      { return targetServiceName; }
     public String getMethodName()             { return methodName; }
     public String getCompensationMethodName() { return compensationMethodName; }
+    public List<String> getCallArguments()    { return callArguments; }
 
     public boolean hasCompensation() {
         return compensationMethodName != null && !compensationMethodName.isBlank();

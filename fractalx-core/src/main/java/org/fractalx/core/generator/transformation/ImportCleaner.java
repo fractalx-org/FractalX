@@ -9,6 +9,7 @@ import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,6 +99,15 @@ public class ImportCleaner implements ServiceFileGenerator {
                     p.getType().ifClassOrInterfaceType(t -> used.add(t.getNameAsString())));
         });
         cu.findAll(ClassOrInterfaceType.class).forEach(t -> used.add(t.getNameAsString()));
+
+        // Capture static call receivers like LoggerFactory.getLogger(...), LocalDate.now(), etc.
+        // These parse as NameExpr (not ClassOrInterfaceType), so they'd be missed otherwise.
+        cu.findAll(NameExpr.class).forEach(n -> {
+            String name = n.getNameAsString();
+            if (Character.isUpperCase(name.charAt(0))) {
+                used.add(name);
+            }
+        });
 
         return used;
     }
