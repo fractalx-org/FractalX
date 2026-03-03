@@ -30,14 +30,22 @@ public class GatewayRouteLocatorGenerator {
     private void generateDynamicRouteLocator(Path pkg, List<FractalModule> modules) throws IOException {
         StringBuilder staticFallbacks = new StringBuilder();
         for (FractalModule m : modules) {
-            String path = m.getServiceName().replace("-service", "");
-            if (!path.endsWith("s")) path += "s";
+            String base = m.getServiceName().replace("-service", "");
+            String plural = base.endsWith("s") ? base : base + "s";
+
+            String paths;
+            if (base.equals(plural)) {
+                paths = "\"" + "/api/" + base + "/**\"";
+            } else {
+                paths = "\"" + "/api/" + base + "/**\", \"" + "/api/" + plural + "/**\"";
+            }
+
             staticFallbacks.append("""
                             builder.routes()
-                                .route("%s-static", r -> r.path("/api/%s/**")
+                                .route("%s-static", r -> r.path(%s)
                                     .uri("http://localhost:%d"))
                                 .build().getRoutes().toIterable().forEach(routes::add);
-                    """.formatted(m.getServiceName(), path, m.getPort()));
+                    """.formatted(m.getServiceName(), paths, m.getPort()));
         }
 
         String content = """
@@ -128,15 +136,15 @@ public class GatewayRouteLocatorGenerator {
                                 String name   = (String) svc.get("name");
                                 String host   = (String) svc.get("host");
                                 int    port   = ((Number) svc.get("port")).intValue();
-                                String prefix = toPathPrefix(name);
+                                String[] patterns = toPathPatterns(name);
                                 String uri    = "http://" + host + ":" + port;
                                 builder.routes()
-                                        .route(name, r -> r.path("/api/" + prefix + "/**").uri(uri))
+                                        .route(name, r -> r.path(patterns).uri(uri))
                                         .build()
                                         .getRoutes()
                                         .toIterable()
                                         .forEach(routes::add);
-                                log.debug("Live route: /api/{}/** -> {}", prefix, uri);
+                                log.debug("Live route: {} -> {}", patterns, uri);
                             }
                         } catch (Exception e) {
                             log.warn("Could not fetch routes from registry: {}", e.getMessage());
@@ -144,9 +152,14 @@ public class GatewayRouteLocatorGenerator {
                         return routes;
                     }
 
-                    private String toPathPrefix(String serviceName) {
-                        String path = serviceName.replace("-service", "");
-                        return path.endsWith("s") ? path : path + "s";
+                    private String[] toPathPatterns(String serviceName) {
+                        String base = serviceName.replace("-service", "");
+                        String plural = base.endsWith("s") ? base : base + "s";
+                        if (base.equals(plural)) {
+                            return new String[]{"/api/" + base + "/**"};
+                        } else {
+                            return new String[]{"/api/" + base + "/**", "/api/" + plural + "/**"};
+                        }
                     }
                 }
                 """;

@@ -127,11 +127,23 @@ class GatewayRouteLocatorGeneratorSpec extends Specification {
         routeFetcher().contains("/services")
     }
 
-    def "RegistryRouteFetcher skips services that are not UP"() {
+    def "DynamicRouteLocatorConfig includes both singular and plural path patterns"() {
         when:
         generator.generate(srcMainJava, [order])
 
         then:
-        routeFetcher().contains("\"UP\"")
+        def c = routeLocator()
+        c.contains("/api/order/**")
+        c.contains("/api/orders/**")
+    }
+
+    def "RegistryRouteFetcher includes both singular and plural path patterns in live routes"() {
+        when:
+        generator.generate(srcMainJava, [order])
+
+        then:
+        def c = routeFetcher()
+        c.contains("/api/\" + base + \"/**")
+        c.contains("/api/\" + plural + \"/**")
     }
 }
