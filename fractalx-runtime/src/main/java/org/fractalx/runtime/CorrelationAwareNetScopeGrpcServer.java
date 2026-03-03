@@ -3,107 +3,97 @@ package org.fractalx.runtime;
 import io.grpc.BindableService;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
-import org.fractalx.netscope.server.config.NetScopeConfig;
-import org.fractalx.netscope.server.grpc.NetScopeAuthInterceptor;
-import org.fractalx.netscope.server.grpc.NetScopeGrpcServer;
-import org.fractalx.netscope.server.grpc.NetScopeGrpcServiceImpl;
+import io.grpc.ServerInterceptor;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.BeansException;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Drop-in replacement for {@link NetScopeGrpcServer} that adds
+ * Drop-in replacement for {@code NetScopeGrpcServer} that adds
  * {@link NetScopeContextInterceptor} as a second {@code ServerInterceptor}.
  *
  * <p>This class is registered via {@link NetScopeGrpcServerBeanOverrider} which replaces
  * the {@code netScopeGrpcServer} bean definition before any beans are instantiated.
- * The override is transparent: all server configuration ({@code keepAliveTime},
- * {@code maxInboundMessageSize}, etc.) is still read from {@link NetScopeConfig} —
- * nothing is hardcoded here.
  *
- * <p>Because {@link NetScopeGrpcServer#start()} is annotated with {@code @PostConstruct}
- * and this class overrides it, Spring dispatches the {@code @PostConstruct} call via
- * polymorphism to this implementation.  We rebuild the gRPC server with both
- * {@link NetScopeAuthInterceptor} AND our correlation interceptor, then store the
- * result in the parent's {@code server} field via reflection so that
- * {@link NetScopeGrpcServer#stop()} works unchanged.
+ * <p>All netscope classes are accessed via {@link ApplicationContext#getBean} and reflection
+ * to avoid a compile-time dependency on netscope JARs — those JARs may be compiled with a
+ * newer JDK than this module targets.  Runtime behaviour is identical to the original
+ * {@code NetScopeGrpcServer}: all server configuration ({@code keepAliveTime},
+ * {@code maxInboundMessageSize}, etc.) is read from {@code NetScopeConfig}, nothing is
+ * hardcoded here.
  */
-public class CorrelationAwareNetScopeGrpcServer extends NetScopeGrpcServer {
+public class CorrelationAwareNetScopeGrpcServer implements ApplicationContextAware {
 
     private static final Logger log = LoggerFactory.getLogger(CorrelationAwareNetScopeGrpcServer.class);
 
     private final NetScopeContextInterceptor correlationInterceptor;
+    private ApplicationContext applicationContext;
+    private volatile Server server;
 
-    public CorrelationAwareNetScopeGrpcServer(
-            NetScopeConfig config,
-            NetScopeGrpcServiceImpl grpcService,
-            NetScopeContextInterceptor correlationInterceptor) {
-        super(config, grpcService);
+    public CorrelationAwareNetScopeGrpcServer(NetScopeContextInterceptor correlationInterceptor) {
         this.correlationInterceptor = correlationInterceptor;
     }
 
-    /**
-     * Replaces {@link NetScopeGrpcServer#start()}.  Reads config and service from
-     * the parent's private final fields via reflection, builds the gRPC server with
-     * both the original auth interceptor and our correlation interceptor, then stores
-     * the running {@link Server} back in the parent's {@code server} field.
-     */
     @Override
+    public void setApplicationContext(ApplicationContext ctx) throws BeansException {
+        this.applicationContext = ctx;
+    }
+
+    @PostConstruct
     public void start() throws IOException {
         try {
-            NetScopeConfig config = getField("config", NetScopeConfig.class);
-            NetScopeGrpcServiceImpl grpcService = getField("grpcService", NetScopeGrpcServiceImpl.class);
+            Object config     = applicationContext.getBean(
+                    Class.forName("org.fractalx.netscope.server.config.NetScopeConfig"));
+            Object grpcService = applicationContext.getBean(
+                    Class.forName("org.fractalx.netscope.server.grpc.NetScopeGrpcServiceImpl"));
 
-            NetScopeConfig.GrpcConfig grpcCfg = config.getGrpc();
+            Object grpcCfg = invoke(config, "getGrpc");
 
-            if (!grpcCfg.isEnabled()) {
+            if (!boolOf(invoke(grpcCfg, "isEnabled"))) {
                 log.info("NetScope gRPC server is disabled");
                 return;
             }
 
-            ServerBuilder<?> builder = ServerBuilder.forPort(grpcCfg.getPort())
-                    .addService(grpcService)
-                    .intercept(new NetScopeAuthInterceptor())   // original auth interceptor
-                    .intercept(correlationInterceptor)          // correlation ID propagation
-                    .maxInboundMessageSize(grpcCfg.getMaxInboundMessageSize());
+            int  port        = intOf(invoke(grpcCfg,  "getPort"));
+            int  maxMsgSize  = intOf(invoke(grpcCfg,  "getMaxInboundMessageSize"));
+            boolean reflect  = boolOf(invoke(grpcCfg, "isEnableReflection"));
+            long keepAlive   = longOf(invoke(grpcCfg, "getKeepAliveTime"));
+            long keepAliveTo = longOf(invoke(grpcCfg, "getKeepAliveTimeout"));
+            boolean permitKA = boolOf(invoke(grpcCfg, "isPermitKeepAliveWithoutCalls"));
+            long maxIdle     = longOf(invoke(grpcCfg, "getMaxConnectionIdle"));
+            long maxAge      = longOf(invoke(grpcCfg, "getMaxConnectionAge"));
 
-            // Optional gRPC reflection service (same conditional as original start())
-            if (grpcCfg.isEnableReflection()) {
-                tryAddReflectionService(builder);
-            }
+            ServerInterceptor authInterceptor = (ServerInterceptor) Class
+                    .forName("org.fractalx.netscope.server.grpc.NetScopeAuthInterceptor")
+                    .getDeclaredConstructor()
+                    .newInstance();
 
-            if (grpcCfg.getKeepAliveTime() > 0) {
-                builder.keepAliveTime(grpcCfg.getKeepAliveTime(), TimeUnit.SECONDS);
-            }
-            if (grpcCfg.getKeepAliveTimeout() > 0) {
-                builder.keepAliveTimeout(grpcCfg.getKeepAliveTimeout(), TimeUnit.SECONDS);
-            }
-            builder.permitKeepAliveWithoutCalls(grpcCfg.isPermitKeepAliveWithoutCalls());
-            if (grpcCfg.getMaxConnectionIdle() > 0) {
-                builder.maxConnectionIdle(grpcCfg.getMaxConnectionIdle(), TimeUnit.SECONDS);
-            }
-            if (grpcCfg.getMaxConnectionAge() > 0) {
-                builder.maxConnectionAge(grpcCfg.getMaxConnectionAge(), TimeUnit.SECONDS);
-            }
+            ServerBuilder<?> builder = ServerBuilder.forPort(port)
+                    .addService((BindableService) grpcService)
+                    .intercept(authInterceptor)         // original auth interceptor
+                    .intercept(correlationInterceptor)  // correlation ID propagation
+                    .maxInboundMessageSize(maxMsgSize);
 
-            Server server = builder.build().start();
+            if (reflect)       tryAddReflectionService(builder);
+            if (keepAlive > 0) builder.keepAliveTime(keepAlive, TimeUnit.SECONDS);
+            if (keepAliveTo > 0) builder.keepAliveTimeout(keepAliveTo, TimeUnit.SECONDS);
+            builder.permitKeepAliveWithoutCalls(permitKA);
+            if (maxIdle > 0)   builder.maxConnectionIdle(maxIdle, TimeUnit.SECONDS);
+            if (maxAge > 0)    builder.maxConnectionAge(maxAge, TimeUnit.SECONDS);
 
-            // Store in parent's `server` field so stop() works correctly
-            setField("server", server);
+            server = builder.build().start();
 
-            log.info("CorrelationAwareNetScopeGrpcServer started on port {} with correlation interceptor",
-                    grpcCfg.getPort());
+            log.info("CorrelationAwareNetScopeGrpcServer started on port {} with correlation interceptor", port);
 
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                try {
-                    stop();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }));
+            Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
 
         } catch (IOException e) {
             throw e;
@@ -112,25 +102,32 @@ public class CorrelationAwareNetScopeGrpcServer extends NetScopeGrpcServer {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Reflection helpers
-    // ------------------------------------------------------------------
-
-    @SuppressWarnings("unchecked")
-    private <T> T getField(String name, Class<T> type) throws ReflectiveOperationException {
-        Field f = NetScopeGrpcServer.class.getDeclaredField(name);
-        f.setAccessible(true);
-        return (T) f.get(this);
+    @PreDestroy
+    public void stop() {
+        Server s = this.server;
+        this.server = null;
+        if (s != null && !s.isShutdown()) {
+            s.shutdown();
+            try {
+                s.awaitTermination(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
-    private void setField(String name, Object value) throws ReflectiveOperationException {
-        Field f = NetScopeGrpcServer.class.getDeclaredField(name);
-        f.setAccessible(true);
-        f.set(this, value);
+    // ---- Reflection helpers -----------------------------------------------
+
+    private static Object invoke(Object obj, String method) throws ReflectiveOperationException {
+        Method m = obj.getClass().getMethod(method);
+        return m.invoke(obj);
     }
 
-    private void tryAddReflectionService(ServerBuilder<?> builder) {
-        // grpc-services 1.75.0 ships ProtoReflectionService (v1alpha) and ProtoReflectionServiceV1
+    private static boolean boolOf(Object v) { return (Boolean) v; }
+    private static int     intOf(Object v)  { return ((Number) v).intValue(); }
+    private static long    longOf(Object v) { return ((Number) v).longValue(); }
+
+    private static void tryAddReflectionService(ServerBuilder<?> builder) {
         String[] candidates = {
                 "io.grpc.protobuf.services.ProtoReflectionServiceV1",
                 "io.grpc.protobuf.services.ProtoReflectionService"

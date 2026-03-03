@@ -5,7 +5,6 @@ import io.grpc.ClientCall;
 import io.grpc.ManagedChannel;
 import io.grpc.MethodDescriptor;
 import org.aopalliance.intercept.MethodInterceptor;
-import org.fractalx.netscope.client.core.NetScopeChannelFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.aop.framework.ProxyFactory;
@@ -18,10 +17,14 @@ import java.util.concurrent.TimeUnit;
 /**
  * Client-side correlation ID propagation.
  *
- * <p>Wraps the {@link NetScopeChannelFactory} bean with a CGLIB proxy so that every
+ * <p>Wraps the {@code NetScopeChannelFactory} bean with a CGLIB proxy so that every
  * {@code channelFor()} call returns a {@link ManagedChannel} that intercepts
  * {@code newCall()} to inject {@code x-correlation-id} gRPC metadata via
  * {@link NetScopeContextInterceptor}.
+ *
+ * <p>{@code NetScopeChannelFactory} is detected by class name rather than a direct type
+ * reference to avoid a compile-time dependency on the netscope-client JAR (which may be
+ * compiled with a newer JDK than this module targets).  Runtime behaviour is unchanged.
  *
  * <p><b>Why NOT {@code ClientInterceptors.intercept()}?</b><br>
  * {@code ClientInterceptors.intercept(channel, interceptor)} returns an
@@ -36,6 +39,8 @@ import java.util.concurrent.TimeUnit;
 public class NetScopeGrpcInterceptorConfigurer implements BeanPostProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(NetScopeGrpcInterceptorConfigurer.class);
+    private static final String CHANNEL_FACTORY_CLASS =
+            "org.fractalx.netscope.client.core.NetScopeChannelFactory";
 
     private final NetScopeContextInterceptor correlationInterceptor;
 
@@ -45,13 +50,27 @@ public class NetScopeGrpcInterceptorConfigurer implements BeanPostProcessor {
 
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
-        if (bean instanceof NetScopeChannelFactory factory) {
-            return wrapChannelFactory(factory);
+        if (isNetScopeChannelFactory(bean)) {
+            return wrapChannelFactory(bean);
         }
         return bean;
     }
 
-    private NetScopeChannelFactory wrapChannelFactory(NetScopeChannelFactory factory) {
+    /**
+     * Checks whether {@code bean} is (or extends) {@code NetScopeChannelFactory} using
+     * class-name comparison so no compile-time import of that class is needed.
+     */
+    private boolean isNetScopeChannelFactory(Object bean) {
+        if (bean == null) return false;
+        Class<?> cls = bean.getClass();
+        while (cls != null) {
+            if (CHANNEL_FACTORY_CLASS.equals(cls.getName())) return true;
+            cls = cls.getSuperclass();
+        }
+        return false;
+    }
+
+    private Object wrapChannelFactory(Object factory) {
         ProxyFactory pf = new ProxyFactory(factory);
         pf.setProxyTargetClass(true);
         pf.addAdvice((MethodInterceptor) invocation -> {
@@ -65,7 +84,7 @@ public class NetScopeGrpcInterceptorConfigurer implements BeanPostProcessor {
             return result;
         });
         log.info("NetScopeGrpcInterceptorConfigurer: correlation ClientInterceptor wired into NetScopeChannelFactory");
-        return (NetScopeChannelFactory) pf.getProxy();
+        return pf.getProxy();
     }
 
     /**
@@ -79,7 +98,6 @@ public class NetScopeGrpcInterceptorConfigurer implements BeanPostProcessor {
             @Override
             public <ReqT, RespT> ClientCall<ReqT, RespT> newCall(
                     MethodDescriptor<ReqT, RespT> method, CallOptions callOptions) {
-                // Apply the interceptor; `delegate` is the `next` channel in the chain
                 return correlationInterceptor.interceptCall(method, callOptions, delegate);
             }
 
