@@ -54,12 +54,16 @@ public class SagaAnalyzer {
      * @return unmodifiable list of detected sagas, possibly empty
      */
     public List<SagaDefinition> analyzeSagas(Path sourceRoot, List<FractalModule> modules) {
+        // First pass: build a map of className → Set<methodName> so deriveCompensationName()
+        // can check whether a compensation method actually exists on the target bean.
+        Map<String, Set<String>> classMethodMap = buildClassMethodMap(sourceRoot);
+
         List<SagaDefinition> sagas = new ArrayList<>();
 
         try (Stream<Path> paths = Files.walk(sourceRoot)) {
             paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                 try {
-                    sagas.addAll(analyzeFile(path, modules));
+                    sagas.addAll(analyzeFile(path, modules, classMethodMap));
                 } catch (IOException e) {
                     log.error("Failed to analyze saga in: {}", path, e);
                 }
@@ -75,11 +79,40 @@ public class SagaAnalyzer {
         return Collections.unmodifiableList(sagas);
     }
 
+    /**
+     * Builds a map of {@code simpleClassName → Set<methodName>} by walking all {@code .java}
+     * files under {@code sourceRoot}. Used by {@link #deriveCompensationName} to verify that
+     * a candidate compensation method actually exists on the target bean before recording it.
+     */
+    private Map<String, Set<String>> buildClassMethodMap(Path sourceRoot) {
+        Map<String, Set<String>> map = new HashMap<>();
+        try (Stream<Path> paths = Files.walk(sourceRoot)) {
+            paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
+                try {
+                    CompilationUnit cu = javaParser.parse(path).getResult().orElse(null);
+                    if (cu == null) return;
+                    for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                        Set<String> methods = new HashSet<>();
+                        cls.getMethods().forEach(m -> methods.add(m.getNameAsString()));
+                        map.put(cls.getNameAsString(), methods);
+                    }
+                } catch (IOException e) {
+                    log.warn("buildClassMethodMap: failed to parse {}", path);
+                }
+            });
+        } catch (IOException e) {
+            log.warn("buildClassMethodMap: failed to walk {}", sourceRoot);
+        }
+        log.debug("buildClassMethodMap: indexed {} classes", map.size());
+        return map;
+    }
+
     // -------------------------------------------------------------------------
     // Per-file analysis
     // -------------------------------------------------------------------------
 
-    private List<SagaDefinition> analyzeFile(Path javaFile, List<FractalModule> modules) throws IOException {
+    private List<SagaDefinition> analyzeFile(Path javaFile, List<FractalModule> modules,
+                                              Map<String, Set<String>> classMethodMap) throws IOException {
         CompilationUnit cu = javaParser.parse(javaFile).getResult().orElse(null);
         if (cu == null) return List.of();
 
@@ -92,7 +125,7 @@ public class SagaAnalyzer {
             for (MethodDeclaration method : cls.getMethods()) {
                 method.getAnnotationByName("DistributedSaga").ifPresent(annotation -> {
                     SagaDefinition saga = buildSagaDefinition(annotation, method, cls,
-                            crossModuleFields, modules, cu);
+                            crossModuleFields, modules, cu, classMethodMap);
                     if (saga != null) {
                         result.add(saga);
                         log.info("Found @DistributedSaga '{}' in {}.{}",
@@ -109,7 +142,8 @@ public class SagaAnalyzer {
                                                ClassOrInterfaceDeclaration cls,
                                                Map<String, String> crossModuleFields,
                                                List<FractalModule> modules,
-                                               CompilationUnit cu) {
+                                               CompilationUnit cu,
+                                               Map<String, Set<String>> classMethodMap) {
         // Extract annotation attributes
         String sagaId            = extractAttr(annotation, "sagaId", "");
         String compensationMethod= extractAttr(annotation, "compensationMethod", "");
@@ -133,7 +167,7 @@ public class SagaAnalyzer {
         }
 
         // Detect ordered cross-module calls within this method body
-        List<SagaStep> steps = detectSteps(method, crossModuleFields, modules);
+        List<SagaStep> steps = detectSteps(method, crossModuleFields, modules, classMethodMap);
 
         // Detect local vars used in step call args that are NOT saga method params
         // (e.g. orderId = draftOrder.getId() passed to processPayment)
@@ -184,7 +218,8 @@ public class SagaAnalyzer {
      */
     private List<SagaStep> detectSteps(MethodDeclaration method,
                                        Map<String, String> crossModuleFields,
-                                       List<FractalModule> modules) {
+                                       List<FractalModule> modules,
+                                       Map<String, Set<String>> classMethodMap) {
         List<SagaStep> steps = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>(); // dedup while preserving order
 
@@ -202,7 +237,7 @@ public class SagaAnalyzer {
             seen.add(key);
 
             String targetService    = NetScopeClientGenerator.beanTypeToServiceName(beanType);
-            String compensationName = deriveCompensationName(calledMethod, beanType, method, modules);
+            String compensationName = deriveCompensationName(calledMethod, beanType, classMethodMap);
 
             // Capture the actual argument expressions used in the call.
             // These are typically parameter names from the parent saga method,
@@ -218,27 +253,37 @@ public class SagaAnalyzer {
     }
 
     /**
-     * Heuristically derives a compensation method name for a given forward method.
-     * Checks common naming conventions: {@code cancel*}, {@code rollback*}, {@code undo*}.
+     * Derives the compensation method name for a forward method by checking what methods
+     * actually exist on the target bean class in the source tree.
+     *
+     * <p>Tries each of the common compensation prefixes in order:
+     * {@code cancel}, {@code rollback}, {@code undo}, {@code revert}, {@code release}, {@code refund}.
+     * The first candidate that exists on {@code beanType} in {@code classMethodMap} is returned.
+     *
+     * <p>Returns an empty string if no compensation method was found. The generated
+     * orchestrator will skip compensation for that step (see {@link SagaStep#hasCompensation()}).
      */
     private String deriveCompensationName(String forwardMethod,
                                           String beanType,
-                                          MethodDeclaration parentMethod,
-                                          List<FractalModule> modules) {
-        // If the parent class compensation method is declared, use it
-        // (set at saga level, not step level — step-level TBD)
-        String base = forwardMethod;
-        String capitalized = Character.toUpperCase(base.charAt(0)) + base.substring(1);
+                                          Map<String, Set<String>> classMethodMap) {
+        String capitalized = Character.toUpperCase(forwardMethod.charAt(0)) + forwardMethod.substring(1);
 
-        List<String> candidates = List.of(
-                "cancel"   + capitalized,
-                "rollback" + capitalized,
-                "undo"     + capitalized,
-                "revert"   + capitalized
-        );
+        List<String> prefixes = List.of("cancel", "rollback", "undo", "revert", "release", "refund");
 
-        // For now return the first candidate — actual availability checked at generation time
-        return candidates.get(0);
+        Set<String> availableMethods = classMethodMap.getOrDefault(beanType, Set.of());
+
+        for (String prefix : prefixes) {
+            String candidate = prefix + capitalized;
+            if (availableMethods.contains(candidate)) {
+                log.debug("Compensation for {}.{} → {}", beanType, forwardMethod, candidate);
+                return candidate;
+            }
+        }
+
+        log.info("No compensation method found for {}.{} (checked: {}) — step will not be compensated",
+                beanType, forwardMethod,
+                prefixes.stream().map(p -> p + capitalized).collect(java.util.stream.Collectors.joining(", ")));
+        return "";
     }
 
     // -------------------------------------------------------------------------

@@ -82,19 +82,24 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
         // Generate a SagaCompletionController for each owned saga so the saga orchestrator
         // can call POST /internal/saga-complete/{correlationId} after all steps complete.
         generateSagaCompletionController(srcMainJava, basePackage, ownedSagas,
-                context.getModule().getServiceName());
+                context.getModule().getServiceName(), context.getModule().getPackageName());
     }
 
     /**
-     * Generates {@code SagaCompletionController} — a REST endpoint that the saga orchestrator
-     * calls after all saga steps succeed (POST /internal/saga-complete/{correlationId}).
+     * Generates {@code SagaCompletionController} — REST endpoints that the saga orchestrator
+     * calls after saga completion or failure.
      *
-     * <p>The generated controller logs the event and emits a clear TODO so the service owner
-     * can add business-state finalization (e.g., mark Order as CONFIRMED).
+     * <p>Injects the owner service's aggregate repository (derived from the owner class name,
+     * e.g. {@code OrderService} → {@code OrderRepository}) to implement the actual
+     * CONFIRMED / CANCELLED state transitions without requiring manual TODO implementation.
+     *
+     * @param modulePackage original package of the owner service's source classes
+     *                      (used to derive the repository FQN)
      */
     private void generateSagaCompletionController(Path srcMainJava, String basePackage,
                                                    List<SagaDefinition> sagas,
-                                                   String serviceName) throws IOException {
+                                                   String serviceName,
+                                                   String modulePackage) throws IOException {
         // Build a summary of all sagas this service owns
         StringBuilder sagaList = new StringBuilder();
         for (SagaDefinition saga : sagas) {
@@ -102,27 +107,71 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
                     .append(saga.getMethodName()).append("()</li>\n");
         }
 
+        // Derive the aggregate repository from the first saga's owner class name.
+        // Heuristic: "OrderService" → aggregate "Order" → repository "OrderRepository"
+        String ownerClass = sagas.get(0).getOwnerClassName(); // e.g. "OrderService"
+        String aggregateName = ownerClass.endsWith("Service")
+                ? ownerClass.substring(0, ownerClass.length() - "Service".length())
+                : ownerClass;
+        String repositoryType = aggregateName + "Repository"; // e.g. "OrderRepository"
+        String repositoryFqn  = modulePackage + "." + repositoryType;
+        String repoField      = Character.toLowerCase(repositoryType.charAt(0)) + repositoryType.substring(1);
+
+        // Look for the aggregate ID field name in any saga's params or extra local vars.
+        // e.g. "orderId" in place-order-saga's extraLocalVars.
+        String idFieldName = aggregateName.toLowerCase() + "Id"; // e.g. "orderId"
+        boolean hasIdField = sagas.stream().anyMatch(s ->
+                s.getSagaMethodParams().stream().anyMatch(p -> p.getName().equals(idFieldName))
+                || s.getExtraLocalVars().stream().anyMatch(p -> p.getName().equals(idFieldName)));
+
         String pkg = basePackage + ".saga";
         Path pkgPath = srcMainJava;
         for (String part : pkg.split("\\.")) pkgPath = pkgPath.resolve(part);
         Files.createDirectories(pkgPath);
 
+        // Build the CONFIRMED update block
+        String confirmBlock;
+        String cancelBlock;
+        if (hasIdField) {
+            confirmBlock =
+                  "            Object idRaw = sagaData.get(\"" + idFieldName + "\");\n"
+                + "            if (idRaw != null) {\n"
+                + "                Long id = ((Number) idRaw).longValue();\n"
+                + "                " + repoField + ".findById(id).ifPresentOrElse(entity -> {\n"
+                + "                    entity.setStatus(\"CONFIRMED\");\n"
+                + "                    " + repoField + ".save(entity);\n"
+                + "                    log.info(\"" + aggregateName + " {} marked CONFIRMED (saga correlationId={})\", id, cid);\n"
+                + "                }, () -> log.warn(\"onSagaComplete: " + aggregateName.toLowerCase() + " {} not found\", id));\n"
+                + "            }\n";
+            cancelBlock =
+                  "            Object idRaw = errorData.get(\"" + idFieldName + "\");\n"
+                + "            if (idRaw != null) {\n"
+                + "                Long id = ((Number) idRaw).longValue();\n"
+                + "                " + repoField + ".findById(id).ifPresentOrElse(entity -> {\n"
+                + "                    entity.setStatus(\"CANCELLED\");\n"
+                + "                    " + repoField + ".save(entity);\n"
+                + "                    log.warn(\"" + aggregateName + " {} marked CANCELLED — saga failed: {} (correlationId={})\", id, errorMessage, cid);\n"
+                + "                }, () -> log.warn(\"onSagaFailed: " + aggregateName.toLowerCase() + " {} not found\", id));\n"
+                + "            }\n";
+        } else {
+            confirmBlock = "            // TODO: finalize business state (e.g., mark " + aggregateName + " as CONFIRMED)\n";
+            cancelBlock  = "            // TODO: revert business state (e.g., mark " + aggregateName + " as CANCELLED)\n";
+        }
+
         String content = "package " + pkg + ";\n\n"
+                + "import " + repositoryFqn + ";\n"
                 + "import com.fasterxml.jackson.core.type.TypeReference;\n"
                 + "import com.fasterxml.jackson.databind.ObjectMapper;\n"
                 + "import org.slf4j.Logger;\n"
                 + "import org.slf4j.LoggerFactory;\n"
                 + "import org.slf4j.MDC;\n"
                 + "import org.springframework.http.ResponseEntity;\n"
+                + "import org.springframework.transaction.annotation.Transactional;\n"
                 + "import org.springframework.web.bind.annotation.*;\n\n"
                 + "import java.util.Map;\n\n"
                 + "/**\n"
                 + " * Receives saga-completion callbacks from the FractalX Saga Orchestrator.\n"
-                + " *\n"
-                + " * <p>Called by the orchestrator via\n"
-                + " * {@code POST /internal/saga-complete/{correlationId}} after ALL steps of a\n"
-                + " * distributed saga succeed. The service should finalize its own business state\n"
-                + " * here (e.g., mark an Order as CONFIRMED).\n"
+                + " * Marks the aggregate as CONFIRMED on success, CANCELLED on failure.\n"
                 + " *\n"
                 + " * <p>Sagas managed for " + serviceName + ":\n"
                 + " * <ul>\n"
@@ -135,17 +184,15 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
                 + "@RequestMapping(\"/internal\")\n"
                 + "public class SagaCompletionController {\n\n"
                 + "    private static final Logger log = LoggerFactory.getLogger(SagaCompletionController.class);\n\n"
-                + "    private final ObjectMapper objectMapper;\n\n"
-                + "    public SagaCompletionController(ObjectMapper objectMapper) {\n"
+                + "    private final ObjectMapper objectMapper;\n"
+                + "    private final " + repositoryType + " " + repoField + ";\n\n"
+                + "    public SagaCompletionController(ObjectMapper objectMapper, "
+                + repositoryType + " " + repoField + ") {\n"
                 + "        this.objectMapper = objectMapper;\n"
+                + "        this." + repoField + " = " + repoField + ";\n"
                 + "    }\n\n"
-                + "    /**\n"
-                + "     * Called by the saga orchestrator when a saga completes successfully.\n"
-                + "     *\n"
-                + "     * @param correlationId the saga execution's correlation ID\n"
-                + "     * @param payload       the saga's JSON payload (contains all saga method arguments)\n"
-                + "     */\n"
                 + "    @PostMapping(\"/saga-complete/{correlationId}\")\n"
+                + "    @Transactional\n"
                 + "    public ResponseEntity<Void> onSagaComplete(\n"
                 + "            @PathVariable(\"correlationId\") String correlationId,\n"
                 + "            @RequestHeader(value = \"X-Correlation-Id\", required = false) String headerCorrelationId,\n"
@@ -156,17 +203,34 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
                 + "        try {\n"
                 + "            Map<String, Object> sagaData = objectMapper.readValue(\n"
                 + "                    payload, new TypeReference<Map<String, Object>>() {});\n"
-                + "            log.info(\"Saga completed — correlationId={} payload={}\", cid, sagaData);\n\n"
-                + "            // TODO: Implement your business-state finalization here.\n"
-                + "            // Example for an Order saga:\n"
-                + "            //   Long orderId = ((Number) sagaData.get(\"orderId\")).longValue();\n"
-                + "            //   orderRepository.findById(orderId).ifPresent(order -> {\n"
-                + "            //       order.setStatus(\"CONFIRMED\");\n"
-                + "            //       orderRepository.save(order);\n"
-                + "            //   });\n\n"
+                + "            log.info(\"Saga completed — correlationId={} payload={}\", cid, sagaData);\n"
+                + confirmBlock
                 + "            return ResponseEntity.ok().build();\n"
                 + "        } catch (Exception e) {\n"
                 + "            log.error(\"Failed to process saga completion: correlationId={}\", cid, e);\n"
+                + "            return ResponseEntity.internalServerError().build();\n"
+                + "        } finally {\n"
+                + "            MDC.remove(\"correlationId\");\n"
+                + "        }\n"
+                + "    }\n\n"
+                + "    @PostMapping(\"/saga-failed/{correlationId}\")\n"
+                + "    @Transactional\n"
+                + "    public ResponseEntity<Void> onSagaFailed(\n"
+                + "            @PathVariable(\"correlationId\") String correlationId,\n"
+                + "            @RequestHeader(value = \"X-Correlation-Id\", required = false) String headerCorrelationId,\n"
+                + "            @RequestBody String payload) {\n\n"
+                + "        String cid = (headerCorrelationId != null && !headerCorrelationId.isBlank())\n"
+                + "                ? headerCorrelationId : correlationId;\n"
+                + "        MDC.put(\"correlationId\", cid);\n"
+                + "        try {\n"
+                + "            Map<String, Object> errorData = objectMapper.readValue(\n"
+                + "                    payload, new TypeReference<Map<String, Object>>() {});\n"
+                + "            String errorMessage = (String) errorData.getOrDefault(\"errorMessage\", \"unknown\");\n"
+                + "            log.warn(\"Saga FAILED — correlationId={} error={}\", cid, errorMessage);\n"
+                + cancelBlock
+                + "            return ResponseEntity.ok().build();\n"
+                + "        } catch (Exception e) {\n"
+                + "            log.error(\"Failed to process saga failure notification: correlationId={}\", cid, e);\n"
                 + "            return ResponseEntity.internalServerError().build();\n"
                 + "        } finally {\n"
                 + "            MDC.remove(\"correlationId\");\n"

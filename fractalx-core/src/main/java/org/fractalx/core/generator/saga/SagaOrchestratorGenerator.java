@@ -276,7 +276,8 @@ public class SagaOrchestratorGenerator {
                     .map(FractalModule::getPort)
                     .findFirst()
                     .orElse(8080);
-            ownerUrlsBlock.append("    ").append(saga.getSagaId()).append("-owner-url: ")
+            // 6-space indent: owner-urls is at 4 spaces, its children must be at 6
+            ownerUrlsBlock.append("      ").append(saga.getSagaId()).append(": ")
                     .append("${").append(saga.getSagaId().toUpperCase().replace("-", "_"))
                     .append("_OWNER_URL:http://localhost:").append(ownerPort).append("}\n");
         }
@@ -650,20 +651,24 @@ public class SagaOrchestratorGenerator {
           .append("' correlationId={}\", instance.getCorrelationId());\n\n");
         // Propagate the saga correlationId to all outbound gRPC calls via MDC
         sb.append("        MDC.put(\"correlationId\", instance.getCorrelationId());\n");
+        sb.append("        // Tracks index of last step that completed — only those steps are compensated on failure\n");
+        sb.append("        int lastCompletedStep = -1;\n");
         sb.append("        try {\n");
         sb.append("            instance.setStatus(SagaStatus.IN_PROGRESS);\n");
 
-        for (SagaStep step : saga.getSteps()) {
+        for (int i = 0; i < saga.getSteps().size(); i++) {
+            SagaStep step = saga.getSteps().get(i);
             String clientField = Character.toLowerCase(step.getBeanType().charAt(0))
                                + step.getBeanType().substring(1) + "Client";
-            sb.append("\n            // Step: ").append(step.getTargetServiceName())
-              .append(" → ").append(step.getMethodName()).append("\n");
+            sb.append("\n            // Step ").append(i).append(": ")
+              .append(step.getTargetServiceName()).append(" → ").append(step.getMethodName()).append("\n");
             sb.append("            instance.setCurrentStep(\"")
               .append(step.getTargetServiceName()).append(":").append(step.getMethodName()).append("\");\n");
             sb.append("            sagaRepository.save(instance);\n");
             sb.append("            ").append(clientField).append(".").append(step.getMethodName()).append("(");
             sb.append(buildCallArgs(step.getCallArguments(), paramTypeMap, params));
             sb.append(");\n");
+            sb.append("            lastCompletedStep = ").append(i).append(";\n");
         }
 
         sb.append("\n            instance.setStatus(SagaStatus.DONE);\n");
@@ -677,9 +682,9 @@ public class SagaOrchestratorGenerator {
         sb.append("            notifyOwnerComplete(instance);\n\n");
         sb.append("        } catch (Exception e) {\n");
         sb.append("            log.error(\"Saga '").append(saga.getSagaId())
-          .append("' failed at step={}\", instance.getCurrentStep(), e);\n");
+          .append("' failed at step={} lastCompleted={}\", instance.getCurrentStep(), lastCompletedStep, e);\n");
         sb.append("            instance.setErrorMessage(e.getMessage());\n");
-        sb.append("            compensate(instance");
+        sb.append("            compensate(instance, lastCompletedStep");
         if (!params.isEmpty()) sb.append(", p");
         sb.append(");\n");
         sb.append("        } finally {\n");
@@ -688,41 +693,53 @@ public class SagaOrchestratorGenerator {
         sb.append("        return instance.getCorrelationId();\n");
         sb.append("    }\n\n");
 
-        // compensate() method
+        // compensate() method — only compensates steps up to lastCompletedStep (inclusive) in reverse
         String compensateParam = params.isEmpty() ? "" : ", " + payloadClass + " p";
-        sb.append("    private void compensate(SagaInstance instance").append(compensateParam).append(") {\n");
+        sb.append("    private void compensate(SagaInstance instance, int lastCompletedStep")
+          .append(compensateParam).append(") {\n");
         sb.append("        instance.setStatus(SagaStatus.COMPENSATING);\n");
         sb.append("        sagaRepository.save(instance);\n");
-        // MDC may already be set from start(), but set it explicitly here in case compensate is called independently
         sb.append("        MDC.put(\"correlationId\", instance.getCorrelationId());\n\n");
-        sb.append("        // Compensation runs in reverse step order\n");
+        sb.append("        // Compensation runs ONLY for steps that actually completed (lastCompletedStep={})\n");
+        sb.append("        log.info(\"Compensating saga '").append(saga.getSagaId())
+          .append("' — reverting {} completed step(s)\", lastCompletedStep + 1);\n\n");
 
-        List<SagaStep> reversed = new ArrayList<>(saga.getSteps());
-        java.util.Collections.reverse(reversed);
-        for (SagaStep step : reversed) {
+        // Generate the compensation array (steps in reverse order)
+        // We emit them in reverse source order but guard each with the step index check
+        List<SagaStep> stepsForComp = new ArrayList<>(saga.getSteps());
+        java.util.Collections.reverse(stepsForComp);
+        for (int i = stepsForComp.size() - 1; i >= 0; i--) {
+            SagaStep step = stepsForComp.get(i);
+            // The "reversed" step at position i in reversed list is at index (size-1-i) in the original
+            int originalIdx = stepsForComp.size() - 1 - i;
             if (step.hasCompensation()) {
                 String clientField = Character.toLowerCase(step.getBeanType().charAt(0))
                                    + step.getBeanType().substring(1) + "Client";
-                sb.append("        try {\n");
-                sb.append("            // Compensate: ").append(step.getTargetServiceName())
-                  .append(" → ").append(step.getCompensationMethodName()).append("\n");
-                sb.append("            ").append(clientField).append(".")
+                sb.append("        if (lastCompletedStep >= ").append(originalIdx).append(") {\n");
+                sb.append("            try {\n");
+                sb.append("                // Compensate step ").append(originalIdx).append(": ")
+                  .append(step.getTargetServiceName()).append(" → ").append(step.getCompensationMethodName()).append("\n");
+                sb.append("                ").append(clientField).append(".")
                   .append(step.getCompensationMethodName()).append("(");
-                // Use same arguments as forward step for compensation
                 sb.append(buildCallArgs(step.getCallArguments(), paramTypeMap, params));
                 sb.append(");\n");
-                sb.append("        } catch (Exception compensationEx) {\n");
-                sb.append("            log.error(\"Compensation step '")
+                sb.append("                log.info(\"Compensated step ").append(originalIdx)
+                  .append(" (").append(step.getCompensationMethodName()).append(")\");\n");
+                sb.append("            } catch (Exception compensationEx) {\n");
+                sb.append("                log.error(\"Compensation step '")
                   .append(step.getCompensationMethodName())
-                  .append("' failed — manual intervention may be needed\", compensationEx);\n");
-                sb.append("        }\n\n");
+                  .append("' failed — manual intervention required\", compensationEx);\n");
+                sb.append("            }\n");
+                sb.append("        }\n");
             }
         }
 
-        sb.append("        instance.setStatus(SagaStatus.FAILED);\n");
+        sb.append("\n        instance.setStatus(SagaStatus.FAILED);\n");
         sb.append("        sagaRepository.save(instance);\n");
         sb.append("        log.warn(\"Saga '").append(saga.getSagaId())
           .append("' compensated and marked FAILED correlationId={}\", instance.getCorrelationId());\n");
+        sb.append("        // Notify owner service so it can handle the failure (e.g. mark Order as CANCELLED)\n");
+        sb.append("        notifyOwnerFailed(instance);\n");
         sb.append("    }\n\n");
 
         // notifyOwnerComplete helper
@@ -736,6 +753,39 @@ public class SagaOrchestratorGenerator {
         sb.append("     * business state (e.g. mark Order as CONFIRMED). Failures are logged but\n");
         sb.append("     * do NOT roll back the saga — the saga itself is already DONE.\n");
         sb.append("     */\n");
+        sb.append("    /**\n");
+        sb.append("     * Notifies the owner service that the saga FAILED after compensation.\n");
+        sb.append("     * Calls {@code POST {ownerServiceBaseUrl}/internal/saga-failed/{correlationId}}\n");
+        sb.append("     * so the owner can revert its own state (e.g. cancel / delete the Order).\n");
+        sb.append("     */\n");
+        sb.append("    private void notifyOwnerFailed(SagaInstance instance) {\n");
+        sb.append("        String url = ownerServiceBaseUrl + \"/internal/saga-failed/\"\n");
+        sb.append("                + instance.getCorrelationId();\n");
+        sb.append("        try {\n");
+        sb.append("            HttpHeaders headers = new HttpHeaders();\n");
+        sb.append("            headers.set(\"Content-Type\", \"application/json\");\n");
+        sb.append("            if (instance.getCorrelationId() != null) {\n");
+        sb.append("                headers.set(\"X-Correlation-Id\", instance.getCorrelationId());\n");
+        sb.append("            }\n");
+        // Merge the saga payload (contains orderId, etc.) with errorMessage so the owner
+        // service can identify and cancel the specific aggregate (e.g., Order).
+        sb.append("            String sagaPayload = instance.getPayload() != null ? instance.getPayload() : \"{}\";\n");
+        sb.append("            String escapedError = instance.getErrorMessage() != null\n");
+        sb.append("                    ? instance.getErrorMessage().replace(\"\\\\\\\\\", \"\\\\\\\\\\\\\\\\\").replace(\"\\\"\", \"\\\\\\\"\") : \"\";\n");
+        sb.append("            String failureBody = sagaPayload.endsWith(\"}\")\n");
+        sb.append("                    ? sagaPayload.substring(0, sagaPayload.length() - 1)\n");
+        sb.append("                            + \",\\\"errorMessage\\\":\\\"\" + escapedError + \"\\\"}\"\n");
+        sb.append("                    : \"{\\\"errorMessage\\\":\\\"\" + escapedError + \"\\\"}\";\n");
+        sb.append("            HttpEntity<String> request = new HttpEntity<>(failureBody, headers);\n");
+        sb.append("            restTemplate.postForObject(url, request, String.class);\n");
+        sb.append("            log.info(\"Notified owner service of saga FAILURE: url={} correlationId={}\",\n");
+        sb.append("                    url, instance.getCorrelationId());\n");
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            log.warn(\"Failed to notify owner service of saga failure: url={} error={}\",\n");
+        sb.append("                    url, e.getMessage());\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+
         sb.append("    private void notifyOwnerComplete(SagaInstance instance) {\n");
         sb.append("        String url = ownerServiceBaseUrl + \"/internal/saga-complete/\"\n");
         sb.append("                + instance.getCorrelationId();\n");
