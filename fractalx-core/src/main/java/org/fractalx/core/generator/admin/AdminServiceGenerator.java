@@ -1,6 +1,7 @@
 package org.fractalx.core.generator.admin;
 
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.model.SagaDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,11 +98,18 @@ public class AdminServiceGenerator {
     public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot)
             throws IOException {
         generateAdminService(modules, outputRoot, sourceRoot,
-                org.fractalx.core.config.FractalxConfig.defaults());
+                org.fractalx.core.config.FractalxConfig.defaults(), List.of());
     }
 
     public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot,
                                       org.fractalx.core.config.FractalxConfig fractalxConfig)
+            throws IOException {
+        generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, List.of());
+    }
+
+    public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot,
+                                      org.fractalx.core.config.FractalxConfig fractalxConfig,
+                                      List<SagaDefinition> sagaDefinitions)
             throws IOException {
         log.info("Generating Admin Service...");
 
@@ -137,7 +145,7 @@ public class AdminServiceGenerator {
         // New enhanced sub-systems
         servicesDetailGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         communicationGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
-        dataConsistencyGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        dataConsistencyGenerator.generate(srcMainJava, BASE_PACKAGE, modules, sagaDefinitions);
         userManagementGenerator.generate(srcMainJava, BASE_PACKAGE);
         databaseGenerator.generate(srcMainJava, BASE_PACKAGE);
         configManagementGenerator.generate(srcMainJava, BASE_PACKAGE, modules, fractalxConfig);

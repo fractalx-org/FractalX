@@ -60,6 +60,9 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     url: ${FRACTALX_REGISTRY_URL:%s}
                     enabled: true
                     host: ${FRACTALX_REGISTRY_HOST:localhost}
+                  saga:
+                    orchestrator:
+                      url: ${FRACTALX_SAGA_ORCHESTRATOR_URL:http://localhost:8099}
                   observability:
                     tracing: true
                     metrics: true
@@ -115,10 +118,10 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   jpa:
                     hibernate:
                       ddl-auto: update
-                    show-sql: true
+                    show-sql: false
                     properties:
                       hibernate:
-                        format_sql: true
+                        format_sql: false
                   h2:
                     console:
                       enabled: true

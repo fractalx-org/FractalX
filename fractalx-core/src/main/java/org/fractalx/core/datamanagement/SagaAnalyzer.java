@@ -15,6 +15,7 @@ import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MemberValuePair;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NormalAnnotationExpr;
+import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -134,6 +135,10 @@ public class SagaAnalyzer {
         // Detect ordered cross-module calls within this method body
         List<SagaStep> steps = detectSteps(method, crossModuleFields, modules);
 
+        // Detect local vars used in step call args that are NOT saga method params
+        // (e.g. orderId = draftOrder.getId() passed to processPayment)
+        List<MethodParam> extraLocalVars = detectExtraLocalVars(method, steps, sagaMethodParams);
+
         return new SagaDefinition(
                 sagaId,
                 ownerService,
@@ -143,7 +148,8 @@ public class SagaAnalyzer {
                 compensationMethod,
                 timeout,
                 description,
-                sagaMethodParams
+                sagaMethodParams,
+                extraLocalVars
         );
     }
 
@@ -274,5 +280,43 @@ public class SagaAnalyzer {
             }
         }
         return defaultValue;
+    }
+
+    /**
+     * Finds local variables declared in the saga method body that are used as step call
+     * arguments but are NOT formal parameters of the saga method.
+     *
+     * <p>Example: {@code Long orderId = draftOrder.getId()} where {@code orderId} is
+     * passed to {@code processPayment(customerId, totalAmount, orderId)}.
+     * The orchestrator needs this value in the payload DTO so it can forward it.
+     */
+    private List<MethodParam> detectExtraLocalVars(MethodDeclaration method,
+                                                    List<SagaStep> steps,
+                                                    List<MethodParam> sagaMethodParams) {
+        // Build name→type map of all local var declarations in method body
+        Map<String, String> localVarTypes = new LinkedHashMap<>();
+        method.findAll(VariableDeclarationExpr.class).forEach(vde ->
+                vde.getVariables().forEach(v ->
+                        localVarTypes.put(v.getNameAsString(), vde.getElementType().asString())
+                )
+        );
+
+        // Collect formal param names for quick lookup
+        Set<String> paramNames = new HashSet<>();
+        for (MethodParam mp : sagaMethodParams) paramNames.add(mp.getName());
+
+        // For each step call arg not in params, check if it resolves to a local var
+        List<MethodParam> extras = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (SagaStep step : steps) {
+            for (String arg : step.getCallArguments()) {
+                if (!paramNames.contains(arg) && localVarTypes.containsKey(arg) && seen.add(arg)) {
+                    extras.add(new MethodParam(localVarTypes.get(arg), arg));
+                    log.debug("SagaAnalyzer: extra local var '{}' ({}) needed by saga step {}.{}",
+                            arg, localVarTypes.get(arg), step.getTargetServiceName(), step.getMethodName());
+                }
+            }
+        }
+        return extras;
     }
 }
