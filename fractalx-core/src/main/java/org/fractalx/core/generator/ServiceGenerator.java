@@ -26,6 +26,7 @@ import org.fractalx.core.generator.transformation.ImportCleaner;
 import org.fractalx.core.generator.transformation.ImportPreserver;
 import org.fractalx.core.generator.transformation.NetScopeClientWiringStep;
 import org.fractalx.core.generator.transformation.NetScopeServerAnnotationStep;
+import org.fractalx.core.generator.transformation.SagaMethodTransformer;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.SagaDefinition;
 import org.fractalx.core.observability.LoggerServiceGenerator;
@@ -101,6 +102,7 @@ public class ServiceGenerator {
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
+                new SagaMethodTransformer(),    // replaces cross-service calls with outboxPublisher.publish()
                 context -> distributedServiceHelper.upgradeService(
                         context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
                         context.getSagaDefinitions()),
@@ -144,7 +146,7 @@ public class ServiceGenerator {
             generateApiGateway(modules, fractalxConfig);
         }
 
-        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig);
+        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions);
 
         // Generate saga orchestrator service if any sagas were detected
         sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);

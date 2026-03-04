@@ -88,9 +88,12 @@ public class SagaOrchestratorGenerator {
             for (SagaStep step : saga.getSteps()) {
                 stepsByBean.computeIfAbsent(step.getBeanType(), k -> new ArrayList<>()).add(step);
             }
+            // Merge method params + extra local vars so buildNetScopeClient can type all call args
+            List<MethodParam> allSagaParams = new ArrayList<>(saga.getSagaMethodParams());
+            allSagaParams.addAll(saga.getExtraLocalVars());
             for (java.util.Map.Entry<String, List<SagaStep>> entry : stepsByBean.entrySet()) {
                 writeFile(packagePath(basePkg, "client"), entry.getKey() + "Client.java",
-                        buildNetScopeClient(entry.getKey(), entry.getValue(), modules, saga.getSagaMethodParams()));
+                        buildNetScopeClient(entry.getKey(), entry.getValue(), modules, allSagaParams));
             }
         }
 
@@ -448,12 +451,20 @@ public class SagaOrchestratorGenerator {
         String className    = saga.toClassName() + "SagaService";
         String payloadClass = saga.toClassName() + "Payload";
         List<MethodParam> params = saga.getSagaMethodParams();
+        List<MethodParam> extraVars = saga.getExtraLocalVars();
 
-        // Build a name→type lookup for resolving call-site args to typed params
+        // Build a name→type lookup for resolving call-site args — includes extra local vars
         java.util.Map<String, String> paramTypeMap = new java.util.LinkedHashMap<>();
         for (MethodParam p : params) {
             paramTypeMap.put(p.getName(), p.getType());
         }
+        for (MethodParam extra : extraVars) {
+            paramTypeMap.put(extra.getName(), extra.getType());
+        }
+
+        // All payload fields = method params + extra local vars
+        List<MethodParam> allPayloadFields = new ArrayList<>(params);
+        allPayloadFields.addAll(extraVars);
 
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
@@ -469,12 +480,13 @@ public class SagaOrchestratorGenerator {
         sb.append("import com.fasterxml.jackson.databind.ObjectMapper;\n");
         sb.append("import org.slf4j.Logger;\n");
         sb.append("import org.slf4j.LoggerFactory;\n");
+        sb.append("import org.slf4j.MDC;\n");
         sb.append("import org.springframework.stereotype.Service;\n");
         sb.append("import org.springframework.transaction.annotation.Transactional;\n");
         sb.append("import java.util.UUID;\n");
 
-        // Emit imports for non-trivial payload field types
-        for (MethodParam p : params) {
+        // Emit imports for non-trivial payload field types (both method params and extra vars)
+        for (MethodParam p : allPayloadFields) {
             String fqn = javaImportFor(p.getType());
             if (fqn != null) sb.append("import ").append(fqn).append(";\n");
         }
@@ -567,6 +579,8 @@ public class SagaOrchestratorGenerator {
         sb.append("        sagaRepository.save(instance);\n\n");
         sb.append("        log.info(\"Starting saga '").append(saga.getSagaId())
           .append("' correlationId={}\", instance.getCorrelationId());\n\n");
+        // Propagate the saga correlationId to all outbound gRPC calls via MDC
+        sb.append("        MDC.put(\"correlationId\", instance.getCorrelationId());\n");
         sb.append("        try {\n");
         sb.append("            instance.setStatus(SagaStatus.IN_PROGRESS);\n");
 
@@ -595,6 +609,8 @@ public class SagaOrchestratorGenerator {
         sb.append("            compensate(instance");
         if (!params.isEmpty()) sb.append(", p");
         sb.append(");\n");
+        sb.append("        } finally {\n");
+        sb.append("            MDC.remove(\"correlationId\");\n");
         sb.append("        }\n\n");
         sb.append("        return instance.getCorrelationId();\n");
         sb.append("    }\n\n");
@@ -603,7 +619,9 @@ public class SagaOrchestratorGenerator {
         String compensateParam = params.isEmpty() ? "" : ", " + payloadClass + " p";
         sb.append("    private void compensate(SagaInstance instance").append(compensateParam).append(") {\n");
         sb.append("        instance.setStatus(SagaStatus.COMPENSATING);\n");
-        sb.append("        sagaRepository.save(instance);\n\n");
+        sb.append("        sagaRepository.save(instance);\n");
+        // MDC may already be set from start(), but set it explicitly here in case compensate is called independently
+        sb.append("        MDC.put(\"correlationId\", instance.getCorrelationId());\n\n");
         sb.append("        // Compensation runs in reverse step order\n");
 
         List<SagaStep> reversed = new ArrayList<>(saga.getSteps());
@@ -634,16 +652,22 @@ public class SagaOrchestratorGenerator {
           .append("' compensated and marked FAILED correlationId={}\", instance.getCorrelationId());\n");
         sb.append("    }\n\n");
 
-        // Payload DTO record — mirrors the parent saga method's parameter list
-        if (!params.isEmpty()) {
+        // Payload DTO record — mirrors the parent saga method's parameter list + extra local vars
+        if (!allPayloadFields.isEmpty()) {
             sb.append("    /**\n");
             sb.append("     * Typed payload DTO for the '").append(saga.getSagaId()).append("' saga.\n");
             sb.append("     * Serialise this as JSON and POST to {@code /saga/")
               .append(saga.getSagaId()).append("/start}.\n");
+            if (!extraVars.isEmpty()) {
+                sb.append("     * Extra fields (local vars needed by steps): ")
+                  .append(extraVars.stream().map(MethodParam::getName)
+                          .collect(java.util.stream.Collectors.joining(", ")))
+                  .append("\n");
+            }
             sb.append("     */\n");
             sb.append("    public record ").append(payloadClass).append("(\n");
             List<String> recordComponents = new ArrayList<>();
-            for (MethodParam mp : params) {
+            for (MethodParam mp : allPayloadFields) {
                 recordComponents.add("            " + mp.getType() + " " + mp.getName());
             }
             sb.append(String.join(",\n", recordComponents));

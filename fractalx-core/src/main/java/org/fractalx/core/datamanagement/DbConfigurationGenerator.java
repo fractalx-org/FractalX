@@ -82,6 +82,7 @@ public class DbConfigurationGenerator {
         if (sourceJpa == null) sourceJpa = new HashMap<>();
 
         configureUpdateMode(sourceJpa);
+        sourceJpa.put("show-sql", false);
         spring.put("jpa", sourceJpa);
 
         // Inject SQL initialization settings
@@ -116,7 +117,7 @@ public class DbConfigurationGenerator {
 
         // JPA: Force update mode
         Map<String, Object> jpa = new HashMap<>();
-        jpa.put("show-sql", true);
+        jpa.put("show-sql", false);
 
         Map<String, Object> hibernate = new HashMap<>();
         hibernate.put("ddl-auto", "update");
