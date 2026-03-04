@@ -143,7 +143,7 @@ public class AdminServiceGenerator {
         observabilityGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
 
         // New enhanced sub-systems
-        servicesDetailGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        servicesDetailGenerator.generate(srcMainJava, BASE_PACKAGE, modules, sagaDefinitions);
         communicationGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         dataConsistencyGenerator.generate(srcMainJava, BASE_PACKAGE, modules, sagaDefinitions);
         userManagementGenerator.generate(srcMainJava, BASE_PACKAGE);

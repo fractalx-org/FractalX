@@ -72,9 +72,17 @@ public class DbConfigurationGenerator {
     private void mergeDbConfig(Map<String, Object> target, Map<String, Object> source, FractalModule module) {
         Map<String, Object> spring = (Map<String, Object>) target.computeIfAbsent("spring", k -> new HashMap<>());
 
-        // Inject Datasource
+        // Inject Datasource (and ensure HikariCP defaults are present)
         Map<String, Object> sourceDs = (Map<String, Object>) source.get("datasource");
         processDatasourceUrl(sourceDs);
+        if (!sourceDs.containsKey("hikari")) {
+            Map<String, Object> hikari = new HashMap<>();
+            hikari.put("maximum-pool-size", 10);
+            hikari.put("minimum-idle", 5);
+            hikari.put("connection-timeout", 30000);
+            hikari.put("idle-timeout", 600000);
+            sourceDs.put("hikari", hikari);
+        }
         spring.put("datasource", sourceDs);
 
         // Inject JPA with update mode forced
@@ -105,6 +113,13 @@ public class DbConfigurationGenerator {
         datasource.put("driver-class-name", "org.h2.Driver");
         datasource.put("username", "sa");
         datasource.put("password", "");
+        // HikariCP connection pool defaults (production-safe values)
+        Map<String, Object> hikari = new HashMap<>();
+        hikari.put("maximum-pool-size", 10);
+        hikari.put("minimum-idle", 5);
+        hikari.put("connection-timeout", 30000);
+        hikari.put("idle-timeout", 600000);
+        datasource.put("hikari", hikari);
         spring.put("datasource", datasource);
 
         // SQL initialization

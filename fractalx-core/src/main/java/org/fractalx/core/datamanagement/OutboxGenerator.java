@@ -84,6 +84,14 @@ public class OutboxGenerator {
                     @Column(columnDefinition = "TEXT")
                     private String payload;
 
+                    /**
+                     * Correlation ID from the originating HTTP request.
+                     * Captured while still in the HTTP thread (MDC is populated) so it
+                     * can be forwarded even when the OutboxPoller runs on a scheduler thread.
+                     */
+                    @Column
+                    private String correlationId;
+
                     /** Whether this event has been successfully forwarded. */
                     @Column(nullable = false)
                     private boolean published = false;
@@ -107,6 +115,8 @@ public class OutboxGenerator {
                     public void setAggregateId(String v) { aggregateId = v; }
                     public String getPayload()           { return payload; }
                     public void setPayload(String v)     { payload = v; }
+                    public String getCorrelationId()     { return correlationId; }
+                    public void setCorrelationId(String v) { correlationId = v; }
                     public boolean isPublished()         { return published; }
                     public void setPublished(boolean v)  { published = v; }
                     public int getRetryCount()           { return retryCount; }
@@ -156,6 +166,7 @@ public class OutboxGenerator {
                 import com.fasterxml.jackson.databind.ObjectMapper;
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
+                import org.slf4j.MDC;
                 import org.springframework.stereotype.Component;
 
                 /**
@@ -189,6 +200,12 @@ public class OutboxGenerator {
                         OutboxEvent event = new OutboxEvent();
                         event.setEventType(eventType);
                         event.setAggregateId(aggregateId);
+                        // Capture correlationId while still in the HTTP thread — MDC is populated here.
+                        // The OutboxPoller runs on a @Scheduled thread with an empty MDC, so we must
+                        // persist the ID now and read it from the entity later.
+                        String correlationId = MDC.get("correlationId");
+                        if (correlationId == null) correlationId = MDC.get("traceId");
+                        event.setCorrelationId(correlationId);
                         try {
                             event.setPayload(objectMapper.writeValueAsString(payload));
                         } catch (JsonProcessingException e) {
@@ -196,7 +213,8 @@ public class OutboxGenerator {
                             event.setPayload(String.valueOf(payload));
                         }
                         outboxRepository.save(event);
-                        log.debug("Outbox event queued: type={} aggregateId={}", eventType, aggregateId);
+                        log.debug("Outbox event queued: type={} aggregateId={} correlationId={}",
+                                eventType, aggregateId, correlationId);
                     }
                 }
                 """.formatted(pkg);
@@ -213,6 +231,8 @@ public class OutboxGenerator {
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
                 import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.http.HttpEntity;
+                import org.springframework.http.HttpHeaders;
                 import org.springframework.scheduling.annotation.Scheduled;
                 import org.springframework.stereotype.Component;
                 import org.springframework.transaction.annotation.Transactional;
@@ -279,11 +299,21 @@ public class OutboxGenerator {
                      * Forwards a single outbox event to the saga orchestrator via HTTP POST.
                      * The URL follows the pattern: {orchestratorUrl}/saga/{eventType}/start
                      * where eventType is the saga ID (e.g., "place-order-saga").
+                     *
+                     * <p>The original correlationId is forwarded as {@code X-Correlation-Id} so
+                     * the saga orchestrator and all downstream services share the same trace ID.
                      */
                     protected void forwardEvent(OutboxEvent event) {
                         String url = orchestratorUrl + "/saga/" + event.getEventType() + "/start";
-                        restTemplate.postForObject(url, event.getPayload(), String.class);
-                        log.debug("Dispatched saga event id={} type={} to {}", event.getId(), event.getEventType(), url);
+                        HttpHeaders headers = new HttpHeaders();
+                        headers.set("Content-Type", "application/json");
+                        if (event.getCorrelationId() != null && !event.getCorrelationId().isBlank()) {
+                            headers.set("X-Correlation-Id", event.getCorrelationId());
+                        }
+                        HttpEntity<String> request = new HttpEntity<>(event.getPayload(), headers);
+                        restTemplate.postForObject(url, request, String.class);
+                        log.debug("Dispatched saga event id={} type={} correlationId={} to {}",
+                                event.getId(), event.getEventType(), event.getCorrelationId(), url);
                     }
                 }
                 """.formatted(pkg, module.getServiceName());
