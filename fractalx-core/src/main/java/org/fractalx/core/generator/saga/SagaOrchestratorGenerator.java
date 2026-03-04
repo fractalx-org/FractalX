@@ -212,22 +212,36 @@ public class SagaOrchestratorGenerator {
 
                 import org.springframework.boot.SpringApplication;
                 import org.springframework.boot.autoconfigure.SpringBootApplication;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.ComponentScan;
                 import org.springframework.scheduling.annotation.EnableScheduling;
+                import org.springframework.web.client.RestTemplate;
                 import org.fractalx.netscope.client.annotation.EnableNetScopeClient;
 
                 /**
                  * FractalX Saga Orchestrator — Auto-Generated.
                  * Coordinates distributed sagas across decomposed microservices.
+                 *
+                 * <p>{@code org.fractalx.runtime} is included in the component scan so that
+                 * FractalX runtime beans ({@code TraceFilter}, {@code NetScopeGrpcInterceptorConfigurer},
+                 * {@code NetScopeContextInterceptor}) are registered and wire the correlation ID
+                 * into outbound gRPC metadata automatically.
                  */
                 @SpringBootApplication
                 @EnableScheduling
+                @ComponentScan(basePackages = {"%s", "org.fractalx.runtime"})
                 @EnableNetScopeClient(basePackages = {"%s.client"})
                 public class SagaOrchestratorApplication {
                     public static void main(String[] args) {
                         SpringApplication.run(SagaOrchestratorApplication.class, args);
                     }
+
+                    @Bean
+                    public RestTemplate restTemplate() {
+                        return new RestTemplate();
+                    }
                 }
-                """.formatted(BASE_PACKAGE, BASE_PACKAGE));
+                """.formatted(BASE_PACKAGE, BASE_PACKAGE, BASE_PACKAGE));
     }
 
     private void writeApplicationYml(Path resourcesDir,
@@ -252,6 +266,19 @@ public class SagaOrchestratorGenerator {
             serversBlock.append("      ").append(serviceName).append(":\n");
             serversBlock.append("        host: localhost\n");
             serversBlock.append("        port: ").append(grpcPort).append("\n");
+        }
+
+        // Build saga owner service callback URLs so the orchestrator can notify them on completion
+        StringBuilder ownerUrlsBlock = new StringBuilder();
+        for (SagaDefinition saga : sagas) {
+            int ownerPort = modules.stream()
+                    .filter(m -> m.getServiceName().equals(saga.getOwnerServiceName()))
+                    .map(FractalModule::getPort)
+                    .findFirst()
+                    .orElse(8080);
+            ownerUrlsBlock.append("    ").append(saga.getSagaId()).append("-owner-url: ")
+                    .append("${").append(saga.getSagaId().toUpperCase().replace("-", "_"))
+                    .append("_OWNER_URL:http://localhost:").append(ownerPort).append("}\n");
         }
 
         writeFile(resourcesDir, "application.yml",
@@ -280,10 +307,34 @@ public class SagaOrchestratorGenerator {
                 + "server:\n"
                 + "  port: 8099\n"
                 + "\n"
+                + "fractalx:\n"
+                + "  observability:\n"
+                + "    tracing: true\n"
+                + "    metrics: true\n"
+                + "    logger-url: ${FRACTALX_LOGGER_URL:http://localhost:9099/api/logs}\n"
+                + "  saga:\n"
+                + "    owner-urls:\n"
+                + ownerUrlsBlock
+                + "\n"
                 + "netscope:\n"
                 + "  client:\n"
                 + "    servers:\n"
                 + serversBlock
+                + "\n"
+                + "management:\n"
+                + "  endpoints:\n"
+                + "    web:\n"
+                + "      exposure:\n"
+                + "        include: health,info,metrics,prometheus\n"
+                + "  endpoint:\n"
+                + "    health:\n"
+                + "      show-details: always\n"
+                + "  tracing:\n"
+                + "    sampling:\n"
+                + "      probability: 1.0\n"
+                + "  otlp:\n"
+                + "    tracing:\n"
+                + "      endpoint: ${OTEL_EXPORTER_OTLP_HTTP_ENDPOINT:http://localhost:4318/v1/traces}\n"
                 + "\n"
                 + "logging:\n"
                 + "  level:\n"
@@ -481,8 +532,12 @@ public class SagaOrchestratorGenerator {
         sb.append("import org.slf4j.Logger;\n");
         sb.append("import org.slf4j.LoggerFactory;\n");
         sb.append("import org.slf4j.MDC;\n");
+        sb.append("import org.springframework.beans.factory.annotation.Value;\n");
+        sb.append("import org.springframework.http.HttpEntity;\n");
+        sb.append("import org.springframework.http.HttpHeaders;\n");
         sb.append("import org.springframework.stereotype.Service;\n");
         sb.append("import org.springframework.transaction.annotation.Transactional;\n");
+        sb.append("import org.springframework.web.client.RestTemplate;\n");
         sb.append("import java.util.UUID;\n");
 
         // Emit imports for non-trivial payload field types (both method params and extra vars)
@@ -524,7 +579,11 @@ public class SagaOrchestratorGenerator {
             }
         }
         sb.append("    private final SagaInstanceRepository sagaRepository;\n");
-        sb.append("    private final ObjectMapper objectMapper;\n\n");
+        sb.append("    private final ObjectMapper objectMapper;\n");
+        sb.append("    private final RestTemplate restTemplate;\n\n");
+        sb.append("    @Value(\"${fractalx.saga.owner-urls.")
+          .append(saga.getSagaId()).append(":http://localhost:8080}\")\n");
+        sb.append("    private String ownerServiceBaseUrl;\n\n");
 
         // Constructor
         sb.append("    public ").append(className).append("(");
@@ -539,6 +598,7 @@ public class SagaOrchestratorGenerator {
         }
         ctorParams.add("SagaInstanceRepository sagaRepository");
         ctorParams.add("ObjectMapper objectMapper");
+        ctorParams.add("RestTemplate restTemplate");
         sb.append(String.join(", ", ctorParams)).append(") {\n");
         Set<String> assigned = new java.util.LinkedHashSet<>();
         for (SagaStep step : saga.getSteps()) {
@@ -550,15 +610,18 @@ public class SagaOrchestratorGenerator {
         }
         sb.append("        this.sagaRepository = sagaRepository;\n");
         sb.append("        this.objectMapper = objectMapper;\n");
+        sb.append("        this.restTemplate = restTemplate;\n");
         sb.append("    }\n\n");
 
         // start() method — deserializes payload, runs steps with typed args
         sb.append("    /**\n");
         sb.append("     * Starts a new saga execution.\n");
-        sb.append("     * @param payload JSON body matching {@link ").append(payloadClass).append("}\n");
+        sb.append("     * @param payload           JSON body matching {@link ").append(payloadClass).append("}\n");
+        sb.append("     * @param incomingCorrelationId optional X-Correlation-Id from the caller;\n");
+        sb.append("     *                          reused if present, otherwise a new UUID is generated\n");
         sb.append("     * @return correlationId to track this execution\n");
         sb.append("     */\n");
-        sb.append("    public String start(String payload) {\n");
+        sb.append("    public String start(String payload, String incomingCorrelationId) {\n");
 
         if (!params.isEmpty()) {
             sb.append("        ").append(payloadClass).append(" p;\n");
@@ -570,9 +633,15 @@ public class SagaOrchestratorGenerator {
             sb.append("        }\n\n");
         }
 
+        sb.append("        // Reuse the incoming correlationId to keep the distributed trace intact,\n");
+        sb.append("        // or generate a fresh UUID if the caller did not supply one.\n");
+        sb.append("        String correlationId = (incomingCorrelationId != null && !incomingCorrelationId.isBlank())\n");
+        sb.append("                ? incomingCorrelationId\n");
+        sb.append("                : UUID.randomUUID().toString();\n\n");
+
         sb.append("        SagaInstance instance = new SagaInstance();\n");
         sb.append("        instance.setSagaId(\"").append(saga.getSagaId()).append("\");\n");
-        sb.append("        instance.setCorrelationId(UUID.randomUUID().toString());\n");
+        sb.append("        instance.setCorrelationId(correlationId);\n");
         sb.append("        instance.setOwnerService(\"").append(saga.getOwnerServiceName()).append("\");\n");
         sb.append("        instance.setStatus(SagaStatus.STARTED);\n");
         sb.append("        instance.setPayload(payload);\n");
@@ -602,6 +671,10 @@ public class SagaOrchestratorGenerator {
         sb.append("            sagaRepository.save(instance);\n");
         sb.append("            log.info(\"Saga '").append(saga.getSagaId())
           .append("' completed successfully correlationId={}\", instance.getCorrelationId());\n\n");
+        sb.append("            // Notify owner service so it can finalize business state\n");
+        sb.append("            // (e.g. mark Order as CONFIRMED). Override via fractalx.saga.owner-urls.")
+          .append(saga.getSagaId()).append(" property.\n");
+        sb.append("            notifyOwnerComplete(instance);\n\n");
         sb.append("        } catch (Exception e) {\n");
         sb.append("            log.error(\"Saga '").append(saga.getSagaId())
           .append("' failed at step={}\", instance.getCurrentStep(), e);\n");
@@ -650,6 +723,36 @@ public class SagaOrchestratorGenerator {
         sb.append("        sagaRepository.save(instance);\n");
         sb.append("        log.warn(\"Saga '").append(saga.getSagaId())
           .append("' compensated and marked FAILED correlationId={}\", instance.getCorrelationId());\n");
+        sb.append("    }\n\n");
+
+        // notifyOwnerComplete helper
+        sb.append("    /**\n");
+        sb.append("     * Notifies the owner service that the saga completed successfully.\n");
+        sb.append("     * Calls {@code POST {ownerServiceBaseUrl}/internal/saga-complete/{correlationId}}\n");
+        sb.append("     * with the full saga payload as the request body.\n");
+        sb.append("     *\n");
+        sb.append("     * <p>The owner service should implement\n");
+        sb.append("     * {@code POST /internal/saga-complete/{correlationId}} to update its\n");
+        sb.append("     * business state (e.g. mark Order as CONFIRMED). Failures are logged but\n");
+        sb.append("     * do NOT roll back the saga — the saga itself is already DONE.\n");
+        sb.append("     */\n");
+        sb.append("    private void notifyOwnerComplete(SagaInstance instance) {\n");
+        sb.append("        String url = ownerServiceBaseUrl + \"/internal/saga-complete/\"\n");
+        sb.append("                + instance.getCorrelationId();\n");
+        sb.append("        try {\n");
+        sb.append("            HttpHeaders headers = new HttpHeaders();\n");
+        sb.append("            headers.set(\"Content-Type\", \"application/json\");\n");
+        sb.append("            if (instance.getCorrelationId() != null) {\n");
+        sb.append("                headers.set(\"X-Correlation-Id\", instance.getCorrelationId());\n");
+        sb.append("            }\n");
+        sb.append("            HttpEntity<String> request = new HttpEntity<>(instance.getPayload(), headers);\n");
+        sb.append("            restTemplate.postForObject(url, request, String.class);\n");
+        sb.append("            log.info(\"Notified owner service of saga completion: url={} correlationId={}\",\n");
+        sb.append("                    url, instance.getCorrelationId());\n");
+        sb.append("        } catch (Exception e) {\n");
+        sb.append("            log.warn(\"Failed to notify owner service of saga completion: url={} error={}\",\n");
+        sb.append("                    url, e.getMessage());\n");
+        sb.append("        }\n");
         sb.append("    }\n\n");
 
         // Payload DTO record — mirrors the parent saga method's parameter list + extra local vars
@@ -840,6 +943,7 @@ public class SagaOrchestratorGenerator {
                 import org.springframework.web.bind.annotation.*;
                 import java.util.List;
                 import java.util.Map;
+                import org.slf4j.MDC;
 
                 /**
                  * REST API for saga orchestration.
@@ -884,9 +988,15 @@ public class SagaOrchestratorGenerator {
                             + saga.toClassName().substring(1) + "SagaService";
             sb.append("    /** Start '").append(saga.getSagaId()).append("' saga. */\n");
             sb.append("    @PostMapping(\"/").append(saga.getSagaId()).append("/start\")\n");
-            sb.append("    public ResponseEntity<Map<String, String>> start")
-              .append(saga.toClassName()).append("(@RequestBody String payload) {\n");
-            sb.append("        String correlationId = ").append(svcField).append(".start(payload);\n");
+            sb.append("    public ResponseEntity<Map<String, String>> start").append(saga.toClassName())
+              .append("(@RequestBody String payload,\n");
+            sb.append("            @RequestHeader(value = \"X-Correlation-Id\", required = false)")
+              .append(" String incomingCorrelationId) {\n");
+            sb.append("        if (incomingCorrelationId != null && !incomingCorrelationId.isBlank()) {\n");
+            sb.append("            MDC.put(\"correlationId\", incomingCorrelationId);\n");
+            sb.append("        }\n");
+            sb.append("        String correlationId = ").append(svcField)
+              .append(".start(payload, incomingCorrelationId);\n");
             sb.append("        return ResponseEntity.accepted().body(Map.of(\"correlationId\", correlationId));\n");
             sb.append("    }\n\n");
         }

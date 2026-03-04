@@ -55,10 +55,7 @@ public class FractalXRuntimeAutoConfiguration {
      * early in the application context lifecycle, before other beans are instantiated.
      */
     @Bean
-    @ConditionalOnClass(name = {
-            "org.fractalx.netscope.server.grpc.NetScopeGrpcServer",
-            "org.fractalx.netscope.client.core.NetScopeChannelFactory"
-    })
+    @ConditionalOnClass(name = "org.fractalx.netscope.client.core.NetScopeChannelFactory")
     public NetScopeGrpcInterceptorConfigurer netScopeGrpcInterceptorConfigurer(
             NetScopeContextInterceptor correlationInterceptor) {
         return new NetScopeGrpcInterceptorConfigurer(correlationInterceptor);

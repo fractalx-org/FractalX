@@ -14,6 +14,7 @@ import org.fractalx.core.generator.resilience.ResilienceConfigStep;
 import org.fractalx.core.generator.saga.SagaOrchestratorGenerator;
 import org.fractalx.core.generator.service.ApplicationGenerator;
 import org.fractalx.core.generator.service.ConfigurationGenerator;
+import org.fractalx.core.generator.service.CorrelationIdGenerator;
 import org.fractalx.core.generator.service.NetScopeClientGenerator;
 import org.fractalx.core.generator.service.NetScopeRegistryBridgeStep;
 import org.fractalx.core.generator.service.PomGenerator;
@@ -106,6 +107,7 @@ public class ServiceGenerator {
                 context -> distributedServiceHelper.upgradeService(
                         context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
                         context.getSagaDefinitions()),
+                new CorrelationIdGenerator(),    // generates logback-spring.xml with %X{correlationId}
                 new OtelConfigStep(),
                 new HealthMetricsStep(),
                 new ServiceRegistrationStep(),
