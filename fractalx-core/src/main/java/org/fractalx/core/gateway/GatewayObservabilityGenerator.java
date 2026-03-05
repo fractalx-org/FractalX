@@ -86,10 +86,14 @@ public class GatewayObservabilityGenerator {
                                 }))
                                 .build();
 
-                        return chain.filter(mutated).doFinally(signal -> {
+                        // Register response headers to be set before the response is committed
+                        mutated.getResponse().beforeCommit(() -> {
                             mutated.getResponse().getHeaders().set("X-Request-Id",     requestId);
                             mutated.getResponse().getHeaders().set("X-Correlation-Id", finalCorrelationId);
+                            return Mono.empty();
                         });
+
+                        return chain.filter(mutated);
                     }
                 }
                 """;

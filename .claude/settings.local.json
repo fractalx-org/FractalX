@@ -4,7 +4,10 @@
       "Bash(jar:*)",
       "Bash(mvn clean:*)",
       "Bash(mvn install:*)",
-      "Bash(mvn compile:*)"
+      "Bash(mvn compile:*)",
+      "Bash(xargs cat)",
+      "Bash(javap:*)",
+      "Bash(mvn test:*)"
     ]
   }
 }

@@ -83,7 +83,7 @@ public class DistributedServiceHelper {
 
         // 5. Generate transactional outbox (for services with cross-module deps or sagas)
         if (!module.getDependencies().isEmpty()) {
-            outboxGen.generateOutbox(module, serviceRoot);
+            outboxGen.generateOutbox(module, serviceRoot, sagaDefinitions);
         }
 
         // 6. Generate reference validators for decoupled foreign keys
