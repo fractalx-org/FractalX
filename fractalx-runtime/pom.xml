@@ -42,5 +42,30 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
+
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-api</artifactId>
+            <version>1.75.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+            <version>1.75.0</version>
+        </dependency>
+
+        <!-- NetScope JARs: provided — always on the generated service classpath, not bundled here -->
+        <dependency>
+            <groupId>org.fractalx</groupId>
+            <artifactId>netscope-server</artifactId>
+            <version>1.0.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.fractalx</groupId>
+            <artifactId>netscope-client</artifactId>
+            <version>1.0.0</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 </project>

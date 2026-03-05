@@ -14,6 +14,7 @@ import org.fractalx.core.generator.resilience.ResilienceConfigStep;
 import org.fractalx.core.generator.saga.SagaOrchestratorGenerator;
 import org.fractalx.core.generator.service.ApplicationGenerator;
 import org.fractalx.core.generator.service.ConfigurationGenerator;
+import org.fractalx.core.generator.service.CorrelationIdGenerator;
 import org.fractalx.core.generator.service.NetScopeClientGenerator;
 import org.fractalx.core.generator.service.NetScopeRegistryBridgeStep;
 import org.fractalx.core.generator.service.PomGenerator;
@@ -26,6 +27,7 @@ import org.fractalx.core.generator.transformation.ImportCleaner;
 import org.fractalx.core.generator.transformation.ImportPreserver;
 import org.fractalx.core.generator.transformation.NetScopeClientWiringStep;
 import org.fractalx.core.generator.transformation.NetScopeServerAnnotationStep;
+import org.fractalx.core.generator.transformation.SagaMethodTransformer;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.SagaDefinition;
 import org.fractalx.core.observability.LoggerServiceGenerator;
@@ -101,9 +103,11 @@ public class ServiceGenerator {
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
+                new SagaMethodTransformer(),    // replaces cross-service calls with outboxPublisher.publish()
                 context -> distributedServiceHelper.upgradeService(
                         context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
                         context.getSagaDefinitions()),
+                new CorrelationIdGenerator(),    // generates logback-spring.xml with %X{correlationId}
                 new OtelConfigStep(),
                 new HealthMetricsStep(),
                 new ServiceRegistrationStep(),
@@ -144,7 +148,7 @@ public class ServiceGenerator {
             generateApiGateway(modules, fractalxConfig);
         }
 
-        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig);
+        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions);
 
         // Generate saga orchestrator service if any sagas were detected
         sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
