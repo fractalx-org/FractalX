@@ -154,6 +154,7 @@ class DockerComposeGeneratorSpec extends Specification {
         dockerfile.contains("FROM eclipse-temurin:17-jre-jammy")
         dockerfile.contains("RUN mvn -B dependency:resolve dependency:resolve-plugins")
         dockerfile.contains("RUN mvn -B package -DskipTests -q")
+        dockerfile.contains("mkdir -p /app/logs && chown fractalx:fractalx /app/logs")
         dockerfile.contains("COPY --from=build --chown=fractalx:fractalx /app/target/*.jar app.jar")
         dockerfile.contains("USER fractalx")
     }
