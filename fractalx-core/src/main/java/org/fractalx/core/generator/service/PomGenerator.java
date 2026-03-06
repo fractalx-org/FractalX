@@ -17,7 +17,7 @@ import java.nio.file.Files;
 public class PomGenerator implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(PomGenerator.class);
-    // Use release() so generated POMs reference e.g. "0.2.0" not "0.2.0-SNAPSHOT".
+    // Use release() so generated POMs reference e.g. "0.2.0" not "0.2.1".
     // SNAPSHOT artifacts are not served by Maven Central, and Docker builds have no
     // local Maven cache — they resolve exclusively from remote repositories.
     private static final String FRACTALX_RUNTIME_VERSION = FractalxVersion.release();

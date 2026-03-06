@@ -29,7 +29,7 @@ public final class FractalxVersion {
 
     private FractalxVersion() {}
 
-    /** Returns the current FractalX version, e.g. {@code 0.2.0-SNAPSHOT}. */
+    /** Returns the current FractalX version, e.g. {@code 0.2.1}. */
     public static String get() { return VERSION; }
 
     /** Returns the version without the {@code -SNAPSHOT} suffix, e.g. {@code 0.2.0}. */
