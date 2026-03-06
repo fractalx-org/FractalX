@@ -238,6 +238,26 @@ Every command renders the **FRACTALX** ASCII banner with a braille spinner dashb
 
 ---
 
+### `fractalx:menu` — Interactive CLI
+
+Opens a full-screen interactive menu with the FRACTALX banner. Use arrow keys to select a command and press Enter to run it — no need to remember goal names.
+
+```bash
+mvn fractalx:menu
+```
+
+Controls:
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` or `k` / `j` | Navigate up / down |
+| `Enter` | Run selected command |
+| `q`, `Ctrl-C`, or `ESC` | Quit without running |
+
+> On dumb terminals (no ANSI) a numbered list is shown instead and you type the number.
+
+---
+
 ### `fractalx:decompose` — Decompose monolith
 
 Analyses `@DecomposableModule` classes and generates a complete microservice deployment.
