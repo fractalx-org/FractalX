@@ -120,6 +120,8 @@ class AdminTopologyGenerator {
                 import org.springframework.web.bind.annotation.RestController;
                 import org.springframework.web.client.RestTemplate;
 
+                import java.net.InetSocketAddress;
+                import java.net.Socket;
                 import java.util.Arrays;
                 import java.util.LinkedHashMap;
                 import java.util.Map;
@@ -166,15 +168,29 @@ class AdminTopologyGenerator {
                         }
                     }
 
-                    private String checkHealth(String serviceNameOrLocalhost, int port, String path) {
+                    /**
+                     * TCP-first check: RUNNING if the port accepts a connection,
+                     * then optionally confirm via actuator path.
+                     */
+                    private String checkHealth(String serviceName, int port, String actuatorPath) {
                         boolean docker = Arrays.asList(environment.getActiveProfiles()).contains("docker");
-                        String host = docker ? serviceNameOrLocalhost : "localhost";
-                        String url = "http://" + host + ":" + port + path;
-                        try {
-                            String resp = restTemplate.getForObject(url, String.class);
-                            return (resp != null && resp.contains("UP")) ? "UP" : "DOWN";
+                        String host = docker ? serviceName : "localhost";
+                        // Phase 1: is the process up at all?
+                        try (Socket s = new Socket()) {
+                            s.connect(new InetSocketAddress(host, port), 2000);
                         } catch (Exception e) {
                             return "DOWN";
+                        }
+                        // Phase 2: actuator health
+                        try {
+                            String resp = restTemplate.getForObject(
+                                    "http://" + host + ":" + port + actuatorPath, String.class);
+                            if (resp == null) return "RUNNING";
+                            boolean anyDown = resp.contains("DOWN");
+                            boolean allUp   = resp.contains("UP") && !anyDown;
+                            return allUp ? "UP" : anyDown ? "DEGRADED" : "RUNNING";
+                        } catch (Exception e) {
+                            return "RUNNING"; // port open but actuator not exposed
                         }
                     }
                 }

@@ -184,7 +184,7 @@ public class MenuMojo extends FractalxBaseMojo {
 
         sb.append("\r\033[2K\r\n");
         sb.append("\r\033[2K  ").append(DIM)
-          .append("Interactive CLI  ").append(FractalxVersion.get()).append(RST).append("\r\n");
+          .append("FractalX CLI  ").append(FractalxVersion.get()).append(RST).append("\r\n");
         sb.append("\r\033[2K\r\n");
         sb.append("\r\033[2K  ").append(DIM)
           .append("\u2191\u2193 navigate   Enter select   q quit").append(RST).append("\r\n");

@@ -196,6 +196,8 @@ class AdminServicesDetailGenerator {
                 import org.springframework.web.bind.annotation.*;
                 import org.springframework.web.client.RestTemplate;
 
+                import java.net.InetSocketAddress;
+                import java.net.Socket;
                 import java.util.*;
                 import java.util.Set;
 
@@ -326,29 +328,62 @@ class AdminServicesDetailGenerator {
                     // -------------------------------------------------------------------------
 
                     /**
-                     * Fetches and classifies actuator health.
-                     * Returns:
-                     *   processStatus  — RUNNING | UNREACHABLE (can we reach the service at all?)
-                     *   status         — UP | DEGRADED | DOWN   (smart aggregate)
-                     *   degraded       — true when process is RUNNING but a dependency is DOWN
-                     *   components     — map of name → {status, category, error?, description?}
+                     * Two-phase health check:
+                     *
+                     * Phase 1 — TCP socket connect (2 s timeout).
+                     *   Like `nc -zv host port` — tells us whether the process is running,
+                     *   independent of any application-level health state.
+                     *   processStatus = RUNNING | UNREACHABLE
+                     *
+                     * Phase 2 — Actuator /health (only when RUNNING).
+                     *   Gives detailed component breakdown: DB, disk, dependencies, etc.
+                     *   status = UP | DEGRADED | DOWN
                      */
                     @SuppressWarnings("unchecked")
                     private Map<String, Object> fetchHealthStatus(ServiceMetaRegistry.ServiceMeta meta) {
                         if (meta.port() == 0) {
                             return buildResult("UNREACHABLE", "UNKNOWN", false, Map.of(), null);
                         }
+
+                        // Phase 1: raw TCP — is the port open?
+                        String processStatus = tcpCheck(serviceHost(meta), meta.port());
+
+                        if ("UNREACHABLE".equals(processStatus)) {
+                            return buildResult("UNREACHABLE", "DOWN", false, Map.of(),
+                                    "Port " + meta.port() + " is not accepting connections");
+                        }
+
+                        // Phase 2: actuator health — application-level details
                         try {
                             Map<String, Object> raw = restTemplate.getForObject(
                                     serviceBaseUrl(meta) + "/actuator/health", Map.class);
                             if (raw == null) {
-                                return buildResult("UNREACHABLE", "DOWN", false, Map.of(), null);
+                                return buildResult("RUNNING", "UNKNOWN", false, Map.of(), null);
                             }
-                            return classifyHealth(raw);
+                            Map<String, Object> result = classifyHealth(raw);
+                            result.put("processStatus", "RUNNING");
+                            return result;
                         } catch (Exception e) {
-                            String msg = e.getMessage() != null ? e.getMessage() : "unreachable";
-                            return buildResult("UNREACHABLE", "DOWN", false, Map.of(), msg);
+                            // Port is open but actuator is not exposed — treat as healthy process
+                            return buildResult("RUNNING", "UNKNOWN", false, Map.of(),
+                                    "Actuator not accessible: " +
+                                    (e.getMessage() != null ? e.getMessage() : "no response"));
                         }
+                    }
+
+                    /** TCP socket connect with 2-second timeout — does not send any data. */
+                    private String tcpCheck(String host, int port) {
+                        try (Socket socket = new Socket()) {
+                            socket.connect(new InetSocketAddress(host, port), 2000);
+                            return "RUNNING";
+                        } catch (Exception e) {
+                            return "UNREACHABLE";
+                        }
+                    }
+
+                    private String serviceHost(ServiceMetaRegistry.ServiceMeta meta) {
+                        boolean docker = Arrays.asList(environment.getActiveProfiles()).contains("docker");
+                        return docker ? meta.name() : "localhost";
                     }
 
                     @SuppressWarnings("unchecked")
@@ -428,11 +463,8 @@ class AdminServicesDetailGenerator {
                         return r;
                     }
 
-                    /** Returns the base URL for a service, using container hostname in Docker. */
                     private String serviceBaseUrl(ServiceMetaRegistry.ServiceMeta meta) {
-                        boolean docker = Arrays.asList(environment.getActiveProfiles()).contains("docker");
-                        String host = docker ? meta.name() : "localhost";
-                        return "http://" + host + ":" + meta.port();
+                        return "http://" + serviceHost(meta) + ":" + meta.port();
                     }
 
                     private Map<String, String> buildCommands(String service) {
