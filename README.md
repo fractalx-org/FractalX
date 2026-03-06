@@ -142,7 +142,7 @@ Add the FractalX annotations dependency:
 <dependency>
     <groupId>org.fractalx</groupId>
     <artifactId>fractalx-annotations</artifactId>
-    <version>0.2.2</version>
+    <version>0.2.0-SNAPSHOT</version>
 </dependency>
 ```
 
