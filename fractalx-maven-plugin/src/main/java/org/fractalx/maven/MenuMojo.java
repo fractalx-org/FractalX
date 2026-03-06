@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -217,25 +218,25 @@ public class MenuMojo extends FractalxBaseMojo {
 
     // ── Service sub-picker (drawn on the already-active alt screen) ───────────
 
+    private record SvcEntry(String name, boolean running) {}
+
     /**
      * Shows an "All services / pick one" selector on the alt screen.
+     * Each service line shows ● (green, running) or ○ (dim, stopped).
      *
      * @return "" for All, service name for a specific service, null if user backed out.
      */
     private String pickService(FileInputStream tty, String commandName) throws IOException {
-        List<String> serviceNames = discoverServiceNames();
+        List<SvcEntry> entries = discoverServiceEntries();
 
-        // Build option list: "All services" first, then each service
-        List<String> options = new ArrayList<>();
-        options.add("All services");
-        options.addAll(serviceNames);
+        // Option 0 = "All services", options 1..n = each service
+        int total = entries.size() + 1;
+        int optW  = entries.stream().mapToInt(e -> e.name().length()).max().orElse(12) + 3;
+        int sel   = 0;
+        String title = Character.toUpperCase(commandName.charAt(0))
+                     + commandName.substring(1) + " — select service";
 
-        int optW      = options.stream().mapToInt(String::length).max().orElse(12) + 3;
-        int sel       = 0;
-        String title  = Character.toUpperCase(commandName.charAt(0))
-                      + commandName.substring(1) + " — select service";
-
-        drawSubPicker(options, sel, optW, title);
+        drawSubPicker(entries, sel, optW, title);
 
         while (true) {
             int b = tty.read();
@@ -246,8 +247,8 @@ public class MenuMojo extends FractalxBaseMojo {
                     int b2 = tty.read();
                     if (b2 == '[' && tty.available() > 0) {
                         int b3 = tty.read();
-                        if      (b3 == 'A') sel = (sel - 1 + options.size()) % options.size();
-                        else if (b3 == 'B') sel = (sel + 1) % options.size();
+                        if      (b3 == 'A') sel = (sel - 1 + total) % total;
+                        else if (b3 == 'B') sel = (sel + 1) % total;
                     }
                 } else {
                     return null;                // bare ESC → back
@@ -256,16 +257,20 @@ public class MenuMojo extends FractalxBaseMojo {
                 break;                          // confirmed
             } else if (b == 'q' || b == 3 || b == 4) {
                 return null;                    // back to main menu
-            } else if (b == 'k') sel = (sel - 1 + options.size()) % options.size();
-            else if  (b == 'j') sel = (sel + 1) % options.size();
+            } else if (b == 'k') sel = (sel - 1 + total) % total;
+            else if  (b == 'j') sel = (sel + 1) % total;
 
-            drawSubPicker(options, sel, optW, title);
+            drawSubPicker(entries, sel, optW, title);
         }
 
-        return sel == 0 ? "" : serviceNames.get(sel - 1);  // "" = All
+        return sel == 0 ? "" : entries.get(sel - 1).name();  // "" = All
     }
 
-    private void drawSubPicker(List<String> options, int selected, int optW, String title) {
+    private void drawSubPicker(List<SvcEntry> entries, int selected, int optW, String title) {
+        // "●" U+25CF (filled circle) = running, "○" U+25CB (empty circle) = stopped
+        final String DOT_UP   = GRN + "\u25CF" + RST;
+        final String DOT_DOWN = DIM + "\u25CB" + RST;
+
         StringBuilder sb = new StringBuilder();
         sb.append(HOME);
         sb.append("\r\033[2K\r\n");
@@ -280,15 +285,31 @@ public class MenuMojo extends FractalxBaseMojo {
           .append(title).append("  ").append(FractalxVersion.get()).append(RST).append("\r\n");
         sb.append("\r\033[2K\r\n");
         sb.append("\r\033[2K  ").append(DIM)
-          .append("\u2191\u2193 navigate   Enter select   ESC back").append(RST).append("\r\n");
+          .append("\u2191\u2193 navigate   Enter select   ESC back   ")
+          .append(GRN).append("\u25CF").append(DIM).append(" running  ")
+          .append("\u25CB").append(" stopped").append(RST).append("\r\n");
         sb.append("\r\033[2K\r\n");
 
-        for (int i = 0; i < options.size(); i++) {
-            boolean sel    = (i == selected);
-            String  cursor = sel ? GRN + "\u25B6" + RST : " ";
-            String  name   = sel ? BLD + pad(options.get(i), optW) + RST
-                                 : DIM + pad(options.get(i), optW) + RST;
+        // Row 0: "All services"
+        {
+            boolean isSel  = (selected == 0);
+            String cursor  = isSel ? GRN + "\u25B6" + RST : " ";
+            String name    = isSel ? BLD + pad("All services", optW) + RST
+                                   : DIM + pad("All services", optW) + RST;
             sb.append("\r\033[2K  ").append(cursor).append("  ").append(name).append("\r\n");
+        }
+
+        // Rows 1..n: each service with status dot
+        for (int i = 0; i < entries.size(); i++) {
+            SvcEntry e    = entries.get(i);
+            boolean isSel = (selected == i + 1);
+            String cursor = isSel ? GRN + "\u25B6" + RST : " ";
+            String dot    = e.running() ? DOT_UP : DOT_DOWN;
+            String name   = isSel ? BLD + pad(e.name(), optW) + RST
+                                  : (e.running() ? pad(e.name(), optW) : DIM + pad(e.name(), optW) + RST);
+            String status = e.running() ? GRN + "running" + RST : DIM + "stopped" + RST;
+            sb.append("\r\033[2K  ").append(cursor).append("  ")
+              .append(dot).append(" ").append(name).append("  ").append(status).append("\r\n");
         }
 
         sb.append(CLR_END);
@@ -319,17 +340,20 @@ public class MenuMojo extends FractalxBaseMojo {
                 String service = "";
 
                 if (isServiceCommand(name)) {
-                    List<String> svcs = discoverServiceNames();
+                    List<SvcEntry> svcs = discoverServiceEntries();
                     out.println();
                     out.println("  [0] All services");
-                    for (int i = 0; i < svcs.size(); i++)
-                        out.println("  [" + (i + 1) + "] " + svcs.get(i));
+                    for (int i = 0; i < svcs.size(); i++) {
+                        SvcEntry e = svcs.get(i);
+                        String status = e.running() ? " [running]" : " [stopped]";
+                        out.println("  [" + (i + 1) + "] " + e.name() + status);
+                    }
                     out.println();
                     out.print("  Select service (0 for all): ");
                     out.flush();
                     if (sc.hasNextInt()) {
                         int s = sc.nextInt();
-                        if (s > 0 && s <= svcs.size()) service = svcs.get(s - 1);
+                        if (s > 0 && s <= svcs.size()) service = svcs.get(s - 1).name();
                     }
                 }
 
@@ -349,18 +373,42 @@ public class MenuMojo extends FractalxBaseMojo {
         return name.equals("start") || name.equals("stop") || name.equals("restart");
     }
 
-    private List<String> discoverServiceNames() {
+    private List<SvcEntry> discoverServiceEntries() {
         if (outputDirectory == null || !outputDirectory.exists()) return List.of();
-        List<String> result = new ArrayList<>();
+        List<SvcEntry> result = new ArrayList<>();
         try (var stream = Files.list(outputDirectory.toPath())) {
             stream.filter(Files::isDirectory)
                   .filter(d -> Files.exists(d.resolve("pom.xml")))
                   .sorted()
-                  .map(Path::getFileName)
-                  .map(Path::toString)
-                  .forEach(result::add);
+                  .forEach(d -> {
+                      String name = d.getFileName().toString();
+                      int port = readPortFromDir(d);
+                      boolean running = port > 0 && isPortOpen(port);
+                      result.add(new SvcEntry(name, running));
+                  });
         } catch (IOException ignored) {}
         return result;
+    }
+
+    private int readPortFromDir(Path svcDir) {
+        Path yml = svcDir.resolve("src/main/resources/application.yml");
+        if (!Files.exists(yml)) return -1;
+        try {
+            for (String line : Files.readAllLines(yml)) {
+                line = line.trim();
+                if (line.startsWith("port:"))
+                    return Integer.parseInt(line.substring("port:".length()).trim());
+            }
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    private boolean isPortOpen(int port) {
+        try (Socket s = new Socket("localhost", port)) {
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     // ── Raw-mode helpers ──────────────────────────────────────────────────────
