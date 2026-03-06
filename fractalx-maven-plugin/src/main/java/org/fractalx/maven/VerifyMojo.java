@@ -22,15 +22,20 @@ import org.apache.maven.project.MavenProject;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Verifies the output of {@code fractalx:decompose} at multiple levels.
  *
+ * <p>Progress is shown on an alternate-screen Dashboard (identical to
+ * {@code fractalx:decompose}). Each verification level is a step; failures
+ * show a yellow ⚠ (level had issues but continued) or red ✗ (fatal crash).
+ * On completion the main screen shows a Vercel-style findings summary.
+ *
  * <pre>
- *   mvn fractalx:verify                                       # structural + NetScope (fast)
- *   mvn fractalx:verify -Dfractalx.verify.compile=true        # + compilation
- *   mvn fractalx:verify -Dfractalx.verify.failBuild=true      # fail on any issue
+ *   mvn fractalx:verify
+ *   mvn fractalx:verify -Dfractalx.verify.compile=true -Dfractalx.verify.failBuild=true
  * </pre>
  */
 @Mojo(name = "verify")
@@ -59,6 +64,12 @@ public class VerifyMojo extends FractalxBaseMojo {
     @Parameter(property = "fractalx.verify.skip",       defaultValue = "false")
     private boolean skip;
 
+    // ── Collected results (populated during verification, printed after) ──────
+    private final List<LevelResult> results = new ArrayList<>();
+
+    private record LevelResult(String name, int pass, int fail,
+                                List<String> failures, List<String> warnings) {}
+
     // =========================================================================
     @Override
     public void execute() throws MojoExecutionException {
@@ -67,6 +78,7 @@ public class VerifyMojo extends FractalxBaseMojo {
 
         if (skip) { out.println(a(DIM) + "  Skipped." + a(RST)); return; }
 
+        // ── Normal screen: banner + subtitle (same as decompose) ──────────────
         printHeader("Verification Engine");
 
         if (!outputDirectory.exists()) {
@@ -74,8 +86,6 @@ public class VerifyMojo extends FractalxBaseMojo {
             warn("Run 'mvn fractalx:decompose' first.");
             return;
         }
-
-        Path outputPath = outputDirectory.toPath();
 
         List<FractalModule> modules;
         try {
@@ -88,244 +98,261 @@ public class VerifyMojo extends FractalxBaseMojo {
             return;
         }
 
-        // ── Print mode line ───────────────────────────────────────────────────
-        String mode = "structural + NetScope + static + advanced"
-                + (compile    ? " + compilation"      : "")
-                + (smokeTests ? " + smoke-tests"      : "");
-        out.println("  " + a(DIM) + "Mode   " + a(RST) + mode);
         out.println("  " + a(DIM) + "Output " + a(RST) + outputDirectory.getAbsolutePath());
         out.println();
 
+        // ── Build step labels ─────────────────────────────────────────────────
+        List<String> labels = new ArrayList<>();
+        labels.add("Structural");
+        labels.add("NetScope compatibility");
+        labels.add("Static analysis");
+        labels.add("Advanced analysis");
+        if (compile)    labels.add("Compilation");
+        if (smokeTests) labels.add("Smoke tests");
+
+        // ── Enter alternate screen ────────────────────────────────────────────
+        if (ansi) { out.print(ALT_ON); out.flush(); }
+
+        Dashboard dash   = new Dashboard(labels, out, ansi, "Verification Engine");
+        Path      outPath = outputDirectory.toPath();
+        String[]  active = { null };
+
+        dash.render();
+
         int totalFail = 0;
+        try {
+            totalFail += runLevel(dash, "Structural",
+                    () -> runStructuralChecks(outPath, modules));
 
-        totalFail += runLevel(1, "Structural",         () -> runStructuralChecks(outputPath, modules));
-        totalFail += runLevel(2, "NetScope compat",    () -> runNetScopeChecks(outputPath, modules));
-        totalFail += runLevel(3, "Static analysis",    () -> runStrictStaticChecks(outputPath, modules));
-        totalFail += runLevel(4, "Advanced analysis",  () -> runAdvancedAnalysis(outputPath, modules));
-        if (compile)    totalFail += runLevel(5, "Compilation",    () -> runCompilationChecks(outputPath, modules));
-        if (smokeTests) runLevel(6, "Smoke tests",     () -> { runSmokeTestGeneration(outputPath, modules); return 0; });
+            totalFail += runLevel(dash, "NetScope compatibility",
+                    () -> runNetScopeChecks(outPath, modules));
 
-        // ── Summary ───────────────────────────────────────────────────────────
-        out.println();
-        if (totalFail == 0) {
-            out.println("  " + a(GRN) + "\u2713" + a(RST) + "  " + a(BLD) + "All checks passed" + a(RST)
-                    + "  " + a(DIM) + "[" + fmt(System.currentTimeMillis() - t0) + "]" + a(RST));
-        } else {
-            out.println("  " + a(RED) + "\u2718" + a(RST) + "  " + a(BLD) + totalFail + " check(s) failed" + a(RST)
-                    + "  " + a(DIM) + "[" + fmt(System.currentTimeMillis() - t0) + "]" + a(RST));
+            totalFail += runLevel(dash, "Static analysis",
+                    () -> runStrictStaticChecks(outPath, modules));
+
+            totalFail += runLevel(dash, "Advanced analysis",
+                    () -> runAdvancedAnalysis(outPath, modules));
+
+            if (compile)
+                totalFail += runLevel(dash, "Compilation",
+                        () -> runCompilationChecks(outPath, modules));
+
+            if (smokeTests)
+                runLevel(dash, "Smoke tests",
+                        () -> { runSmokeTestGeneration(outPath, modules); return new LevelResult("Smoke tests", 0, 0, List.of(), List.of()); });
+
+        } catch (Exception e) {
+            String step = active[0] != null ? active[0] : "verification";
+            dash.onFail(step, e.getMessage());
+            if (ansi) {
+                try { Thread.sleep(2500); } catch (InterruptedException ignored) {}
+                out.print(ALT_OFF); out.flush();
+            }
+            throw new MojoExecutionException("Verification failed at: " + step, e);
         }
+
+        dash.finish();
+
+        if (ansi) {
+            try { Thread.sleep(250); } catch (InterruptedException ignored) {}
+            out.print(ALT_OFF); out.flush();
+        }
+
+        // ── Summary on main screen ────────────────────────────────────────────
         out.println();
+        printSummary(totalFail, System.currentTimeMillis() - t0);
 
         if (totalFail > 0 && failBuild) {
             throw new MojoExecutionException(
                     totalFail + " verification check(s) failed. Re-run 'mvn fractalx:decompose'.");
-        } else if (totalFail > 0) {
-            out.println("  " + a(DIM) + "Add -Dfractalx.verify.failBuild=true to fail the build on issues." + a(RST));
-            out.println();
         }
     }
 
     // ── Level runner ──────────────────────────────────────────────────────────
 
     @FunctionalInterface
-    private interface CheckBlock { int run() throws Exception; }
+    private interface LevelBlock { LevelResult run() throws Exception; }
 
-    private int runLevel(int n, String name, CheckBlock block) {
-        out.println("  " + a(BLD) + a(DIM) + "Level " + n + a(RST)
-                + "  " + a(BLD) + name + a(RST));
-        out.println();
-        try {
-            int fails = block.run();
-            out.println();
-            return fails;
-        } catch (Exception e) {
-            out.println("  " + a(RED) + "\u2718" + a(RST) + "  " + e.getMessage());
-            out.println();
-            return 1;
+    private int runLevel(Dashboard dash, String label, LevelBlock block) throws Exception {
+        dash.onStart(label);
+        LevelResult result = block.run();
+        results.add(result);
+        if (result.fail() > 0) {
+            dash.onWarn(label, result.fail() + " failed");
+        } else {
+            dash.onDone(label);
         }
+        return result.fail();
     }
 
     // ── Level 1: structural ───────────────────────────────────────────────────
 
-    private int runStructuralChecks(Path outputPath, List<FractalModule> modules) {
+    private LevelResult runStructuralChecks(Path outputPath, List<FractalModule> modules) {
         DecompositionVerifier.VerificationReport report =
                 new DecompositionVerifier().verify(outputPath, modules);
 
-        String currentCat = null;
+        List<String> failures = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
         for (DecompositionVerifier.CheckResult r : report.results()) {
-            if (!r.category().equals(currentCat)) {
-                currentCat = r.category();
-                out.println("    " + a(DIM) + r.category() + a(RST));
-            }
-            printCheck(r.status().name(), r.description(), r.detail());
+            if ("FAIL".equals(r.status().name())) failures.add(r.description()
+                    + (r.detail() != null && !r.detail().isBlank() ? "  (" + r.detail() + ")" : ""));
+            else if ("WARN".equals(r.status().name())) warnings.add(r.description());
         }
-        out.println("    " + a(DIM) + report.pass() + " passed  |  "
-                + report.warn() + " warnings  |  " + report.fail() + " failed" + a(RST));
-        return report.fail();
+        return new LevelResult("Structural", report.pass(), report.fail(), failures, warnings);
     }
 
     // ── Level 2: NetScope compatibility ───────────────────────────────────────
 
-    private int runNetScopeChecks(Path outputPath, List<FractalModule> modules) {
+    private LevelResult runNetScopeChecks(Path outputPath, List<FractalModule> modules) {
         boolean hasDeps = modules.stream().anyMatch(m -> !m.getDependencies().isEmpty());
-        if (!hasDeps) {
-            out.println("  " + a(DIM) + "\u2013  No cross-service dependencies \u2014 skipped." + a(RST));
-            return 0;
-        }
+        if (!hasDeps) return new LevelResult("NetScope compatibility", 1, 0, List.of(), List.of());
 
         List<NetScopeCompatibilityChecker.CompatibilityIssue> issues =
                 new NetScopeCompatibilityChecker().check(outputPath, modules);
 
-        if (issues.isEmpty()) {
-            out.println("  " + a(GRN) + "\u25AA" + a(RST)
-                    + "  All @NetScopeClient interfaces match @NetworkPublic server methods.");
-            return 0;
-        }
-
+        List<String> failures = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
         for (NetScopeCompatibilityChecker.CompatibilityIssue issue : issues) {
-            boolean fail = issue.kind() == NetScopeCompatibilityChecker.IssueKind.MISSING_CLIENT_METHOD
-                        || issue.kind() == NetScopeCompatibilityChecker.IssueKind.NO_CLIENT_FILE;
-            String icon  = fail ? a(RED) + "\u2718" + a(RST) : a(YLW) + "\u26A0" + a(RST);
-            out.println("  " + icon + "  [" + issue.callerService() + " \u2192 "
-                    + issue.targetService() + "]  " + issue.detail());
+            boolean isFail = issue.kind() == NetScopeCompatibilityChecker.IssueKind.MISSING_CLIENT_METHOD
+                          || issue.kind() == NetScopeCompatibilityChecker.IssueKind.NO_CLIENT_FILE;
+            String msg = "[" + issue.callerService() + " \u2192 " + issue.targetService() + "]  " + issue.detail();
+            if (isFail) failures.add(msg); else warnings.add(msg);
         }
-
-        return (int) issues.stream().filter(i ->
-                i.kind() == NetScopeCompatibilityChecker.IssueKind.MISSING_CLIENT_METHOD
-                || i.kind() == NetScopeCompatibilityChecker.IssueKind.NO_CLIENT_FILE).count();
+        return new LevelResult("NetScope compatibility",
+                issues.size() - failures.size(), failures.size(), failures, warnings);
     }
 
     // ── Level 3: strict static analysis ──────────────────────────────────────
 
-    private int runStrictStaticChecks(Path outputPath, List<FractalModule> modules) {
-        int fails = 0;
+    private LevelResult runStrictStaticChecks(Path outputPath, List<FractalModule> modules) {
+        List<String> failures = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
 
-        List<PortConflictChecker.Conflict> portConflicts = new PortConflictChecker().check(outputPath, modules);
-        if (portConflicts.isEmpty()) {
-            pass("No HTTP or gRPC port conflicts detected.");
-        } else {
-            for (PortConflictChecker.Conflict c : portConflicts) { fail(c.toString()); fails++; }
+        new PortConflictChecker().check(outputPath, modules)
+                .forEach(c -> failures.add("Port conflict: " + c));
+
+        new CrossBoundaryImportChecker().check(outputPath, modules)
+                .forEach(v -> failures.add("Cross-boundary import: " + v));
+
+        for (ApiConventionChecker.ApiViolation v : new ApiConventionChecker().check(outputPath, modules)) {
+            if (v.isCritical()) failures.add("API: " + v); else warnings.add("API: " + v);
         }
-
-        List<CrossBoundaryImportChecker.Violation> importViolations =
-                new CrossBoundaryImportChecker().check(outputPath, modules);
-        if (importViolations.isEmpty()) {
-            pass("No cross-boundary package imports detected.");
-        } else {
-            for (CrossBoundaryImportChecker.Violation v : importViolations) { fail(v.toString()); fails++; }
-        }
-
-        List<ApiConventionChecker.ApiViolation> apiViolations =
-                new ApiConventionChecker().check(outputPath, modules);
-        if (apiViolations.isEmpty()) {
-            pass("All REST controllers follow HTTP method conventions.");
-        } else {
-            for (ApiConventionChecker.ApiViolation v : apiViolations) {
-                if (v.isCritical()) { fail(v.toString()); fails++; } else { warn(v.toString()); }
-            }
-        }
-
-        return fails;
+        return new LevelResult("Static analysis", 0, failures.size(), failures, warnings);
     }
 
     // ── Level 4: advanced analysis ────────────────────────────────────────────
 
-    private int runAdvancedAnalysis(Path outputPath, List<FractalModule> modules) {
-        int fails = 0;
+    private LevelResult runAdvancedAnalysis(Path outputPath, List<FractalModule> modules) {
+        List<String> failures = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
 
         ServiceGraphAnalyzer.GraphReport graph = new ServiceGraphAnalyzer().analyse(modules);
-        if (graph.findings().isEmpty()) {
-            pass("Service dependency graph is clean (no cycles, no outliers).");
-        } else {
-            for (ServiceGraphAnalyzer.Finding f : graph.findings()) {
-                if (f.isCritical()) { fail(f.kind() + " \u2014 " + f.service() + ": " + f.detail()); fails++; }
-                else { warn(f.kind() + " \u2014 " + f.service() + ": " + f.detail()); }
-            }
-        }
-        out.println("    " + a(DIM) + "fan-out: " + graph.fanOut()
-                + "  |  fan-in: " + graph.fanIn() + a(RST));
-
-        List<SqlSchemaValidator.SqlFinding> sqlFindings = new SqlSchemaValidator().validate(outputPath, modules);
-        if (sqlFindings.isEmpty()) { pass("All Flyway migration scripts are valid."); }
-        else sqlFindings.forEach(f -> { if (f.isCritical()) { fail(f.toString()); } else warn(f.toString()); });
-
-        List<TransactionBoundaryAnalyzer.TransactionViolation> txViolations =
-                new TransactionBoundaryAnalyzer().analyse(outputPath, modules);
-        if (txViolations.isEmpty()) { pass("No @Transactional + cross-service call combinations."); }
-        else txViolations.forEach(v -> warn(v.toString()));
-
-        List<SecretLeakScanner.SecretLeak> leaks = new SecretLeakScanner().scan(outputPath, modules);
-        if (leaks.isEmpty()) { pass("No hardcoded secrets detected in generated configs."); }
-        else {
-            leaks.forEach(l -> warn(l.toString()));
-            warn("Rotate these before deploying to any shared/production environment.");
+        for (ServiceGraphAnalyzer.Finding f : graph.findings()) {
+            String msg = f.kind() + " \u2014 " + f.service() + ": " + f.detail();
+            if (f.isCritical()) failures.add(msg); else warnings.add(msg);
         }
 
-        List<DockerfileValidator.DockerFinding> dockerFindings =
-                new DockerfileValidator().validate(outputPath, modules);
-        if (dockerFindings.isEmpty()) { pass("All Dockerfiles meet production-readiness standards."); }
-        else { for (DockerfileValidator.DockerFinding f : dockerFindings) { if (f.isCritical()) { fail(f.toString()); fails++; } else warn(f.toString()); } }
+        for (SqlSchemaValidator.SqlFinding f : new SqlSchemaValidator().validate(outputPath, modules)) {
+            if (f.isCritical()) failures.add("SQL: " + f); else warnings.add("SQL: " + f);
+        }
 
-        List<ConfigPropertyChecker.CfgFinding> cfgFindings =
-                new ConfigPropertyChecker().check(outputPath, modules);
-        if (cfgFindings.isEmpty()) { pass("All @Value references are covered by application.yml."); }
-        else { for (ConfigPropertyChecker.CfgFinding f : cfgFindings) { if (f.isCritical()) { fail(f.toString()); fails++; } else warn(f.toString()); } }
+        new TransactionBoundaryAnalyzer().analyse(outputPath, modules)
+                .forEach(v -> warnings.add("Tx: " + v));
 
-        return fails;
+        new SecretLeakScanner().scan(outputPath, modules)
+                .forEach(l -> warnings.add("Secret: " + l));
+
+        for (DockerfileValidator.DockerFinding f : new DockerfileValidator().validate(outputPath, modules)) {
+            if (f.isCritical()) failures.add("Docker: " + f); else warnings.add("Docker: " + f);
+        }
+
+        for (ConfigPropertyChecker.CfgFinding f : new ConfigPropertyChecker().check(outputPath, modules)) {
+            if (f.isCritical()) failures.add("Config: " + f); else warnings.add("Config: " + f);
+        }
+
+        return new LevelResult("Advanced analysis", 0, failures.size(), failures, warnings);
     }
 
     // ── Level 5: compilation ──────────────────────────────────────────────────
 
-    private int runCompilationChecks(Path outputPath, List<FractalModule> modules) {
-        out.println("  " + a(DIM) + "This may take a few minutes..." + a(RST));
-        out.println();
-
-        List<CompilationVerifier.CompilationResult> results =
+    private LevelResult runCompilationChecks(Path outputPath, List<FractalModule> modules) {
+        List<CompilationVerifier.CompilationResult> compiled =
                 new CompilationVerifier().compileAll(outputPath, modules);
 
-        int fails = 0;
-        for (CompilationVerifier.CompilationResult r : results) {
-            if (r.success()) {
-                pass(r.serviceName() + " compiled successfully (" + r.durationMs() + "ms)");
-            } else {
-                fail(r.serviceName() + " \u2014 compilation errors:");
-                for (String err : r.errors()) out.println("         " + a(DIM) + err + a(RST));
-                fails++;
+        List<String> failures = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        for (CompilationVerifier.CompilationResult r : compiled) {
+            if (!r.success()) {
+                String detail = r.serviceName() + " \u2014 " + String.join(", ", r.errors());
+                failures.add(detail);
             }
         }
-        out.println("    " + a(DIM) + (results.size() - fails) + " compiled  |  " + fails + " failed" + a(RST));
-        return fails;
+        return new LevelResult("Compilation",
+                (int) compiled.stream().filter(CompilationVerifier.CompilationResult::success).count(),
+                failures.size(), failures, warnings);
     }
 
     // ── Level 6: smoke test generation ───────────────────────────────────────
 
     private void runSmokeTestGeneration(Path outputPath, List<FractalModule> modules) {
-        List<SmokeTestGenerator.GenerationResult> results =
-                new SmokeTestGenerator().generate(outputPath, modules);
-        for (SmokeTestGenerator.GenerationResult r : results) {
-            if (r.success()) pass(r.serviceName() + " \u2014 FractalXSmokeTest.java written");
-            else             warn(r.serviceName() + " \u2014 " + r.detail());
+        new SmokeTestGenerator().generate(outputPath, modules);
+    }
+
+    // ── Summary on main screen ────────────────────────────────────────────────
+
+    private void printSummary(int totalFail, long totalMs) {
+        boolean anyFailures = results.stream().anyMatch(r -> !r.failures().isEmpty());
+        boolean anyWarnings = results.stream().anyMatch(r -> !r.warnings().isEmpty());
+
+        // Failures section
+        if (anyFailures) {
+            section("Failures");
+            for (LevelResult r : results) {
+                if (r.failures().isEmpty()) continue;
+                out.println("  " + a(BLD) + r.name() + a(RST));
+                for (String f : r.failures())
+                    out.println("    " + a(RED) + "\u2718" + a(RST) + "  " + f);
+                out.println();
+            }
+        }
+
+        // Warnings section
+        if (anyWarnings) {
+            section("Warnings");
+            for (LevelResult r : results) {
+                if (r.warnings().isEmpty()) continue;
+                out.println("  " + a(BLD) + r.name() + a(RST));
+                for (String w : r.warnings())
+                    out.println("    " + a(YLW) + "\u26A0" + a(RST) + "  " + a(DIM) + w + a(RST));
+                out.println();
+            }
+        }
+
+        // Level summary table
+        section("Results");
+        int pw = results.stream().mapToInt(r -> r.name().length()).max().orElse(10) + 2;
+        for (LevelResult r : results) {
+            String icon = r.fail() > 0 ? a(YLW) + "\u26A0" + a(RST)
+                        : a(GRN) + "\u25AA" + a(RST);
+            String counts = a(DIM) + r.pass() + " passed"
+                    + (r.fail() > 0 ? "  " + r.fail() + " failed" : "")
+                    + (r.warnings().size() > 0 ? "  " + r.warnings().size() + " warnings" : "")
+                    + a(RST);
+            out.println("  " + icon + "  " + a(BLD) + pad(r.name(), pw) + a(RST) + "  " + counts);
         }
         out.println();
-        out.println("  " + a(DIM) + "Run with: cd <service-dir> && mvn test" + a(RST));
-    }
 
-    // ── Row helpers ───────────────────────────────────────────────────────────
-
-    private void printCheck(String status, String description, String detail) {
-        String line = "    " + description + (detail != null && !detail.isBlank() ? "  (" + detail + ")" : "");
-        switch (status) {
-            case "PASS" -> pass(description + (detail != null && !detail.isBlank() ? "  (" + detail + ")" : ""));
-            case "WARN" -> warn(description + (detail != null && !detail.isBlank() ? "  (" + detail + ")" : ""));
-            default     -> fail(description + (detail != null && !detail.isBlank() ? "  (" + detail + ")" : ""));
+        // Final line
+        String t = fmt(totalMs);
+        if (totalFail == 0) {
+            out.println("  " + a(GRN) + "\u2713" + a(RST) + "  " + a(BLD) + "All checks passed" + a(RST)
+                    + "  " + a(DIM) + "[" + t + "]" + a(RST));
+        } else {
+            out.println("  " + a(YLW) + "\u26A0" + a(RST) + "  " + a(BLD) + totalFail + " check(s) failed" + a(RST)
+                    + "  " + a(DIM) + "[" + t + "]" + a(RST));
+            out.println();
+            out.println("  " + a(DIM) + "Add -Dfractalx.verify.failBuild=true to fail the build on issues." + a(RST));
         }
-    }
-
-    private void pass(String msg) {
-        out.println("    " + a(GRN) + "\u25AA" + a(RST) + "  " + msg);
-    }
-
-    private void fail(String msg) {
-        out.println("    " + a(RED) + "\u2718" + a(RST) + "  " + a(RED) + msg + a(RST));
+        out.println();
     }
 }

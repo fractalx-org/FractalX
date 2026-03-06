@@ -311,16 +311,16 @@ mvn fractalx:ps
 
 ---
 
-### `fractalx:run` — Start services
+### `fractalx:start` — Start services
 
 Starts all generated services (via `start-all.sh` or individual start scripts).
 
 ```bash
 # Start all services
-mvn fractalx:run
+mvn fractalx:start
 
 # Start a specific service
-mvn fractalx:run -Dfractalx.service=order-service
+mvn fractalx:start -Dfractalx.service=order-service
 ```
 
 ---
@@ -341,7 +341,7 @@ mvn fractalx:stop -Dfractalx.service=order-service
 
 ### `fractalx:restart` — Restart services
 
-Stops then restarts services (stop + run).
+Stops then restarts services (stop + start).
 
 ```bash
 # Restart all
@@ -366,7 +366,7 @@ mvn fractalx:verify
 mvn fractalx:services
 
 # 4. Start everything
-mvn fractalx:run
+mvn fractalx:start
 
 # 5. Check what's running
 mvn fractalx:ps

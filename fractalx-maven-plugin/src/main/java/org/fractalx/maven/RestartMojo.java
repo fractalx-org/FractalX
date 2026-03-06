@@ -11,7 +11,7 @@ import java.io.File;
  * Restarts generated services (stop then start).
  *
  * <pre>
- *   mvn fractalx:restart                                    # restart all
+ *   mvn fractalx:restart                                     # restart all
  *   mvn fractalx:restart -Dfractalx.service=order-service   # restart one
  * </pre>
  */
@@ -43,8 +43,8 @@ public class RestartMojo extends FractalxBaseMojo {
         }
 
         // Delegate to stop then run, sharing outputDirectory + service params
-        StopMojo stop = new StopMojo();
-        RunMojo  run  = new RunMojo();
+        StopMojo  stop = new StopMojo();
+        StartMojo run  = new StartMojo();
 
         copySharedState(stop);
         copySharedState(run);
