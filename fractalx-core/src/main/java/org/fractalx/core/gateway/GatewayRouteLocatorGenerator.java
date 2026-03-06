@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -28,26 +29,17 @@ public class GatewayRouteLocatorGenerator {
     }
 
     private void generateDynamicRouteLocator(Path pkg, List<FractalModule> modules) throws IOException {
-        StringBuilder staticFallbacks = new StringBuilder();
+        StringBuilder staticRoutesBuilder = new StringBuilder();
         for (FractalModule m : modules) {
-            String base = m.getServiceName().replace("-service", "");
-            String plural = base.endsWith("s") ? base : base + "s";
+            String path = m.getServiceName().replace("-service", "");
+            if (!path.endsWith("s")) path += "s";
 
-            String paths;
-            if (base.equals(plural)) {
-                paths = "\"" + "/api/" + base + "/**\"";
-            } else {
-                paths = "\"" + "/api/" + base + "/**\", \"" + "/api/" + plural + "/**\"";
-            }
-
-            staticFallbacks.append("""
-                            builder.routes()
-                                .route("%s-static", r -> r.path(%s)
-                                    .filters(f -> f.circuitBreaker(c -> c.setName("%s")
-                                        .setFallbackUri("forward:/fallback/%s")))
-                                    .uri("http://localhost:%d"))
-                                .build().getRoutes().toIterable().forEach(routes::add);
-                    """.formatted(m.getServiceName(), paths, m.getServiceName(), m.getServiceName(), m.getPort()));
+            staticRoutesBuilder.append("        // ").append(m.getServiceName()).append(" static route\n");
+            staticRoutesBuilder.append("        routeBuilder.route(\"").append(m.getServiceName()).append("-static\",\n");
+            staticRoutesBuilder.append("                r -> r.path(\"/api/").append(path).append("/**\")\n");
+            staticRoutesBuilder.append("                        .filters(f -> f.circuitBreaker(c -> c.setName(\"").append(m.getServiceName()).append("\")\n");
+            staticRoutesBuilder.append("                                .setFallbackUri(\"forward:/fallback/").append(m.getServiceName()).append("\")))\n");
+            staticRoutesBuilder.append("                        .uri(\"http://localhost:").append(m.getPort()).append("\"));\n\n");
         }
 
         String content = """
@@ -82,20 +74,34 @@ public class GatewayRouteLocatorGenerator {
                     @Bean
                     public RouteLocator dynamicRouteLocator() {
                         return () -> {
-                            List<Route> routes = new ArrayList<>();
-                            List<Route> liveRoutes = registryFetcher.fetchRoutes(builder);
-                            if (!liveRoutes.isEmpty()) {
-                                log.debug("Using {} live routes from fractalx-registry", liveRoutes.size());
-                                routes.addAll(liveRoutes);
-                            } else {
-                                log.warn("fractalx-registry unavailable — falling back to static routes");
-                                %s
+                            // Try to fetch live routes from registry first
+                            try {
+                                List<Route> liveRoutes = registryFetcher.fetchRoutes(builder);
+                                if (!liveRoutes.isEmpty()) {
+                                    log.info("Using {} live routes from fractalx-registry", liveRoutes.size());
+                                    return Flux.fromIterable(liveRoutes);
+                                }
+                                log.warn("No live routes available from registry");
+                            } catch (Exception e) {
+                                log.warn("Could not fetch routes from registry: {}", e.getMessage());
                             }
-                            return Flux.fromIterable(routes);
+
+                            // Fallback to static routes
+                            log.info("Using static fallback routes");
+                            return Flux.fromIterable(buildStaticRoutes());
                         };
                     }
+
+                    private List<Route> buildStaticRoutes() {
+                        List<Route> routes = new ArrayList<>();
+                        RouteLocatorBuilder.Builder routeBuilder = builder.routes();
+                %s
+                        routeBuilder.build().getRoutes().subscribe(routes::add);
+                        log.debug("Built {} static fallback routes", routes.size());
+                        return routes;
+                    }
                 }
-                """.formatted(staticFallbacks.toString());
+                """.formatted(staticRoutesBuilder.toString());
 
         Files.writeString(pkg.resolve("DynamicRouteLocatorConfig.java"), content);
     }
@@ -113,7 +119,9 @@ public class GatewayRouteLocatorGenerator {
                 import org.springframework.web.client.ResourceAccessException;
                 import org.springframework.web.client.HttpClientErrorException;
                 import org.springframework.web.client.RestTemplate;
-
+                import org.springframework.web.client.ResourceAccessException;
+                import org.springframework.web.client.HttpClientErrorException;
+                            
                 import java.util.ArrayList;
                 import java.util.List;
                 import java.util.Map;
@@ -132,24 +140,43 @@ public class GatewayRouteLocatorGenerator {
                     public List<Route> fetchRoutes(RouteLocatorBuilder builder) {
                         List<Route> routes = new ArrayList<>();
                         try {
+                            log.debug("Fetching routes from registry at {}", registryUrl);
+                            
                             List<Map<String, Object>> services =
                                     restTemplate.getForObject(registryUrl + "/services", List.class);
-                            if (services == null) return routes;
-                            for (Map<String, Object> svc : services) {
-                                if (!"UP".equals(svc.get("status"))) continue;
-                                String name   = (String) svc.get("name");
-                                String host   = (String) svc.get("host");
-                                int    port   = ((Number) svc.get("port")).intValue();
-                                String[] patterns = toPathPatterns(name);
-                                String uri    = "http://" + host + ":" + port;
-                                builder.routes()
-                                        .route(name, r -> r.path(patterns).uri(uri))
-                                        .build()
-                                        .getRoutes()
-                                        .toIterable()
-                                        .forEach(routes::add);
-                                log.debug("Live route: {} -> {}", patterns, uri);
+                                    
+                            if (services == null || services.isEmpty()) {
+                                log.debug("No services found in registry");
+                                return routes;
                             }
+                            
+                            RouteLocatorBuilder.Builder routeBuilder = builder.routes();
+                            
+                            for (Map<String, Object> svc : services) {
+
+                                if (!"UP".equals(svc.get("status"))) {
+                                    log.debug("Skipping service {} - status: {}",
+                                        svc.get("name"), svc.get("status"));
+                                    continue;
+                                }
+                                
+                                String name = (String) svc.get("name");
+                                String host = (String) svc.get("host");
+                                int port = ((Number) svc.get("port")).intValue();
+                                String prefix = toPathPrefix(name);
+                                String uri = "http://" + host + ":" + port;
+                                
+                                routeBuilder.route(name + "-live",
+                                    r -> r.path("/api/" + prefix + "/**")
+                                        .filters(f -> f.circuitBreaker(c -> c.setName(name)
+                                            .setFallbackUri("forward:/fallback/" + name)))
+                                        .uri(uri));
+                                        
+                                log.info("Live route added: /api/{}/** -> {}", prefix, uri);
+                            }
+                            
+                            routeBuilder.build().getRoutes().subscribe(routes::add);
+                            
                         } catch (ResourceAccessException e) {
                             log.warn("Cannot connect to registry at {}: {}", registryUrl, e.getMessage());
                         } catch (HttpClientErrorException e) {
@@ -160,14 +187,18 @@ public class GatewayRouteLocatorGenerator {
                         return routes;
                     }
 
-                    private String[] toPathPatterns(String serviceName) {
-                        String base = serviceName.replace("-service", "");
-                        String plural = base.endsWith("s") ? base : base + "s";
-                        if (base.equals(plural)) {
-                            return new String[]{"/api/" + base + "/**"};
-                        } else {
-                            return new String[]{"/api/" + base + "/**", "/api/" + plural + "/**"};
+                    private String toPathPrefix(String serviceName) {
+                        String path = serviceName.replace("-service", "");
+                        // Handle common pluralization
+                        if (path.endsWith("y")) {
+                            path = path.substring(0, path.length() - 1) + "ies";
+                        } else if (path.endsWith("s") || path.endsWith("sh") || path.endsWith("ch")) {
+                            path = path + "es";
+                        } else if (!path.endsWith("s")) {
+                            path = path + "s";
                         }
+                        return path;
+
                     }
                 }
                 """;

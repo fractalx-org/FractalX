@@ -2,12 +2,15 @@ package org.fractalx.core.gateway;
 
 import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.gateway.RouteDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +47,11 @@ public class GatewayConfigGenerator {
     }
 
     private String generateApplicationYml(List<FractalModule> modules, FractalxConfig cfg) {
+        if (modules == null || modules.isEmpty()) {
+            log.warn("No modules provided for gateway configuration");
+            modules = new ArrayList<>(); // Use empty list to avoid NPE
+        }
+
         StringBuilder routesConfig = new StringBuilder();
 
         for (FractalModule module : modules) {
@@ -106,13 +114,19 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("  endpoints:\n");
         ymlBuilder.append("    web:\n");
         ymlBuilder.append("      exposure:\n");
-        ymlBuilder.append("        include: health,info,metrics\n");
+        ymlBuilder.append("        include: health,info,gateway,routes,metrics\n");
+        ymlBuilder.append("  endpoint:\n");
+        ymlBuilder.append("    gateway:\n");
+        ymlBuilder.append("      enabled: true\n");
+        ymlBuilder.append("    health:\n");
+        ymlBuilder.append("      show-details: always\n");
         ymlBuilder.append("\n");
 
         ymlBuilder.append("logging:\n");
         ymlBuilder.append("  level:\n");
         ymlBuilder.append("    org.springframework.cloud.gateway: INFO\n");
         ymlBuilder.append("    org.fractalx.gateway: INFO\n");
+        ymlBuilder.append("    reactor.netty: DEBUG\n");
         ymlBuilder.append("    com.netflix.eureka: OFF\n");
         ymlBuilder.append("    com.netflix.discovery: OFF\n");
 
