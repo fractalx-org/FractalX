@@ -12,7 +12,7 @@ A static decomposition framework that converts modular monolithic Spring Boot ap
 4. [Build](#4-build)
 5. [Annotate Your Monolith](#5-annotate-your-monolith)
 6. [Configure Before Decomposition](#6-configure-before-decomposition)
-7. [Run Decomposition](#7-run-decomposition)
+7. [CLI Reference](#7-cli-reference)
 8. [Generated Output](#8-generated-output)
 9. [Start Generated Services](#9-start-generated-services)
 10. [Docker Deployment](#10-docker-deployment)
@@ -23,12 +23,11 @@ A static decomposition framework that converts modular monolithic Spring Boot ap
 15. [Data Consistency](#15-data-consistency)
 16. [Observability & Monitoring](#16-observability--monitoring)
 17. [Admin Dashboard](#17-admin-dashboard)
-18. [Static Verification](#18-static-verification)
-19. [Test Endpoints](#19-test-endpoints)
-20. [Configuration Reference](#20-configuration-reference)
-21. [Troubleshooting](#21-troubleshooting)
-22. [Contributing](#22-contributing)
-23. [License](#23-license)
+18. [Test Endpoints](#18-test-endpoints)
+19. [Configuration Reference](#19-configuration-reference)
+20. [Troubleshooting](#20-troubleshooting)
+21. [Contributing](#21-contributing)
+22. [License](#22-license)
 
 ---
 
@@ -228,38 +227,155 @@ After generation, the admin portal exposes the baked-in platform config at `GET 
 
 ---
 
-## 7. Run Decomposition
+## 7. CLI Reference
+
+Every command renders the **FRACTALX** ASCII banner with a braille spinner dashboard in the terminal. All commands share these common flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-Dfractalx.outputDirectory` | `./fractalx-output` | Path to the generated services directory |
+| `-Dfractalx.color=false` | `true` | Disable ANSI colours (auto-disabled for non-TTY) |
+
+---
+
+### `fractalx:decompose` — Decompose monolith
+
+Analyses `@DecomposableModule` classes and generates a complete microservice deployment.
 
 ```bash
-cd your-app
 mvn fractalx:decompose
 ```
 
-Or with explicit version:
-
 ```bash
-mvn org.fractalx:fractalx-maven-plugin:0.2.0-SNAPSHOT:decompose
+# Skip generation (analysis only)
+mvn fractalx:decompose -Dfractalx.generate=false
+
+# Custom output directory
+mvn fractalx:decompose -Dfractalx.outputDirectory=/path/to/output
 ```
 
-### Verify generated output (optional)
+Output is written to `./fractalx-output/` (not wiped by `mvn clean`).
+
+---
+
+### `fractalx:verify` — Verify generated output
+
+Runs multi-level static analysis on the generated services without starting them.
 
 ```bash
 mvn fractalx:verify
 ```
 
-This runs multi-level static analysis on the generated services without starting them:
+```bash
+# Include compilation check (slower)
+mvn fractalx:verify -Dfractalx.verify.compile=true
+
+# Fail the build on any issue
+mvn fractalx:verify -Dfractalx.verify.failBuild=true
+
+# Generate Spring context smoke tests
+mvn fractalx:verify -Dfractalx.verify.smokeTests=true
+
+# One-shot: decompose + full verify
+mvn fractalx:decompose fractalx:verify -Dfractalx.verify.compile=true -Dfractalx.verify.failBuild=true
+```
 
 | Level | Checks |
 |-------|--------|
-| 1 | Structural — required files exist, package structure is valid |
-| 2 | NetScope compatibility — client/server interfaces are compatible |
-| 3 | Port conflicts, cross-boundary imports, REST API conventions, Dockerfile structure |
-| 4 | Advanced — service dependency graph, SQL schema, transaction boundaries, secret leaks, config property coverage |
+| 1 | Structural — required files, package structure, Dockerfiles, docker-compose |
+| 2 | NetScope compatibility — `@NetScopeClient` interfaces match `@NetworkPublic` server methods |
+| 3 | Port conflicts, cross-boundary imports, REST API conventions |
+| 4 | Service dependency graph, SQL schema, transaction boundaries, secret leaks, config coverage |
+| 5 | Compilation (opt-in) — `mvn compile` on every generated service |
+| 6 | Smoke test generation (opt-in) — Spring context load test per service |
 
-Generated services appear under:
+---
+
+### `fractalx:services` — List generated services
+
+Shows all services in the output directory with their ports and Docker status.
 
 ```bash
-target/generated-services/
+mvn fractalx:services
+```
+
+---
+
+### `fractalx:ps` — Show running services
+
+Port-based check of which generated services are currently up.
+
+```bash
+mvn fractalx:ps
+```
+
+---
+
+### `fractalx:run` — Start services
+
+Starts all generated services (via `start-all.sh` or individual start scripts).
+
+```bash
+# Start all services
+mvn fractalx:run
+
+# Start a specific service
+mvn fractalx:run -Dfractalx.service=order-service
+```
+
+---
+
+### `fractalx:stop` — Stop services
+
+Stops running services by killing the process bound to each service port.
+
+```bash
+# Stop all services
+mvn fractalx:stop
+
+# Stop a specific service
+mvn fractalx:stop -Dfractalx.service=order-service
+```
+
+---
+
+### `fractalx:restart` — Restart services
+
+Stops then restarts services (stop + run).
+
+```bash
+# Restart all
+mvn fractalx:restart
+
+# Restart a specific service
+mvn fractalx:restart -Dfractalx.service=payment-service
+```
+
+---
+
+### Typical workflow
+
+```bash
+# 1. Decompose your monolith
+mvn fractalx:decompose
+
+# 2. Verify generated output
+mvn fractalx:verify
+
+# 3. See what was generated
+mvn fractalx:services
+
+# 4. Start everything
+mvn fractalx:run
+
+# 5. Check what's running
+mvn fractalx:ps
+
+# 6. Restart a single service after code change
+mvn fractalx:restart -Dfractalx.service=order-service
+
+# 7. Stop all
+mvn fractalx:stop
 ```
 
 ---
@@ -267,7 +383,7 @@ target/generated-services/
 ## 8. Generated Output
 
 ```
-target/generated-services/
+fractalx-output/
 ├── fractalx-registry/          # Service discovery registry (start first)
 ├── order-service/              # Generated microservice
 │   ├── pom.xml
@@ -311,7 +427,7 @@ target/generated-services/
 ### One command (recommended)
 
 ```bash
-cd target/generated-services
+cd fractalx-output
 ./start-all.sh
 ```
 
@@ -354,7 +470,7 @@ cd admin-service && mvn spring-boot:run
 A `docker-compose.yml` is generated at the root of the output directory. It includes all services plus the full observability stack.
 
 ```bash
-cd target/generated-services
+cd fractalx-output
 docker compose up --build
 ```
 
@@ -756,7 +872,7 @@ fractalx:
 
 ```bash
 # Option A — Maven run flag
-cd target/generated-services/admin-service
+cd fractalx-output/admin-service
 mvn spring-boot:run -Dspring-boot.run.profiles=db
 
 # Option B — environment variable
