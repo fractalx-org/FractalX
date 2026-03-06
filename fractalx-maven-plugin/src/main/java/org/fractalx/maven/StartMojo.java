@@ -32,7 +32,7 @@ public class StartMojo extends FractalxBaseMojo {
 
     /** Optional: name of a single service to start. If blank, starts all. */
     @Parameter(property = "fractalx.service", defaultValue = "")
-    private String service;
+    private String service = "";
 
     @Override
     public void execute() throws MojoExecutionException {

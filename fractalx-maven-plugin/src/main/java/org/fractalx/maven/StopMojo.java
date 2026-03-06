@@ -32,7 +32,7 @@ public class StopMojo extends FractalxBaseMojo {
 
     /** Optional: name of a single service to stop. If blank, stops all. */
     @Parameter(property = "fractalx.service", defaultValue = "")
-    private String service;
+    private String service = "";
 
     @Override
     public void execute() throws MojoExecutionException {
