@@ -885,10 +885,10 @@ class AdminTemplateGenerator {
                                 <div class="card-bd table-wrap">
                                     <table class="table table-sm mb-0">
                                         <thead><tr>
-                                            <th>Service</th><th>Schemas</th><th>Health</th>
+                                            <th>Service</th><th>Schemas</th><th>Health</th><th></th>
                                         </tr></thead>
                                         <tbody id="databases-tbody">
-                                            <tr><td colspan="3" class="text-muted p-3">Loading…</td></tr>
+                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -1743,7 +1743,21 @@ class AdminTemplateGenerator {
                                 const stepsList = (s.steps||[]).map((st, i) => {
                                     const parts = st.split(':');
                                     const svc = parts[0], method = parts[1] || st;
-                                    return `<div style="font-size:11px;padding:1px 0"><span style="color:#9ca3af">${i+1}.</span> <span style="color:#6366f1">${svc}</span> → <strong>${method}</strong></div>`;
+                                    const compEntry = (s.compensationSteps||[])[i] || '';
+                                    const compMethod = compEntry ? (compEntry.split(':')[1] || compEntry) : '';
+                                    const detailId = `sd-${s.sagaId.replace(/[^a-z0-9]/gi,'')}-${i}`;
+                                    return `<div style="font-size:11px;padding:2px 0;cursor:pointer;user-select:none" onclick="toggleStepDetail('${detailId}')">
+                                        <span style="color:#9ca3af">${i+1}.</span>
+                                        <span style="color:#6366f1">${svc}</span> → <strong>${method}</strong>
+                                        ${compMethod ? `<span style="color:#f59e0b;font-size:10px;margin-left:4px" title="Compensation: ${compMethod}">↩</span>` : ''}
+                                    </div>
+                                    <div id="${detailId}" style="display:none;background:#f8faff;border-left:3px solid #6366f1;padding:5px 10px;margin:1px 0 3px 14px;border-radius:0 4px 4px 0;font-size:10.5px">
+                                        <div><span class="text-muted">Service:</span> <strong>${svc}</strong></div>
+                                        <div><span class="text-muted">Method:</span> <code style="font-size:10px">${method}</code></div>
+                                        ${compMethod
+                                            ? `<div><span class="text-muted">Compensation:</span> <code style="font-size:10px;color:#f59e0b">↩ ${compMethod}</code></div>`
+                                            : `<div class="text-muted" style="font-style:italic">No compensation defined</div>`}
+                                    </div>`;
                                 }).join('');
                                 tbody.innerHTML += `<tr>
                                     <td><code style="font-size:12px">${s.sagaId}</code></td>
@@ -1766,15 +1780,19 @@ class AdminTemplateGenerator {
                             tbody.innerHTML = '';
                             dbs.forEach(db => {
                                 const h = db.health || 'UNKNOWN';
+                                const extra = db.instanceCount !== undefined
+                                    ? `<td class="text-muted small">${db.instanceCount >= 0 ? db.instanceCount + ' rows' : '—'}</td>`
+                                    : '<td></td>';
                                 tbody.innerHTML += `<tr>
                                     <td>${db.service}</td>
                                     <td><small>${db.schemas || '-'}</small></td>
                                     <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'} small">${h}</span></td>
+                                    ${extra}
                                 </tr>`;
                             });
                         }).catch(() => {
                             document.getElementById('databases-tbody').innerHTML =
-                                '<tr><td colspan="3" class="text-muted">DB health unavailable</td></tr>';
+                                '<tr><td colspan="4" class="text-muted">DB health unavailable</td></tr>';
                         });
 
                     fetch('/api/data/outbox')
@@ -1882,6 +1900,42 @@ class AdminTemplateGenerator {
                     let payload = '—';
                     try { payload = JSON.stringify(JSON.parse(inst.payload||'{}'), null, 2); } catch(e) { payload = inst.payload||'—'; }
 
+                    // Derive compensation actions taken (only for FAILED/COMPENSATING sagas)
+                    let compensationHtml = '';
+                    if (inst.status === 'FAILED' || inst.status === 'COMPENSATING') {
+                        const compSteps = inst.compensationSteps || [];
+                        const completedIdxs = (inst.stepProgress || [])
+                            .map((sp, i) => ({...sp, idx: i}))
+                            .filter(sp => sp.status === 'COMPLETED')
+                            .reverse(); // compensations run in reverse order
+                        if (completedIdxs.length > 0) {
+                            const rows = completedIdxs.map(sp => {
+                                const compEntry = compSteps[sp.idx] || '';
+                                const compParts = compEntry.split(':');
+                                const compSvc    = compParts[0] || sp.step.split(':')[0];
+                                const compMethod = compParts[1] || compEntry;
+                                const fwdMethod  = sp.step.split(':')[1] || sp.step;
+                                return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #fef3c7">
+                                    <span style="width:22px;height:22px;border-radius:50%;background:#f59e0b20;display:flex;align-items:center;justify-content:center;color:#f59e0b;font-size:13px;flex-shrink:0">↩</span>
+                                    <div style="flex:1">
+                                        <div style="font-size:12px;font-weight:500">${compMethod || '—'}</div>
+                                        <div style="font-size:10px;color:#6b7280">${compSvc} — compensates <code style="font-size:10px">${fwdMethod}</code></div>
+                                    </div>
+                                </div>`;
+                            }).join('');
+                            compensationHtml = `<div style="margin-bottom:16px">
+                                <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:#d97706">
+                                    <i class="fas fa-undo-alt me-1"></i>Compensation Actions Taken (${completedIdxs.length})
+                                </div>
+                                <div style="border:1px solid #fde68a;border-radius:8px;padding:0 12px;background:#fffbeb">${rows}</div>
+                            </div>`;
+                        } else {
+                            compensationHtml = `<div style="margin-bottom:16px;padding:10px 12px;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;font-size:12px;color:#92400e">
+                                <i class="fas fa-info-circle me-1"></i>No compensation actions taken — saga failed at first step.
+                            </div>`;
+                        }
+                    }
+
                     document.getElementById('instance-detail-body').innerHTML = `
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #f3f4f6">
                             <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">SAGA ID</div><code style="font-size:13px">${inst.sagaId||'—'}</code></div>
@@ -1892,6 +1946,7 @@ class AdminTemplateGenerator {
                             <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">LAST UPDATED</div><span style="font-size:12px">${fmtTs(inst.updatedAt)}</span></div>
                         </div>
                         ${inst.errorMessage ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;margin-bottom:16px;font-size:12px;color:#dc2626"><strong>Error:</strong> ${inst.errorMessage}</div>` : ''}
+                        ${compensationHtml}
                         <div style="margin-bottom:16px">
                             <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:#374151">Step Execution (${(inst.stepProgress||[]).length} steps)</div>
                             <div style="border:1px solid #e5e7eb;border-radius:8px;padding:0 12px">${stepsHtml||'<div class="text-muted small p-3 text-center">No step data</div>'}</div>
@@ -1905,6 +1960,11 @@ class AdminTemplateGenerator {
 
                 function closeInstancesPanel() {
                     document.getElementById('instances-panel').style.display = 'none';
+                }
+
+                function toggleStepDetail(id) {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
                 }
                 """;
     }
