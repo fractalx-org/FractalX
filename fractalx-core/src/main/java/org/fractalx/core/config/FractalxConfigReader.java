@@ -117,7 +117,14 @@ public class FractalxConfigReader {
             int port = 0;
             Object p = svc.get("port");
             if (p instanceof Number n) port = n.intValue();
-            result.put(name, new FractalxConfig.ServiceOverride(port));
+            boolean tracingEnabled = true;
+            Object tracingObj = svc.get("tracing");
+            if (tracingObj instanceof Map<?, ?> tracingMap) {
+                Object enabledVal = tracingMap.get("enabled");
+                if (enabledVal instanceof Boolean b) tracingEnabled = b;
+                else if ("false".equalsIgnoreCase(String.valueOf(enabledVal))) tracingEnabled = false;
+            }
+            result.put(name, new FractalxConfig.ServiceOverride(port, tracingEnabled));
         });
         return result;
     }

@@ -36,6 +36,9 @@ import java.util.Map;
  *         url: jdbc:mysql://db-host:3306/order_db
  *         username: root
  *         password: secret
+ *     payment-service:
+ *       tracing:
+ *         enabled: false   # disables OTel + Jaeger for this service only
  * </pre>
  */
 public record FractalxConfig(
@@ -50,7 +53,7 @@ public record FractalxConfig(
 ) {
 
     /** Per-service overrides read from fractalx-config.yml. */
-    public record ServiceOverride(int port) {
+    public record ServiceOverride(int port, boolean tracingEnabled) {
         public boolean hasPort() { return port > 0; }
     }
 
@@ -73,5 +76,15 @@ public record FractalxConfig(
     public int portFor(String serviceName, int defaultPort) {
         ServiceOverride ov = serviceOverrides.get(serviceName);
         return (ov != null && ov.hasPort()) ? ov.port() : defaultPort;
+    }
+
+    /**
+     * Returns {@code false} only when the service explicitly sets
+     * {@code tracing.enabled: false} in its fractalx-config.yml services block.
+     * Defaults to {@code true} for all services.
+     */
+    public boolean isTracingEnabled(String serviceName) {
+        ServiceOverride ov = serviceOverrides.get(serviceName);
+        return ov == null || ov.tracingEnabled();
     }
 }
