@@ -197,6 +197,7 @@ class AdminServicesDetailGenerator {
                 import org.springframework.web.client.RestTemplate;
 
                 import java.util.*;
+                import java.util.Set;
 
                 /**
                  * REST API for the Services section of the admin dashboard.
@@ -246,13 +247,24 @@ class AdminServicesDetailGenerator {
                         return ResponseEntity.ok(result);
                     }
 
-                    /** Full detail for one service: health, metrics snapshot, dependencies, commands. */
+                    /**
+                     * Returns a parsed health summary for a single service.
+                     * Distinguishes between the service itself being down vs a dependency being unavailable.
+                     */
+                    @GetMapping("/{name}/health-summary")
+                    public ResponseEntity<Map<String, Object>> getHealthSummary(@PathVariable("name") String name) {
+                        return registry.findByName(name)
+                                .map(meta -> ResponseEntity.ok(fetchHealthStatus(meta)))
+                                .orElse(ResponseEntity.notFound().build());
+                    }
+
+                    /** Full detail for one service: structured health breakdown, dependencies, commands. */
                     @GetMapping("/{name}/detail")
                     public ResponseEntity<Map<String, Object>> getServiceDetail(@PathVariable("name") String name) {
                         return registry.findByName(name).map(meta -> {
                             Map<String, Object> detail = new LinkedHashMap<>();
                             detail.put("meta",       meta);
-                            detail.put("health",     fetchHealthFull(meta));
+                            detail.put("health",     fetchHealthStatus(meta));
                             detail.put("commands",   buildCommands(name));
                             detail.put("deployment", deploymentTracker.getLatest(name));
                             return ResponseEntity.ok(detail);
@@ -313,25 +325,107 @@ class AdminServicesDetailGenerator {
 
                     // -------------------------------------------------------------------------
 
-                    private String fetchHealthStatus(ServiceMetaRegistry.ServiceMeta meta) {
-                        if (meta.port() == 0) return "UNKNOWN";
+                    /**
+                     * Fetches and classifies actuator health.
+                     * Returns:
+                     *   processStatus  — RUNNING | UNREACHABLE (can we reach the service at all?)
+                     *   status         — UP | DEGRADED | DOWN   (smart aggregate)
+                     *   degraded       — true when process is RUNNING but a dependency is DOWN
+                     *   components     — map of name → {status, category, error?, description?}
+                     */
+                    @SuppressWarnings("unchecked")
+                    private Map<String, Object> fetchHealthStatus(ServiceMetaRegistry.ServiceMeta meta) {
+                        if (meta.port() == 0) {
+                            return buildResult("UNREACHABLE", "UNKNOWN", false, Map.of(), null);
+                        }
                         try {
-                            String resp = restTemplate.getForObject(
-                                    serviceBaseUrl(meta) + "/actuator/health", String.class);
-                            return (resp != null && resp.contains("UP")) ? "UP" : "DOWN";
+                            Map<String, Object> raw = restTemplate.getForObject(
+                                    serviceBaseUrl(meta) + "/actuator/health", Map.class);
+                            if (raw == null) {
+                                return buildResult("UNREACHABLE", "DOWN", false, Map.of(), null);
+                            }
+                            return classifyHealth(raw);
                         } catch (Exception e) {
-                            return "DOWN";
+                            String msg = e.getMessage() != null ? e.getMessage() : "unreachable";
+                            return buildResult("UNREACHABLE", "DOWN", false, Map.of(), msg);
                         }
                     }
 
-                    private Object fetchHealthFull(ServiceMetaRegistry.ServiceMeta meta) {
-                        if (meta.port() == 0) return Map.of("status", "UNKNOWN");
-                        try {
-                            return restTemplate.getForObject(
-                                    serviceBaseUrl(meta) + "/actuator/health", Object.class);
-                        } catch (Exception e) {
-                            return Map.of("status", "DOWN", "error", e.getMessage());
+                    @SuppressWarnings("unchecked")
+                    private Map<String, Object> classifyHealth(Map<String, Object> raw) {
+                        String overall = String.valueOf(raw.getOrDefault("status", "DOWN")).toUpperCase();
+                        Map<String, Object> rawComps = raw.containsKey("components")
+                                ? (Map<String, Object>) raw.get("components") : Map.of();
+
+                        // Process indicators — these tell us the JVM/Spring context is alive
+                        Set<String> processKeys  = Set.of("ping", "livenessState", "readinessState");
+                        // Resource indicators — own infrastructure (disk, DB, refresh scope)
+                        Set<String> resourceKeys = Set.of("diskSpace", "refreshScope", "db",
+                                "mongo", "redis", "elasticsearch", "cassandra", "solr", "neo4j");
+
+                        // selfStatus: DOWN only if a process-level indicator is explicitly DOWN
+                        String selfStatus = "UP";
+                        for (String key : processKeys) {
+                            Object comp = rawComps.get(key);
+                            if (comp instanceof Map<?,?> cm) {
+                                Object sv = cm.get("status");
+                                String s = sv != null ? String.valueOf(sv).toUpperCase() : "UP";
+                                if ("DOWN".equals(s) || "OUT_OF_SERVICE".equals(s)) {
+                                    selfStatus = "DOWN"; break;
+                                }
+                            }
                         }
+                        // If we got a response but have no components at all, service is reachable
+                        if (rawComps.isEmpty()) selfStatus = "UP".equals(overall) ? "UP" : "DOWN";
+
+                        boolean degraded = "UP".equals(selfStatus) && !"UP".equals(overall);
+                        String displayStatus = degraded ? "DEGRADED" : overall;
+
+                        // Build enriched component map: name → {status, category, error?, description?}
+                        Map<String, Map<String, String>> compMap = new LinkedHashMap<>();
+                        for (Map.Entry<String, Object> entry : rawComps.entrySet()) {
+                            String name = entry.getKey();
+                            if (!(entry.getValue() instanceof Map<?,?> cm)) continue;
+
+                            Object sv = cm.get("status");
+                            String st = sv != null ? String.valueOf(sv).toUpperCase() : "UNKNOWN";
+
+                            String category = processKeys.contains(name) ? "process"
+                                    : resourceKeys.contains(name) ? "resource" : "dependency";
+
+                            Map<String, String> detail = new LinkedHashMap<>();
+                            detail.put("status",   st);
+                            detail.put("category", category);
+
+                            // Extract error message from details
+                            Object details = cm.get("details");
+                            if (details instanceof Map<?,?> dm) {
+                                Object err  = dm.get("error");
+                                Object desc = dm.get("description");
+                                if (err  != null) detail.put("error",       String.valueOf(err));
+                                if (desc != null) detail.put("description", String.valueOf(desc));
+                            }
+                            // description at component level
+                            Object compDesc = cm.get("description");
+                            if (compDesc != null && !detail.containsKey("description")) {
+                                detail.put("description", String.valueOf(compDesc));
+                            }
+                            compMap.put(name, detail);
+                        }
+
+                        return buildResult("RUNNING", displayStatus, degraded, compMap, null);
+                    }
+
+                    private Map<String, Object> buildResult(String processStatus, String status,
+                                                             boolean degraded,
+                                                             Map<String, ?> components, String error) {
+                        Map<String, Object> r = new LinkedHashMap<>();
+                        r.put("processStatus", processStatus);
+                        r.put("status",        status);
+                        r.put("degraded",      degraded);
+                        r.put("components",    components);
+                        if (error != null) r.put("error", error);
+                        return r;
                     }
 
                     /** Returns the base URL for a service, using container hostname in Docker. */
