@@ -283,7 +283,36 @@ class AdminTemplateGenerator {
                         /* ── Badges ── */
                         .badge-up{background:#dcfce7!important;color:#15803d!important}
                         .badge-down{background:#fee2e2!important;color:#b91c1c!important}
+                        .badge-degraded{background:#fef3c7!important;color:#92400e!important}
                         .badge-unknown{background:#f3f4f6!important;color:#6b7280!important}
+                        /* Process status pills */
+                        .proc-pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;
+                                   padding:2px 8px;border-radius:20px;letter-spacing:.02em}
+                        .proc-pill.running{background:#dcfce7;color:#15803d;border:1px solid #bbf7d0}
+                        .proc-pill.unreachable{background:#fee2e2;color:#b91c1c;border:1px solid #fecaca}
+                        .proc-pill.unknown{background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb}
+                        /* Component pills */
+                        .comp-pill{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;
+                                   border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;margin:1px;
+                                   cursor:default;transition:opacity .15s}
+                        .comp-pill:hover{opacity:.8}
+                        .comp-pill.up{background:#f0fdf4;border-color:#bbf7d0;color:#15803d}
+                        .comp-pill.down{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+                        .comp-pill.unknown{background:#f3f4f6;border-color:#e5e7eb;color:#9ca3af}
+                        .comp-pill.degraded{background:#fffbeb;border-color:#fde68a;color:#92400e}
+                        /* Health card in detail modal */
+                        .health-card{border-radius:10px;border:1px solid #e5e7eb;overflow:hidden;background:#fff}
+                        .health-card-header{padding:10px 14px;background:#f9fafb;border-bottom:1px solid #e5e7eb;
+                                            display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px}
+                        .comp-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;
+                                  gap:8px;padding:7px 14px;border-bottom:1px solid #f1f5f9;font-size:12px}
+                        .comp-row:last-child{border-bottom:none}
+                        .comp-row:hover{background:#fafafa}
+                        .comp-cat-tag{font-size:9px;padding:1px 5px;border-radius:8px;font-weight:600;
+                                      text-transform:uppercase;letter-spacing:.04em}
+                        .comp-cat-tag.process{background:#e0e7ff;color:#3730a3}
+                        .comp-cat-tag.resource{background:#e0f2fe;color:#0369a1}
+                        .comp-cat-tag.dependency{background:#fef3c7;color:#92400e}
                         .badge.bg-success{background:#dcfce7!important;color:#15803d!important}
                         .badge.bg-danger{background:#fee2e2!important;color:#b91c1c!important}
                         .badge.bg-warning{background:#fef9c3!important;color:#854d0e!important;color:#854d0e}
@@ -1439,6 +1468,59 @@ class AdminTemplateGenerator {
 
     private String buildScriptsNavAndOverview() {
         return """
+                // ── Health helpers ─────────────────────────────────────────────────────────
+                function healthStatus(h) {
+                    if (!h) return 'UNKNOWN';
+                    return typeof h === 'object' ? (h.status || 'UNKNOWN') : String(h);
+                }
+
+                function processBadge(h) {
+                    const ps = (h && typeof h === 'object') ? (h.processStatus || 'UNKNOWN') : 'UNKNOWN';
+                    const cls  = ps === 'RUNNING'     ? 'running'
+                               : ps === 'UNREACHABLE' ? 'unreachable' : 'unknown';
+                    const icon = ps === 'RUNNING'     ? '●'
+                               : ps === 'UNREACHABLE' ? '○' : '?';
+                    return `<span class="proc-pill ${cls}" title="Process status">${icon} ${ps}</span>`;
+                }
+
+                function healthBadge(h, large) {
+                    const s   = healthStatus(h);
+                    const sz  = large ? ' fs-6' : ' small';
+                    const cls = s==='UP'       ? 'badge-up'
+                              : s==='DEGRADED' ? 'badge-degraded'
+                              : s==='DOWN'     ? 'badge-down'
+                              :                  'badge-unknown';
+                    const tip = (typeof h === 'object' && h.degraded)
+                        ? ' title="Service process is RUNNING — a dependency is unreachable"' : '';
+                    const icon = s==='UP' ? '✓' : s==='DEGRADED' ? '⚠' : s==='DOWN' ? '✗' : '?';
+                    return `<span class="badge ${cls}${sz}"${tip}>${icon} ${s}</span>`;
+                }
+
+                /** Compact row: [● RUNNING] [⚠ DEGRADED] */
+                function healthCell(h) {
+                    return `<div style="display:flex;flex-direction:column;gap:3px">
+                        <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+                            ${processBadge(h)} ${healthBadge(h)}
+                        </div>
+                        ${componentPills(h)}
+                    </div>`;
+                }
+
+                function componentPills(h) {
+                    if (!h || typeof h !== 'object' || !h.components) return '';
+                    const comps = h.components;
+                    if (!comps || Object.keys(comps).length === 0) return '';
+                    return '<div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:2px">' +
+                        Object.entries(comps).map(([name, detail]) => {
+                            const st  = typeof detail === 'object' ? (detail.status || '?') : String(detail);
+                            const err = typeof detail === 'object' ? (detail.error || detail.description || '') : '';
+                            const cls = st==='UP' ? 'up' : st==='DOWN' ? 'down' : 'unknown';
+                            const dot = st==='UP' ? '●' : st==='DOWN' ? '○' : '◌';
+                            const tip = err ? `${name}: ${st} — ${err}` : `${name}: ${st}`;
+                            return `<span class="comp-pill ${cls}" title="${escHtml(tip)}">${dot} ${name}</span>`;
+                        }).join('') + '</div>';
+                }
+
                 let currentSection = 'overview';
 
                 function showSection(name) {
@@ -1492,16 +1574,16 @@ class AdminTemplateGenerator {
                     tbody.innerHTML = '';
                     services.forEach(s => {
                         const m = s.meta;
-                        const h = s.health || 'UNKNOWN';
                         const dep = s.deployment ? s.deployment.version || '?' : '?';
                         const depStr = (m.dependencies && m.dependencies.length)
                             ? m.dependencies.join(', ') : '<span class="text-muted">none</span>';
+                        const pills = componentPills(s.health);
                         tbody.innerHTML += `<tr>
                             <td><strong>${m.name}</strong></td>
                             <td><span class="badge bg-light text-dark small">${m.type}</span></td>
                             <td>${m.port || '-'}</td>
                             <td>${m.grpcPort || '-'}</td>
-                            <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'} small">${h}</span></td>
+                            <td style="min-width:180px">${healthCell(s.health)}</td>
                             <td><small>${depStr}</small></td>
                             <td><small>v${dep}</small></td>
                             <td>
@@ -1527,40 +1609,117 @@ class AdminTemplateGenerator {
 
                 function showServiceDetailModal(name) {
                     document.getElementById('svc-detail-title').textContent = name;
-                    document.getElementById('svc-detail-body').innerHTML = '<div class="text-muted">Loading...</div>';
+                    document.getElementById('svc-detail-body').innerHTML = '<div class="text-muted p-3">Loading…</div>';
                     const modal = new bootstrap.Modal(document.getElementById('serviceDetailModal'));
                     modal.show();
                     fetch('/api/services/' + name + '/detail')
                         .then(r => r.json()).then(d => {
-                            const m = d.meta;
-                            const h = d.health || {};
-                            const dep = d.deployment || {};
+                            const m    = d.meta;
+                            const rawH = d.health || {};
+                            const dep  = d.deployment || {};
                             const stages = dep.stages || [];
-                            const stageHtml = stages.map(s =>
-                                `<span class="badge bg-success me-1">${s.name} \u2713</span>`).join('');
+                            const stageHtml = stages.map(sg =>
+                                `<span class="badge bg-success me-1">${sg.name} ✓</span>`).join('');
+
+                            // Health breakdown
+                            const ps         = rawH.processStatus || 'UNKNOWN';
+                            const overallSt  = rawH.status        || 'UNKNOWN';
+                            const isDegraded = rawH.degraded === true;
+                            const connErr    = rawH.error || null;
+                            const comps      = rawH.components || {};
+
+                            // Build component rows grouped by category
+                            const catOrder = ['process','resource','dependency'];
+                            const catLabel = {process:'Process',resource:'Resource',dependency:'Dependency'};
+                            const compEntries = Object.entries(comps);
+                            const compRows = catOrder.flatMap(cat => {
+                                const rows = compEntries.filter(([,v]) =>
+                                    (typeof v === 'object' ? v.category : 'dependency') === cat);
+                                if (!rows.length) return [];
+                                return [
+                                    `<div style="padding:4px 14px 2px;font-size:10px;font-weight:700;
+                                        text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;
+                                        background:#f9fafb;border-bottom:1px solid #f1f5f9">${catLabel[cat]}</div>`,
+                                    ...rows.map(([name, detail]) => {
+                                        const st  = typeof detail === 'object' ? (detail.status||'?') : String(detail);
+                                        const err = typeof detail === 'object' ? (detail.error||detail.description||'') : '';
+                                        const stCls = st==='UP' ? 'badge-up' : st==='DOWN' ? 'badge-down' : 'badge-unknown';
+                                        const icon  = st==='UP' ? '✓' : st==='DOWN' ? '✗' : '?';
+                                        return `<div class="comp-row">
+                                            <span class="comp-cat-tag ${cat}">${cat[0].toUpperCase()}</span>
+                                            <span style="font-family:monospace;font-size:12px">${name}
+                                                ${err ? `<br><span style="font-size:10px;color:#9ca3af">${escHtml(err)}</span>` : ''}
+                                            </span>
+                                            <span class="badge ${stCls} small">${icon} ${st}</span>
+                                        </div>`;
+                                    })
+                                ];
+                            }).join('');
+
+                            const psIcon  = ps==='RUNNING' ? '●' : '○';
+                            const psCls   = ps==='RUNNING' ? '#15803d' : '#b91c1c';
+                            const psBg    = ps==='RUNNING' ? '#f0fdf4' : '#fef2f2';
+                            const stIcon  = overallSt==='UP' ? '✓' : overallSt==='DEGRADED' ? '⚠' : '✗';
+                            const stCl    = overallSt==='UP' ? '#15803d' : overallSt==='DEGRADED' ? '#92400e' : '#b91c1c';
+                            const stBg    = overallSt==='UP' ? '#f0fdf4' : overallSt==='DEGRADED' ? '#fffbeb' : '#fef2f2';
+
                             document.getElementById('svc-detail-body').innerHTML = `
                                 <div class="row g-3">
-                                    <div class="col-md-6">
-                                        <h6 class="text-muted mb-1">Service Info</h6>
-                                        <table class="table table-sm">
-                                            <tr><th>Name</th><td>${m.name}</td></tr>
-                                            <tr><th>Type</th><td>${m.type}</td></tr>
-                                            <tr><th>HTTP Port</th><td>${m.port}</td></tr>
-                                            <tr><th>gRPC Port</th><td>${m.grpcPort || '-'}</td></tr>
-                                            <tr><th>Package</th><td><small>${m.packageName || '-'}</small></td></tr>
+                                    <div class="col-md-5">
+                                        <h6 class="text-muted mb-2" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em">Service Info</h6>
+                                        <table class="table table-sm mb-0" style="font-size:12px">
+                                            <tr><th>Name</th><td><strong>${m.name}</strong></td></tr>
+                                            <tr><th>Type</th><td><span class="badge bg-light text-dark">${m.type}</span></td></tr>
+                                            <tr><th>HTTP</th><td>:${m.port}</td></tr>
+                                            <tr><th>gRPC</th><td>${m.grpcPort ? ':'+m.grpcPort : '—'}</td></tr>
+                                            <tr><th>Package</th><td><code style="font-size:10px">${m.packageName||'—'}</code></td></tr>
                                         </table>
+
+                                        <h6 class="text-muted mt-3 mb-2" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em">Status</h6>
+                                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                                            <div style="border-radius:8px;padding:10px;background:${psBg};border:1px solid ${psCls}22;text-align:center">
+                                                <div style="font-size:20px;color:${psCls}">${psIcon}</div>
+                                                <div style="font-size:10px;color:#6b7280;margin:2px 0">PROCESS</div>
+                                                <div style="font-size:12px;font-weight:700;color:${psCls}">${ps}</div>
+                                            </div>
+                                            <div style="border-radius:8px;padding:10px;background:${stBg};border:1px solid ${stCl}22;text-align:center">
+                                                <div style="font-size:20px;color:${stCl}">${stIcon}</div>
+                                                <div style="font-size:10px;color:#6b7280;margin:2px 0">HEALTH</div>
+                                                <div style="font-size:12px;font-weight:700;color:${stCl}">${overallSt}</div>
+                                            </div>
+                                        </div>
+                                        ${isDegraded ? `
+                                        <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
+                                            background:#fffbeb;border:1px solid #fde68a;font-size:11px;color:#92400e">
+                                            <strong>⚠ Running with degraded dependencies</strong><br>
+                                            The service process is healthy. One or more external services it depends on are currently unreachable.
+                                        </div>` : ''}
+                                        ${connErr ? `
+                                        <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
+                                            background:#fef2f2;border:1px solid #fecaca;font-size:11px;color:#b91c1c">
+                                            <strong>✗ Unreachable</strong><br>${escHtml(connErr)}
+                                        </div>` : ''}
                                     </div>
-                                    <div class="col-md-6">
-                                        <h6 class="text-muted mb-1">Health</h6>
-                                        <pre class="bg-light p-2 rounded small" style="max-height:120px;overflow:auto">${JSON.stringify(h, null, 2)}</pre>
+                                    <div class="col-md-7">
+                                        <h6 class="text-muted mb-2" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em">Health Components</h6>
+                                        <div class="health-card">
+                                            <div class="health-card-header">
+                                                <i class="fas fa-heartbeat" style="color:#10b981"></i>
+                                                Actuator Components
+                                                <span class="ms-auto" style="font-size:10px;font-weight:400;color:#9ca3af">
+                                                    ${Object.keys(comps).length} checked
+                                                </span>
+                                            </div>
+                                            ${compRows || '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:12px">No component data available</div>'}
+                                        </div>
+                                        <h6 class="text-muted mt-3 mb-1" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em">Deployment</h6>
+                                        <div>${stageHtml || '<span class="text-muted small">No stage data</span>'}</div>
                                     </div>
                                 </div>
-                                <h6 class="text-muted mb-1 mt-2">Deployment Stages</h6>
-                                <div>${stageHtml || '<span class="text-muted small">No stage data</span>'}</div>
                             `;
                         }).catch(() => {
                             document.getElementById('svc-detail-body').innerHTML =
-                                '<div class="text-danger">Failed to load service detail</div>';
+                                '<div class="text-danger p-3">Failed to load service detail</div>';
                         });
                 }
 
@@ -3597,15 +3756,17 @@ class AdminTemplateGenerator {
                 function loadOverview() {
                     fetch('/api/services/all')
                         .then(r => r.json()).then(services => {
-                            let up = 0, down = 0;
+                            let up = 0, degraded = 0, down = 0;
                             const tbody = document.getElementById('overview-tbody');
                             tbody.innerHTML = '';
                             services.forEach(s => {
-                                const h = s.health || 'UNKNOWN';
-                                if (h === 'UP') up++; else down++;
+                                const st = healthStatus(s.health);
+                                if (st === 'UP') up++;
+                                else if (st === 'DEGRADED') { degraded++; up++; }
+                                else down++;
                                 tbody.innerHTML += `<tr>
                                     <td><strong>${s.meta.name}</strong></td>
-                                    <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'}">${h}</span></td>
+                                    <td style="min-width:160px">${healthCell(s.health)}</td>
                                     <td>${s.meta.port || '-'}</td>
                                     <td><span style="color:#6366f1;font-size:12px">${s.meta.grpcPort || '-'}</span></td>
                                     <td><span class="badge bg-light text-dark">${s.meta.type}</span></td>
