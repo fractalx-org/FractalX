@@ -11,19 +11,22 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Scanner;
 
 /**
  * Interactive CLI menu — shows the FRACTALX banner, lets the user navigate
- * commands with arrow keys, executes the selected one, then returns to the
- * menu to ask what's next. Choose Exit (or press q / Ctrl-C) to leave.
+ * commands with arrow keys, executes the selected one, then returns to ask
+ * what's next. Start / stop / restart show a service sub-picker first.
+ * Choose Exit (or press q / Ctrl-C) to leave.
  *
  * <pre>
  *   mvn fractalx:menu
  * </pre>
- *
- * Controls: ↑↓ (or j/k) to move, Enter to select, q or Ctrl-C to quit.
  */
 @Mojo(name = "menu")
 public class MenuMojo extends FractalxBaseMojo {
@@ -39,27 +42,26 @@ public class MenuMojo extends FractalxBaseMojo {
                defaultValue = "${project.basedir}/fractalx-output")
     private File outputDirectory;
 
-    // ── Menu options (Exit is rendered separately as the last item) ───────────
+    // ── Menu options (Exit rendered separately as the last item) ──────────────
 
     private static final String[] NAMES = {
-        "decompose", "verify", "start", "stop", "restart", "ps", "services", "logs"
+        "decompose", "verify", "start", "stop", "restart", "ps", "services"
     };
 
     private static final String[] DESCS = {
         "Decompose monolith into microservices",
         "Verify decomposition output",
-        "Start all generated services",
+        "Start generated services",
         "Stop running services",
         "Restart services",
         "Show service process status",
-        "List all generated services",
-        "Stream a service log file"
+        "List all generated services"
     };
 
     private static final int NAME_W =
             Arrays.stream(NAMES).mapToInt(String::length).max().orElse(8) + 3;
 
-    /** Sentinel index meaning the user chose "Exit". */
+    /** Sentinel index meaning "Exit". */
     private static final int EXIT_IDX = NAMES.length;
     /** Total selectable rows = commands + Exit. */
     private static final int TOTAL    = NAMES.length + 1;
@@ -84,12 +86,12 @@ public class MenuMojo extends FractalxBaseMojo {
             outer:
             while (true) {
 
-                // ── Show menu on alternate screen ──────────────────────────────
+                // ── Main menu on alt screen ────────────────────────────────────
                 out.print(ALT_ON);
                 out.flush();
                 drawMenu(selected);
 
-                // ── Navigation loop ────────────────────────────────────────────
+                // ── Navigate ──────────────────────────────────────────────────
                 inner:
                 while (true) {
                     int b = tty.read();
@@ -104,12 +106,11 @@ public class MenuMojo extends FractalxBaseMojo {
                                 else if (b3 == 'B') selected = (selected + 1) % TOTAL;
                             }
                         } else {
-                            // bare ESC → quit
                             out.print(ALT_OFF); out.flush();
-                            break outer;
+                            break outer;                    // bare ESC → exit menu
                         }
                     } else if (b == '\r' || b == '\n') {
-                        break inner;                  // Enter → confirmed
+                        break inner;                        // confirmed
                     } else if (b == 'q' || b == 3 || b == 4) {
                         out.print(ALT_OFF); out.flush();
                         break outer;
@@ -119,49 +120,62 @@ public class MenuMojo extends FractalxBaseMojo {
                     drawMenu(selected);
                 }
 
-                // ── Exit alt screen before running ─────────────────────────────
+                // ── Exit chosen ────────────────────────────────────────────────
+                if (selected == EXIT_IDX) {
+                    out.print(ALT_OFF); out.flush();
+                    break;
+                }
+
+                String commandName = NAMES[selected];
+
+                // ── Service sub-picker for start / stop / restart ──────────────
+                String service = "";
+                if (isServiceCommand(commandName)) {
+                    // Still on alt screen — draw the sub-picker over it.
+                    String picked = pickService(tty, commandName);
+                    if (picked == null) {
+                        // User backed out → redraw main menu (continue outer re-enters ALT_ON)
+                        continue outer;
+                    }
+                    service = picked;
+                }
+
+                // ── Exit alt screen, run command on main screen ────────────────
                 out.print(ALT_OFF);
                 out.flush();
 
-                if (selected == EXIT_IDX) break;       // Exit chosen
-
-                // ── Run command on main screen ─────────────────────────────────
                 try {
-                    invokeCommand(NAMES[selected]);
+                    invokeCommand(commandName, service);
                 } catch (MojoExecutionException e) {
                     out.println();
                     warn("Command failed: " + e.getMessage());
                 }
 
-                // Sub-mojos may restore the terminal — re-enable raw mode so
-                // the "press any key" read and next menu loop work correctly.
+                // Sub-mojos may restore the terminal; re-enable raw mode for the
+                // "press any key" read and the next menu loop.
                 enableRawMode();
 
-                // ── "Press any key to return to menu" ──────────────────────────
                 out.println();
                 out.print("  " + a(DIM) + "\u21B5  press any key to return to menu" + a(RST));
                 out.flush();
                 int k = tty.read();
                 out.println();
-                if (k == 'q' || k == 3 || k == 4) break; // q/Ctrl-C here also exits
+                if (k == 'q' || k == 3 || k == 4) break;
             }
 
         } catch (IOException ignored) {
-            // no TTY — fall through
         } finally {
             restoreTerminal();
         }
     }
 
-    // ── Menu renderer ─────────────────────────────────────────────────────────
+    // ── Main menu renderer ────────────────────────────────────────────────────
 
     private void drawMenu(int selected) {
         StringBuilder sb = new StringBuilder();
         sb.append(HOME);
-
         sb.append("\r\033[2K\r\n");
 
-        // FRACTALX banner — static at top, redrawn in-place so it never flickers
         for (int i = 0; i < BANNER.length; i++) {
             String color = i < BANNER_COLORS.length ? BANNER_COLORS[i] : "";
             sb.append("\r\033[2K").append(color).append(BANNER[i]).append(RST).append("\r\n");
@@ -171,12 +185,10 @@ public class MenuMojo extends FractalxBaseMojo {
         sb.append("\r\033[2K  ").append(DIM)
           .append("Interactive CLI  ").append(FractalxVersion.get()).append(RST).append("\r\n");
         sb.append("\r\033[2K\r\n");
-
         sb.append("\r\033[2K  ").append(DIM)
           .append("\u2191\u2193 navigate   Enter select   q quit").append(RST).append("\r\n");
         sb.append("\r\033[2K\r\n");
 
-        // Command items
         for (int i = 0; i < NAMES.length; i++) {
             boolean sel    = (i == selected);
             String  cursor = sel ? GRN + "\u25B6" + RST : " ";
@@ -187,14 +199,14 @@ public class MenuMojo extends FractalxBaseMojo {
               .append(name).append("  ").append(desc).append("\r\n");
         }
 
-        // Separator + Exit item
+        // Separator + Exit
         sb.append("\r\033[2K\r\n");
-        boolean exitSel = (selected == EXIT_IDX);
-        String exitCursor = exitSel ? RED + "\u25B6" + RST : " ";
-        String exitName   = exitSel ? RED + BLD + pad("exit", NAME_W) + RST
-                                    : DIM + pad("exit", NAME_W) + RST;
-        String exitDesc   = exitSel ? RED + "Exit interactive CLI" + RST
-                                    : DIM + "Exit interactive CLI" + RST;
+        boolean exitSel    = (selected == EXIT_IDX);
+        String  exitCursor = exitSel ? RED + "\u25B6" + RST : " ";
+        String  exitName   = exitSel ? RED + BLD + pad("exit", NAME_W) + RST
+                                     : DIM + pad("exit", NAME_W) + RST;
+        String  exitDesc   = exitSel ? RED + "Exit interactive CLI" + RST
+                                     : DIM + "Exit interactive CLI" + RST;
         sb.append("\r\033[2K  ").append(exitCursor).append("  ")
           .append(exitName).append("  ").append(exitDesc).append("\r\n");
 
@@ -203,7 +215,88 @@ public class MenuMojo extends FractalxBaseMojo {
         out.flush();
     }
 
-    // ── Numbered fallback (no ANSI / dumb terminal) ───────────────────────────
+    // ── Service sub-picker (drawn on the already-active alt screen) ───────────
+
+    /**
+     * Shows an "All services / pick one" selector on the alt screen.
+     *
+     * @return "" for All, service name for a specific service, null if user backed out.
+     */
+    private String pickService(FileInputStream tty, String commandName) throws IOException {
+        List<String> serviceNames = discoverServiceNames();
+
+        // Build option list: "All services" first, then each service
+        List<String> options = new ArrayList<>();
+        options.add("All services");
+        options.addAll(serviceNames);
+
+        int optW      = options.stream().mapToInt(String::length).max().orElse(12) + 3;
+        int sel       = 0;
+        String title  = Character.toUpperCase(commandName.charAt(0))
+                      + commandName.substring(1) + " — select service";
+
+        drawSubPicker(options, sel, optW, title);
+
+        while (true) {
+            int b = tty.read();
+
+            if (b == 27) {
+                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+                if (tty.available() > 0) {
+                    int b2 = tty.read();
+                    if (b2 == '[' && tty.available() > 0) {
+                        int b3 = tty.read();
+                        if      (b3 == 'A') sel = (sel - 1 + options.size()) % options.size();
+                        else if (b3 == 'B') sel = (sel + 1) % options.size();
+                    }
+                } else {
+                    return null;                // bare ESC → back
+                }
+            } else if (b == '\r' || b == '\n') {
+                break;                          // confirmed
+            } else if (b == 'q' || b == 3 || b == 4) {
+                return null;                    // back to main menu
+            } else if (b == 'k') sel = (sel - 1 + options.size()) % options.size();
+            else if  (b == 'j') sel = (sel + 1) % options.size();
+
+            drawSubPicker(options, sel, optW, title);
+        }
+
+        return sel == 0 ? "" : serviceNames.get(sel - 1);  // "" = All
+    }
+
+    private void drawSubPicker(List<String> options, int selected, int optW, String title) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(HOME);
+        sb.append("\r\033[2K\r\n");
+
+        for (int i = 0; i < BANNER.length; i++) {
+            String color = i < BANNER_COLORS.length ? BANNER_COLORS[i] : "";
+            sb.append("\r\033[2K").append(color).append(BANNER[i]).append(RST).append("\r\n");
+        }
+
+        sb.append("\r\033[2K\r\n");
+        sb.append("\r\033[2K  ").append(DIM)
+          .append(title).append("  ").append(FractalxVersion.get()).append(RST).append("\r\n");
+        sb.append("\r\033[2K\r\n");
+        sb.append("\r\033[2K  ").append(DIM)
+          .append("\u2191\u2193 navigate   Enter select   ESC back").append(RST).append("\r\n");
+        sb.append("\r\033[2K\r\n");
+
+        for (int i = 0; i < options.size(); i++) {
+            boolean sel    = (i == selected);
+            String  cursor = sel ? GRN + "\u25B6" + RST : " ";
+            String  name   = sel ? BLD + pad(options.get(i), optW) + RST
+                                 : DIM + pad(options.get(i), optW) + RST;
+            sb.append("\r\033[2K  ").append(cursor).append("  ").append(name).append("\r\n");
+        }
+
+        sb.append(CLR_END);
+        out.print(sb);
+        out.flush();
+    }
+
+    // ── Numbered fallback ─────────────────────────────────────────────────────
 
     private void runNumberedMenuLoop() throws MojoExecutionException {
         try (Scanner sc = new Scanner(System.in)) {
@@ -220,16 +313,54 @@ public class MenuMojo extends FractalxBaseMojo {
                 if (!sc.hasNextInt()) break;
                 int choice = sc.nextInt();
                 if (choice == 0) break;
-                if (choice >= 1 && choice <= NAMES.length) {
-                    try {
-                        invokeCommand(NAMES[choice - 1]);
-                    } catch (MojoExecutionException e) {
-                        warn("Command failed: " + e.getMessage());
-                    }
+                if (choice < 1 || choice > NAMES.length) continue;
+
+                String name    = NAMES[choice - 1];
+                String service = "";
+
+                if (isServiceCommand(name)) {
+                    List<String> svcs = discoverServiceNames();
                     out.println();
+                    out.println("  [0] All services");
+                    for (int i = 0; i < svcs.size(); i++)
+                        out.println("  [" + (i + 1) + "] " + svcs.get(i));
+                    out.println();
+                    out.print("  Select service (0 for all): ");
+                    out.flush();
+                    if (sc.hasNextInt()) {
+                        int s = sc.nextInt();
+                        if (s > 0 && s <= svcs.size()) service = svcs.get(s - 1);
+                    }
                 }
+
+                try {
+                    invokeCommand(name, service);
+                } catch (MojoExecutionException e) {
+                    warn("Command failed: " + e.getMessage());
+                }
+                out.println();
             }
         }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static boolean isServiceCommand(String name) {
+        return name.equals("start") || name.equals("stop") || name.equals("restart");
+    }
+
+    private List<String> discoverServiceNames() {
+        if (outputDirectory == null || !outputDirectory.exists()) return List.of();
+        List<String> result = new ArrayList<>();
+        try (var stream = Files.list(outputDirectory.toPath())) {
+            stream.filter(Files::isDirectory)
+                  .filter(d -> Files.exists(d.resolve("pom.xml")))
+                  .sorted()
+                  .map(Path::getFileName)
+                  .map(Path::toString)
+                  .forEach(result::add);
+        } catch (IOException ignored) {}
+        return result;
     }
 
     // ── Raw-mode helpers ──────────────────────────────────────────────────────
@@ -253,7 +384,7 @@ public class MenuMojo extends FractalxBaseMojo {
 
     // ── Mojo dispatcher ───────────────────────────────────────────────────────
 
-    private void invokeCommand(String name) throws MojoExecutionException {
+    private void invokeCommand(String name, String service) throws MojoExecutionException {
         FractalxBaseMojo mojo = switch (name) {
             case "decompose" -> new DecomposeMojo();
             case "verify"    -> new VerifyMojo();
@@ -262,15 +393,14 @@ public class MenuMojo extends FractalxBaseMojo {
             case "restart"   -> new RestartMojo();
             case "ps"        -> new PsMojo();
             case "services"  -> new ServicesMojo();
-            case "logs"      -> new LogsMojo();
             default -> throw new MojoExecutionException("Unknown command: " + name);
         };
 
-        // @Parameter defaultValue isn't applied for direct instantiation — inject manually.
         inject(mojo, "colorParam",      true);
         inject(mojo, "project",         project);
         inject(mojo, "outputDirectory", outputDirectory);
-        inject(mojo, "sourceDirectory", sourceDirectory);  // silently ignored if absent
+        inject(mojo, "sourceDirectory", sourceDirectory);
+        inject(mojo, "service",         service);        // "" = all, name = specific
         try {
             mojo.execute();
         } catch (MojoFailureException e) {

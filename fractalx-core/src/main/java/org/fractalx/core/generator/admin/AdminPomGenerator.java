@@ -70,7 +70,7 @@ class AdminPomGenerator {
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>fractalx-runtime</artifactId>
-                            <version>" + FractalxVersion.get() + "</version>
+                            <version>%s</version>
                         </dependency>
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
@@ -162,7 +162,7 @@ class AdminPomGenerator {
                         </plugins>
                     </build>
                 </project>
-                """;
+                """.formatted(FractalxVersion.get());
         Files.writeString(serviceRoot.resolve("pom.xml"), content);
         log.debug("Generated admin pom.xml");
     }
