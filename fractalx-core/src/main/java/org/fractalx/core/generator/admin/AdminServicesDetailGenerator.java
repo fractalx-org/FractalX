@@ -191,6 +191,7 @@ class AdminServicesDetailGenerator {
                 package org.fractalx.admin.services;
 
                 import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.core.env.Environment;
                 import org.springframework.http.ResponseEntity;
                 import org.springframework.web.bind.annotation.*;
                 import org.springframework.web.client.RestTemplate;
@@ -218,13 +219,16 @@ class AdminServicesDetailGenerator {
                     private final ServiceMetaRegistry    registry;
                     private final DeploymentTracker      deploymentTracker;
                     private final RestTemplate           restTemplate = new RestTemplate();
+                    private final Environment            environment;
 
                     @Value("${fractalx.registry.url:http://localhost:8761}")
                     private String registryUrl;
 
-                    public ServicesController(ServiceMetaRegistry registry, DeploymentTracker deploymentTracker) {
+                    public ServicesController(ServiceMetaRegistry registry, DeploymentTracker deploymentTracker,
+                                              Environment environment) {
                         this.registry          = registry;
                         this.deploymentTracker = deploymentTracker;
+                        this.environment       = environment;
                     }
 
                     /** Returns all services with live health status, metadata, and lifecycle commands. */
@@ -262,7 +266,7 @@ class AdminServicesDetailGenerator {
                             if (meta.port() == 0) return ResponseEntity.ok((Object) Map.of("status", "UNKNOWN"));
                             try {
                                 Object resp = restTemplate.getForObject(
-                                        "http://localhost:" + meta.port() + "/actuator/health", Object.class);
+                                        serviceBaseUrl(meta) + "/actuator/health", Object.class);
                                 return ResponseEntity.ok(resp);
                             } catch (Exception e) {
                                 return ResponseEntity.ok((Object) Map.of("status", "DOWN", "error", e.getMessage()));
@@ -278,7 +282,7 @@ class AdminServicesDetailGenerator {
                                 return ResponseEntity.ok((Object) Map.of("error", "No metrics port configured"));
                             try {
                                 Object resp = restTemplate.getForObject(
-                                        "http://localhost:" + meta.port() + "/actuator/metrics", Object.class);
+                                        serviceBaseUrl(meta) + "/actuator/metrics", Object.class);
                                 return ResponseEntity.ok(resp);
                             } catch (Exception e) {
                                 return ResponseEntity.ok((Object) Map.of("error", e.getMessage()));
@@ -313,7 +317,7 @@ class AdminServicesDetailGenerator {
                         if (meta.port() == 0) return "UNKNOWN";
                         try {
                             String resp = restTemplate.getForObject(
-                                    "http://localhost:" + meta.port() + "/actuator/health", String.class);
+                                    serviceBaseUrl(meta) + "/actuator/health", String.class);
                             return (resp != null && resp.contains("UP")) ? "UP" : "DOWN";
                         } catch (Exception e) {
                             return "DOWN";
@@ -324,10 +328,17 @@ class AdminServicesDetailGenerator {
                         if (meta.port() == 0) return Map.of("status", "UNKNOWN");
                         try {
                             return restTemplate.getForObject(
-                                    "http://localhost:" + meta.port() + "/actuator/health", Object.class);
+                                    serviceBaseUrl(meta) + "/actuator/health", Object.class);
                         } catch (Exception e) {
                             return Map.of("status", "DOWN", "error", e.getMessage());
                         }
+                    }
+
+                    /** Returns the base URL for a service, using container hostname in Docker. */
+                    private String serviceBaseUrl(ServiceMetaRegistry.ServiceMeta meta) {
+                        boolean docker = Arrays.asList(environment.getActiveProfiles()).contains("docker");
+                        String host = docker ? meta.name() : "localhost";
+                        return "http://" + host + ":" + meta.port();
                     }
 
                     private Map<String, String> buildCommands(String service) {

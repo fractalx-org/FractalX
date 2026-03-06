@@ -34,16 +34,14 @@ class PomGeneratorSpec extends Specification {
         Files.readString(serviceRoot.resolve("pom.xml"))
     }
 
-    def "generated pom uses release version for fractalx-runtime (no SNAPSHOT)"() {
+    def "generated pom uses the current fractalx-runtime version"() {
         when:
         def content = pom()
 
         then:
-        // The fractalx-runtime dependency block must not reference a SNAPSHOT version
         def runtimeBlock = content.find(
             /(?s)<artifactId>fractalx-runtime<\/artifactId>\s*<version>([^<]+)<\/version>/) { _, v -> v }
-        runtimeBlock == FractalxVersion.release()
-        !runtimeBlock.contains("SNAPSHOT")
+        runtimeBlock == FractalxVersion.get()
     }
 
     def "netscope-server version is 1.0.1"() {

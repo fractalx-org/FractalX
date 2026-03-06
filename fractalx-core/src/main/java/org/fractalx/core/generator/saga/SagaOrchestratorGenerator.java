@@ -165,8 +165,7 @@ public class SagaOrchestratorGenerator {
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>fractalx-runtime</artifactId>
-                            <version>""").append(FRACTALX_RUNTIME_VER).append("""
-                        </version>
+                            <version>0.2.0-SNAPSHOT</version>
                         </dependency>
                         <dependency>
                             <groupId>com.h2database</groupId>

@@ -1467,40 +1467,6 @@ class AdminTemplateGenerator {
                     document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
                 }
 
-                function loadOverview() {
-                    fetch('/api/services/all')
-                        .then(r => r.json()).then(services => {
-                            let up = 0, down = 0;
-                            const tbody = document.getElementById('overview-tbody');
-                            tbody.innerHTML = '';
-                            services.forEach(s => {
-                                const h = s.health || 'UNKNOWN';
-                                if (h === 'UP') up++; else down++;
-                                tbody.innerHTML += `<tr>
-                                    <td><strong>${s.meta.name}</strong></td>
-                                    <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'}">${h}</span></td>
-                                    <td>${s.meta.port || '-'}</td>
-                                    <td><span class="badge bg-light text-dark">${s.meta.type}</span></td>
-                                    <td>
-                                        <button class="btn btn-xs btn-outline-primary btn-sm py-0 px-1"
-                                            onclick="showServiceDetailModal('${s.meta.name}')">Detail</button>
-                                        <button class="btn btn-xs btn-outline-secondary btn-sm py-0 px-1"
-                                            onclick="showLifecycleModal('${s.meta.name}')">Commands</button>
-                                    </td>
-                                </tr>`;
-                            });
-                            document.getElementById('ov-total').textContent = services.length;
-                            document.getElementById('ov-up').textContent = up;
-                            document.getElementById('ov-down').textContent = down;
-                        }).catch(() => {
-                            document.getElementById('overview-tbody').innerHTML =
-                                '<tr><td colspan="5" class="text-danger text-center p-3">Failed to load services</td></tr>';
-                        });
-                    fetch('/api/alerts/active')
-                        .then(r => r.json())
-                        .then(a => document.getElementById('ov-alerts').textContent = a.length)
-                        .catch(() => {});
-                }
                 """;
     }
 
@@ -1527,7 +1493,7 @@ class AdminTemplateGenerator {
                     services.forEach(s => {
                         const m = s.meta;
                         const h = s.health || 'UNKNOWN';
-                        const dep = m.deployment ? m.deployment.version || '?' : '?';
+                        const dep = s.deployment ? s.deployment.version || '?' : '?';
                         const depStr = (m.dependencies && m.dependencies.length)
                             ? m.dependencies.join(', ') : '<span class="text-muted">none</span>';
                         tbody.innerHTML += `<tr>
@@ -2375,6 +2341,7 @@ class AdminTemplateGenerator {
                 document.addEventListener('DOMContentLoaded', () => {
                     loadOverview();
                     connectAlertStream();
+                    setInterval(loadOverview, 30000);
                     setInterval(() => updateAlertBadge(
                         parseInt(document.getElementById('active-alert-count').textContent) || 0), 30000);
                 });

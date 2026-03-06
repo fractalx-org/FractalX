@@ -167,8 +167,8 @@ class AdminTopologyGeneratorSpec extends Specification {
 
         then:
         def c = topologyCtrl()
-        c.contains("localhost:8081")
-        c.contains("localhost:8082")
+        c.contains('"order-service", 8081')
+        c.contains('"payment-service", 8082')
         c.contains("/actuator/health")
     }
 }

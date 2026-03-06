@@ -103,21 +103,24 @@ class AdminTopologyGenerator {
         StringBuilder healthChecks = new StringBuilder();
         for (FractalModule m : modules) {
             healthChecks.append(String.format(
-                    "        summary.put(\"%s\", checkHealth(\"http://localhost:%d/actuator/health\"));\n",
-                    m.getServiceName(), m.getPort()));
+                    "        summary.put(\"%s\", checkHealth(\"%s\", %d, \"/actuator/health\"));\n",
+                    m.getServiceName(), m.getServiceName(), m.getPort()));
         }
-        healthChecks.append("        summary.put(\"fractalx-registry\", checkHealth(\"http://localhost:8761/services/health\"));\n");
-        healthChecks.append("        summary.put(\"fractalx-gateway\",  checkHealth(\"http://localhost:9999/actuator/health\"));\n");
+        healthChecks.append("        summary.put(\"fractalx-registry\", checkHealth(\"fractalx-registry\", 8761, \"/services/health\"));\n");
+        healthChecks.append("        summary.put(\"fractalx-gateway\",  checkHealth(\"fractalx-gateway\",  9999, \"/actuator/health\"));\n");
 
         String content = """
                 package org.fractalx.admin.topology;
 
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.core.env.Environment;
                 import org.springframework.http.ResponseEntity;
                 import org.springframework.web.bind.annotation.GetMapping;
                 import org.springframework.web.bind.annotation.RequestMapping;
                 import org.springframework.web.bind.annotation.RestController;
                 import org.springframework.web.client.RestTemplate;
 
+                import java.util.Arrays;
                 import java.util.LinkedHashMap;
                 import java.util.Map;
 
@@ -127,9 +130,14 @@ class AdminTopologyGenerator {
 
                     private final ServiceTopologyProvider topologyProvider;
                     private final RestTemplate restTemplate = new RestTemplate();
+                    private final Environment  environment;
 
-                    public TopologyController(ServiceTopologyProvider topologyProvider) {
+                    @Value("${fractalx.registry.url:http://localhost:8761}")
+                    private String registryUrl;
+
+                    public TopologyController(ServiceTopologyProvider topologyProvider, Environment environment) {
                         this.topologyProvider = topologyProvider;
+                        this.environment      = environment;
                     }
 
                     /** Returns the static service dependency graph (nodes + edges). */
@@ -150,8 +158,6 @@ class AdminTopologyGenerator {
                     @GetMapping("/services")
                     public ResponseEntity<Object> getLiveServices() {
                         try {
-                            String registryUrl = System.getProperty("fractalx.registry.url",
-                                    "http://localhost:8761");
                             return ResponseEntity.ok(
                                     restTemplate.getForObject(registryUrl + "/services", Object.class));
                         } catch (Exception e) {
@@ -160,9 +166,12 @@ class AdminTopologyGenerator {
                         }
                     }
 
-                    private String checkHealth(String healthUrl) {
+                    private String checkHealth(String serviceNameOrLocalhost, int port, String path) {
+                        boolean docker = Arrays.asList(environment.getActiveProfiles()).contains("docker");
+                        String host = docker ? serviceNameOrLocalhost : "localhost";
+                        String url = "http://" + host + ":" + port + path;
                         try {
-                            String resp = restTemplate.getForObject(healthUrl, String.class);
+                            String resp = restTemplate.getForObject(url, String.class);
                             return (resp != null && resp.contains("UP")) ? "UP" : "DOWN";
                         } catch (Exception e) {
                             return "DOWN";
