@@ -143,7 +143,7 @@ Add the FractalX annotations dependency:
 <dependency>
     <groupId>org.fractalx</groupId>
     <artifactId>fractalx-annotations</artifactId>
-    <version>0.3.2-SNAPSHOT</version>
+    <version>0.2.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -238,7 +238,7 @@ mvn fractalx:decompose
 Or with explicit version:
 
 ```bash
-mvn org.fractalx:fractalx-maven-plugin:0.3.2-SNAPSHOT:decompose
+mvn org.fractalx:fractalx-maven-plugin:0.2.0-SNAPSHOT:decompose
 ```
 
 ### Verify generated output (optional)

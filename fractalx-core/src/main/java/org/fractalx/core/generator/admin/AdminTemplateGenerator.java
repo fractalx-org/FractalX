@@ -98,7 +98,7 @@ class AdminTemplateGenerator {
                                 </button>
                             </form>
                         </div>
-                        <div class="footer">FractalX v0.3.2 &mdash; Microservices Framework</div>
+                        <div class="footer">FractalX v0.2.0 &mdash; Microservices Framework</div>
                     </div>
                 </body>
                 </html>
