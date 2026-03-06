@@ -77,25 +77,39 @@ public class SagaOrchestratorGenerator {
         writeFile(packagePath(basePkg, "model"), "SagaInstance.java",  buildSagaInstance());
         writeFile(packagePath(basePkg, "repository"), "SagaInstanceRepository.java", buildRepository());
 
-        // ── Per-saga service and NetScope clients ────────────────────────────
+        // ── Per-saga service ─────────────────────────────────────────────────
         for (SagaDefinition saga : sagas) {
             String serviceClass = saga.toClassName() + "SagaService";
             writeFile(packagePath(basePkg, "service"), serviceClass + ".java",
                     buildSagaService(saga));
+        }
 
-            // Generate one NetScope client interface per unique bean type,
-            // aggregating all forward + compensation methods for that bean
-            java.util.Map<String, List<SagaStep>> stepsByBean = new java.util.LinkedHashMap<>();
-            for (SagaStep step : saga.getSteps()) {
-                stepsByBean.computeIfAbsent(step.getBeanType(), k -> new ArrayList<>()).add(step);
-            }
-            // Merge method params + extra local vars so buildNetScopeClient can type all call args
+        // ── NetScope client interfaces — aggregated across ALL sagas ─────────
+        // Collect every step and its params globally so that when multiple sagas
+        // call the same service (e.g. PayrollService is used by both
+        // onboard-employee-saga AND approve-leave-saga), all methods end up in
+        // one interface file instead of the last saga overwriting the first.
+        java.util.Map<String, List<SagaStep>> globalStepsByBean = new java.util.LinkedHashMap<>();
+        java.util.Map<String, java.util.Map<String, MethodParam>> globalParamsByBean =
+                new java.util.LinkedHashMap<>();
+        for (SagaDefinition saga : sagas) {
             List<MethodParam> allSagaParams = new ArrayList<>(saga.getSagaMethodParams());
             allSagaParams.addAll(saga.getExtraLocalVars());
-            for (java.util.Map.Entry<String, List<SagaStep>> entry : stepsByBean.entrySet()) {
-                writeFile(packagePath(basePkg, "client"), entry.getKey() + "Client.java",
-                        buildNetScopeClient(entry.getKey(), entry.getValue(), modules, allSagaParams));
+            for (SagaStep step : saga.getSteps()) {
+                globalStepsByBean.computeIfAbsent(step.getBeanType(), k -> new ArrayList<>()).add(step);
+                java.util.Map<String, MethodParam> paramMap = globalParamsByBean
+                        .computeIfAbsent(step.getBeanType(), k -> new java.util.LinkedHashMap<>());
+                // Deduplicate params by name across sagas (same name → same type in well-formed sagas)
+                for (MethodParam p : allSagaParams) {
+                    paramMap.put(p.getName(), p);
+                }
             }
+        }
+        for (java.util.Map.Entry<String, List<SagaStep>> entry : globalStepsByBean.entrySet()) {
+            List<MethodParam> mergedParams = new ArrayList<>(
+                    globalParamsByBean.get(entry.getKey()).values());
+            writeFile(packagePath(basePkg, "client"), entry.getKey() + "Client.java",
+                    buildNetScopeClient(entry.getKey(), entry.getValue(), modules, mergedParams));
         }
 
         // ── Controller ───────────────────────────────────────────────────────
