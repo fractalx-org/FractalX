@@ -15,7 +15,6 @@ import org.fractalx.core.verifier.ServiceGraphAnalyzer;
 import org.fractalx.core.verifier.SmokeTestGenerator;
 import org.fractalx.core.verifier.SqlSchemaValidator;
 import org.fractalx.core.verifier.TransactionBoundaryAnalyzer;
-import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
@@ -26,35 +25,16 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * Maven goal that verifies the output of {@code fractalx:decompose} at three levels:
+ * Verifies the output of {@code fractalx:decompose} at multiple levels.
  *
- * <ol>
- *   <li><b>Structural</b> (always) — all expected directories, pom.xml, Dockerfiles,
- *       application.yml, NetScope annotations, docker-compose.yml</li>
- *   <li><b>NetScope compatibility</b> (always) — JavaParser checks that every
- *       {@code @NetScopeClient} interface method matches a {@code @NetworkPublic}
- *       server method in the target service (same name + parameter count)</li>
- *   <li><b>Compilation</b> (opt-in) — runs {@code mvn compile} on each generated
- *       service to catch missing imports, type errors, and classpath issues</li>
- * </ol>
- *
- * <p>Usage:
  * <pre>
- *   # Structural + NetScope checks only (fast, ~1s)
- *   mvn fractalx:verify
- *
- *   # Full verification including compilation (slow, compiles every service)
- *   mvn fractalx:verify -Dfractalx.verify.compile=true
- *
- *   # Fail the build on any issue
- *   mvn fractalx:verify -Dfractalx.verify.compile=true -Dfractalx.verify.failBuild=true
- *
- *   # One-shot: decompose then full verify
- *   mvn fractalx:decompose fractalx:verify -Dfractalx.verify.compile=true -Dfractalx.verify.failBuild=true
+ *   mvn fractalx:verify                                       # structural + NetScope (fast)
+ *   mvn fractalx:verify -Dfractalx.verify.compile=true        # + compilation
+ *   mvn fractalx:verify -Dfractalx.verify.failBuild=true      # fail on any issue
  * </pre>
  */
 @Mojo(name = "verify")
-public class VerifyMojo extends AbstractMojo {
+public class VerifyMojo extends FractalxBaseMojo {
 
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
     private MavenProject project;
@@ -64,57 +44,39 @@ public class VerifyMojo extends AbstractMojo {
     private File sourceDirectory;
 
     @Parameter(property = "fractalx.outputDirectory",
-            defaultValue = "${project.build.directory}/generated-services")
+            defaultValue = "${project.basedir}/fractalx-output")
     private File outputDirectory;
 
-    /**
-     * When true, compiles every generated service with {@code mvn compile}
-     * to catch type errors, missing imports, and classpath issues.
-     * Slower — adds ~30-120s depending on how many services were generated.
-     */
-    @Parameter(property = "fractalx.verify.compile", defaultValue = "false")
+    @Parameter(property = "fractalx.verify.compile",    defaultValue = "false")
     private boolean compile;
 
-    /**
-     * When true, generates a {@code FractalXSmokeTest.java} in every service
-     * that loads the Spring application context with {@code webEnvironment=NONE}.
-     * Run {@code mvn test} in each service to execute them.
-     */
     @Parameter(property = "fractalx.verify.smokeTests", defaultValue = "false")
     private boolean smokeTests;
 
-    /** Fail the Maven build when any check fails. Default: false (print failures, continue). */
-    @Parameter(property = "fractalx.verify.failBuild", defaultValue = "false")
+    @Parameter(property = "fractalx.verify.failBuild",  defaultValue = "false")
     private boolean failBuild;
 
-    @Parameter(property = "fractalx.verify.skip", defaultValue = "false")
+    @Parameter(property = "fractalx.verify.skip",       defaultValue = "false")
     private boolean skip;
 
+    // =========================================================================
     @Override
     public void execute() throws MojoExecutionException {
-        if (skip) {
-            getLog().info("FractalX verification skipped");
+        initCli();
+        long t0 = System.currentTimeMillis();
+
+        if (skip) { out.println(a(DIM) + "  Skipped." + a(RST)); return; }
+
+        printHeader("Verification Engine");
+
+        if (!outputDirectory.exists()) {
+            warn("Output directory not found: " + outputDirectory.getAbsolutePath());
+            warn("Run 'mvn fractalx:decompose' first.");
             return;
         }
 
         Path outputPath = outputDirectory.toPath();
-        if (!outputDirectory.exists()) {
-            getLog().warn("Output directory does not exist: " + outputDirectory.getAbsolutePath());
-            getLog().warn("Run 'mvn fractalx:decompose' first.");
-            return;
-        }
 
-        getLog().info(banner('='));
-        getLog().info("FractalX Decomposition Verifier");
-        getLog().info(banner('='));
-        getLog().info("Output: " + outputDirectory.getAbsolutePath());
-        getLog().info("Mode:   structural + NetScope + port/boundary/API/Docker/cfg + advanced"
-                + (compile ? " + compilation" : "")
-                + (smokeTests ? " + smoke-test generation" : "")
-                + (!compile ? "  (add -Dfractalx.verify.compile=true for full compilation)" : ""));
-        getLog().info("");
-
-        // Re-analyse source to know which modules were expected
         List<FractalModule> modules;
         try {
             modules = new ModuleAnalyzer().analyzeProject(sourceDirectory.toPath());
@@ -122,59 +84,70 @@ public class VerifyMojo extends AbstractMojo {
             throw new MojoExecutionException("Failed to analyse source modules", e);
         }
         if (modules.isEmpty()) {
-            getLog().warn("No @DecomposableModule classes found — nothing to verify.");
+            warn("No @DecomposableModule classes found — nothing to verify.");
             return;
         }
 
+        // ── Print mode line ───────────────────────────────────────────────────
+        String mode = "structural + NetScope + static + advanced"
+                + (compile    ? " + compilation"      : "")
+                + (smokeTests ? " + smoke-tests"      : "");
+        out.println("  " + a(DIM) + "Mode   " + a(RST) + mode);
+        out.println("  " + a(DIM) + "Output " + a(RST) + outputDirectory.getAbsolutePath());
+        out.println();
+
         int totalFail = 0;
 
-        // ── Level 1: Structural ───────────────────────────────────────────────
-        totalFail += runStructuralChecks(outputPath, modules);
-
-        // ── Level 2: NetScope interface compatibility ─────────────────────────
-        totalFail += runNetScopeChecks(outputPath, modules);
-
-        // ── Level 3: Strict static analysis ──────────────────────────────────
-        totalFail += runStrictStaticChecks(outputPath, modules);
-
-        // ── Level 4: Advanced analysis ────────────────────────────────────────
-        totalFail += runAdvancedAnalysis(outputPath, modules);
-
-        // ── Level 5: Compilation (opt-in) ─────────────────────────────────────
-        if (compile) {
-            totalFail += runCompilationChecks(outputPath, modules);
-        }
-
-        // ── Level 6: Smoke test generation (opt-in) ───────────────────────────
-        if (smokeTests) {
-            runSmokeTestGeneration(outputPath, modules);
-        }
+        totalFail += runLevel(1, "Structural",         () -> runStructuralChecks(outputPath, modules));
+        totalFail += runLevel(2, "NetScope compat",    () -> runNetScopeChecks(outputPath, modules));
+        totalFail += runLevel(3, "Static analysis",    () -> runStrictStaticChecks(outputPath, modules));
+        totalFail += runLevel(4, "Advanced analysis",  () -> runAdvancedAnalysis(outputPath, modules));
+        if (compile)    totalFail += runLevel(5, "Compilation",    () -> runCompilationChecks(outputPath, modules));
+        if (smokeTests) runLevel(6, "Smoke tests",     () -> { runSmokeTestGeneration(outputPath, modules); return 0; });
 
         // ── Summary ───────────────────────────────────────────────────────────
-        getLog().info("");
-        getLog().info(banner('='));
+        out.println();
         if (totalFail == 0) {
-            getLog().info("All checks passed.");
+            out.println("  " + a(GRN) + "\u2713" + a(RST) + "  " + a(BLD) + "All checks passed" + a(RST)
+                    + "  " + a(DIM) + "[" + fmt(System.currentTimeMillis() - t0) + "]" + a(RST));
         } else {
-            getLog().info(totalFail + " check(s) failed.");
+            out.println("  " + a(RED) + "\u2718" + a(RST) + "  " + a(BLD) + totalFail + " check(s) failed" + a(RST)
+                    + "  " + a(DIM) + "[" + fmt(System.currentTimeMillis() - t0) + "]" + a(RST));
         }
-        getLog().info(banner('='));
+        out.println();
 
         if (totalFail > 0 && failBuild) {
             throw new MojoExecutionException(
-                    totalFail + " verification check(s) failed. "
-                    + "Re-run 'mvn fractalx:decompose' and check the issues above.");
+                    totalFail + " verification check(s) failed. Re-run 'mvn fractalx:decompose'.");
         } else if (totalFail > 0) {
-            getLog().warn("Add -Dfractalx.verify.failBuild=true to fail the build on issues.");
+            out.println("  " + a(DIM) + "Add -Dfractalx.verify.failBuild=true to fail the build on issues." + a(RST));
+            out.println();
+        }
+    }
+
+    // ── Level runner ──────────────────────────────────────────────────────────
+
+    @FunctionalInterface
+    private interface CheckBlock { int run() throws Exception; }
+
+    private int runLevel(int n, String name, CheckBlock block) {
+        out.println("  " + a(BLD) + a(DIM) + "Level " + n + a(RST)
+                + "  " + a(BLD) + name + a(RST));
+        out.println();
+        try {
+            int fails = block.run();
+            out.println();
+            return fails;
+        } catch (Exception e) {
+            out.println("  " + a(RED) + "\u2718" + a(RST) + "  " + e.getMessage());
+            out.println();
+            return 1;
         }
     }
 
     // ── Level 1: structural ───────────────────────────────────────────────────
 
     private int runStructuralChecks(Path outputPath, List<FractalModule> modules) {
-        getLog().info("[ Level 1 ] Structural checks");
-        getLog().info(banner('-'));
-
         DecompositionVerifier.VerificationReport report =
                 new DecompositionVerifier().verify(outputPath, modules);
 
@@ -182,28 +155,21 @@ public class VerifyMojo extends AbstractMojo {
         for (DecompositionVerifier.CheckResult r : report.results()) {
             if (!r.category().equals(currentCat)) {
                 currentCat = r.category();
-                getLog().info("");
-                getLog().info("  " + currentCat);
+                out.println("    " + a(DIM) + r.category() + a(RST));
             }
             printCheck(r.status().name(), r.description(), r.detail());
         }
-
-        getLog().info("");
-        getLog().info("  " + report.pass() + " passed  |  "
-                + report.warn() + " warnings  |  " + report.fail() + " failed");
+        out.println("    " + a(DIM) + report.pass() + " passed  |  "
+                + report.warn() + " warnings  |  " + report.fail() + " failed" + a(RST));
         return report.fail();
     }
 
     // ── Level 2: NetScope compatibility ───────────────────────────────────────
 
     private int runNetScopeChecks(Path outputPath, List<FractalModule> modules) {
-        getLog().info("");
-        getLog().info("[ Level 2 ] NetScope interface compatibility");
-        getLog().info(banner('-'));
-
         boolean hasDeps = modules.stream().anyMatch(m -> !m.getDependencies().isEmpty());
         if (!hasDeps) {
-            getLog().info("  No cross-service dependencies — skipping.");
+            out.println("  " + a(DIM) + "\u2013  No cross-service dependencies \u2014 skipped." + a(RST));
             return 0;
         }
 
@@ -211,73 +177,51 @@ public class VerifyMojo extends AbstractMojo {
                 new NetScopeCompatibilityChecker().check(outputPath, modules);
 
         if (issues.isEmpty()) {
-            getLog().info("  [PASS] All @NetScopeClient interfaces match @NetworkPublic server methods.");
+            out.println("  " + a(GRN) + "\u25AA" + a(RST)
+                    + "  All @NetScopeClient interfaces match @NetworkPublic server methods.");
             return 0;
         }
 
         for (NetScopeCompatibilityChecker.CompatibilityIssue issue : issues) {
-            String label = switch (issue.kind()) {
-                case MISSING_CLIENT_METHOD -> "[FAIL] Client stub missing server method";
-                case EXTRA_SERVER_METHOD   -> "[WARN] Server exposes method not in client";
-                case NO_CLIENT_FILE        -> "[FAIL] Client interface not generated";
-                case NO_SERVER_FILE        -> "[WARN] Server class not found";
-                case PARSE_ERROR           -> "[WARN] Could not parse file";
-            };
-            boolean isFail = issue.kind() == NetScopeCompatibilityChecker.IssueKind.MISSING_CLIENT_METHOD
-                    || issue.kind() == NetScopeCompatibilityChecker.IssueKind.NO_CLIENT_FILE;
-            String line = "  " + label + " [" + issue.callerService() + " → "
-                    + issue.targetService() + "]  " + issue.detail();
-            if (isFail) getLog().error(line); else getLog().warn(line);
+            boolean fail = issue.kind() == NetScopeCompatibilityChecker.IssueKind.MISSING_CLIENT_METHOD
+                        || issue.kind() == NetScopeCompatibilityChecker.IssueKind.NO_CLIENT_FILE;
+            String icon  = fail ? a(RED) + "\u2718" + a(RST) : a(YLW) + "\u26A0" + a(RST);
+            out.println("  " + icon + "  [" + issue.callerService() + " \u2192 "
+                    + issue.targetService() + "]  " + issue.detail());
         }
 
-        long fails = issues.stream().filter(i ->
+        return (int) issues.stream().filter(i ->
                 i.kind() == NetScopeCompatibilityChecker.IssueKind.MISSING_CLIENT_METHOD
                 || i.kind() == NetScopeCompatibilityChecker.IssueKind.NO_CLIENT_FILE).count();
-        return (int) fails;
     }
 
     // ── Level 3: strict static analysis ──────────────────────────────────────
 
     private int runStrictStaticChecks(Path outputPath, List<FractalModule> modules) {
-        getLog().info("");
-        getLog().info("[ Level 3 ] Strict static analysis");
-        getLog().info(banner('-'));
-
         int fails = 0;
 
-        // Port conflicts
-        List<PortConflictChecker.Conflict> portConflicts =
-                new PortConflictChecker().check(outputPath, modules);
+        List<PortConflictChecker.Conflict> portConflicts = new PortConflictChecker().check(outputPath, modules);
         if (portConflicts.isEmpty()) {
-            getLog().info("  [PASS] No HTTP or gRPC port conflicts detected.");
+            pass("No HTTP or gRPC port conflicts detected.");
         } else {
-            for (PortConflictChecker.Conflict c : portConflicts) {
-                getLog().error("  " + c);
-                fails++;
-            }
+            for (PortConflictChecker.Conflict c : portConflicts) { fail(c.toString()); fails++; }
         }
 
-        // Cross-boundary imports
         List<CrossBoundaryImportChecker.Violation> importViolations =
                 new CrossBoundaryImportChecker().check(outputPath, modules);
         if (importViolations.isEmpty()) {
-            getLog().info("  [PASS] No cross-boundary package imports detected.");
+            pass("No cross-boundary package imports detected.");
         } else {
-            for (CrossBoundaryImportChecker.Violation v : importViolations) {
-                getLog().error("  " + v);
-                fails++;
-            }
+            for (CrossBoundaryImportChecker.Violation v : importViolations) { fail(v.toString()); fails++; }
         }
 
-        // REST API convention checks
         List<ApiConventionChecker.ApiViolation> apiViolations =
                 new ApiConventionChecker().check(outputPath, modules);
         if (apiViolations.isEmpty()) {
-            getLog().info("  [PASS] All REST controllers follow HTTP method conventions.");
+            pass("All REST controllers follow HTTP method conventions.");
         } else {
             for (ApiConventionChecker.ApiViolation v : apiViolations) {
-                if (v.isCritical()) { getLog().error("  " + v); fails++; }
-                else                  getLog().warn("  " + v);
+                if (v.isCritical()) { fail(v.toString()); fails++; } else { warn(v.toString()); }
             }
         }
 
@@ -287,82 +231,45 @@ public class VerifyMojo extends AbstractMojo {
     // ── Level 4: advanced analysis ────────────────────────────────────────────
 
     private int runAdvancedAnalysis(Path outputPath, List<FractalModule> modules) {
-        getLog().info("");
-        getLog().info("[ Level 4 ] Advanced analysis");
-        getLog().info(banner('-'));
         int fails = 0;
 
-        // Service dependency graph (cycles, fan-in/out, orphans)
-        ServiceGraphAnalyzer.GraphReport graph =
-                new ServiceGraphAnalyzer().analyse(modules);
+        ServiceGraphAnalyzer.GraphReport graph = new ServiceGraphAnalyzer().analyse(modules);
         if (graph.findings().isEmpty()) {
-            getLog().info("  [PASS] Service dependency graph is clean (no cycles, no outliers).");
+            pass("Service dependency graph is clean (no cycles, no outliers).");
         } else {
             for (ServiceGraphAnalyzer.Finding f : graph.findings()) {
-                String line = "  [" + (f.isCritical() ? "FAIL" : "WARN") + "] "
-                        + f.kind() + " — " + f.service() + ": " + f.detail();
-                if (f.isCritical()) { getLog().error(line); fails++; }
-                else                  getLog().warn(line);
+                if (f.isCritical()) { fail(f.kind() + " \u2014 " + f.service() + ": " + f.detail()); fails++; }
+                else { warn(f.kind() + " \u2014 " + f.service() + ": " + f.detail()); }
             }
         }
-        // Print coupling metrics
-        getLog().info("  Coupling metrics:  fan-out (calls peers): "
-                + graph.fanOut() + "  |  fan-in (called by peers): " + graph.fanIn());
+        out.println("    " + a(DIM) + "fan-out: " + graph.fanOut()
+                + "  |  fan-in: " + graph.fanIn() + a(RST));
 
-        // SQL schema validation
-        List<SqlSchemaValidator.SqlFinding> sqlFindings =
-                new SqlSchemaValidator().validate(outputPath, modules);
-        if (sqlFindings.isEmpty()) {
-            getLog().info("  [PASS] All Flyway migration scripts are valid.");
-        } else {
-            for (SqlSchemaValidator.SqlFinding f : sqlFindings) {
-                if (f.isCritical()) { getLog().error("  " + f); fails++; }
-                else                  getLog().warn("  " + f);
-            }
-        }
+        List<SqlSchemaValidator.SqlFinding> sqlFindings = new SqlSchemaValidator().validate(outputPath, modules);
+        if (sqlFindings.isEmpty()) { pass("All Flyway migration scripts are valid."); }
+        else sqlFindings.forEach(f -> { if (f.isCritical()) { fail(f.toString()); } else warn(f.toString()); });
 
-        // Transaction boundary analysis
         List<TransactionBoundaryAnalyzer.TransactionViolation> txViolations =
                 new TransactionBoundaryAnalyzer().analyse(outputPath, modules);
-        if (txViolations.isEmpty()) {
-            getLog().info("  [PASS] No @Transactional + cross-service call combinations detected.");
-        } else {
-            txViolations.forEach(v -> getLog().warn("  " + v));
+        if (txViolations.isEmpty()) { pass("No @Transactional + cross-service call combinations."); }
+        else txViolations.forEach(v -> warn(v.toString()));
+
+        List<SecretLeakScanner.SecretLeak> leaks = new SecretLeakScanner().scan(outputPath, modules);
+        if (leaks.isEmpty()) { pass("No hardcoded secrets detected in generated configs."); }
+        else {
+            leaks.forEach(l -> warn(l.toString()));
+            warn("Rotate these before deploying to any shared/production environment.");
         }
 
-        // Secret leak scan
-        List<SecretLeakScanner.SecretLeak> leaks =
-                new SecretLeakScanner().scan(outputPath, modules);
-        if (leaks.isEmpty()) {
-            getLog().info("  [PASS] No hardcoded secrets detected in generated configs.");
-        } else {
-            leaks.forEach(l -> getLog().warn("  " + l));
-            getLog().warn("  Rotate these before deploying to any shared/production environment.");
-        }
-
-        // Dockerfile quality checks
         List<DockerfileValidator.DockerFinding> dockerFindings =
                 new DockerfileValidator().validate(outputPath, modules);
-        if (dockerFindings.isEmpty()) {
-            getLog().info("  [PASS] All Dockerfiles meet production-readiness standards.");
-        } else {
-            for (DockerfileValidator.DockerFinding f : dockerFindings) {
-                if (f.isCritical()) { getLog().error("  " + f); fails++; }
-                else                  getLog().warn("  " + f);
-            }
-        }
+        if (dockerFindings.isEmpty()) { pass("All Dockerfiles meet production-readiness standards."); }
+        else { for (DockerfileValidator.DockerFinding f : dockerFindings) { if (f.isCritical()) { fail(f.toString()); fails++; } else warn(f.toString()); } }
 
-        // @Value → application.yml property coverage
         List<ConfigPropertyChecker.CfgFinding> cfgFindings =
                 new ConfigPropertyChecker().check(outputPath, modules);
-        if (cfgFindings.isEmpty()) {
-            getLog().info("  [PASS] All @Value references are covered by application.yml.");
-        } else {
-            for (ConfigPropertyChecker.CfgFinding f : cfgFindings) {
-                if (f.isCritical()) { getLog().error("  " + f); fails++; }
-                else                  getLog().warn("  " + f);
-            }
-        }
+        if (cfgFindings.isEmpty()) { pass("All @Value references are covered by application.yml."); }
+        else { for (ConfigPropertyChecker.CfgFinding f : cfgFindings) { if (f.isCritical()) { fail(f.toString()); fails++; } else warn(f.toString()); } }
 
         return fails;
     }
@@ -370,11 +277,8 @@ public class VerifyMojo extends AbstractMojo {
     // ── Level 5: compilation ──────────────────────────────────────────────────
 
     private int runCompilationChecks(Path outputPath, List<FractalModule> modules) {
-        getLog().info("");
-        getLog().info("[ Level 3 ] Compilation (mvn compile per service)");
-        getLog().info(banner('-'));
-        getLog().info("  This may take a few minutes...");
-        getLog().info("");
+        out.println("  " + a(DIM) + "This may take a few minutes..." + a(RST));
+        out.println();
 
         List<CompilationVerifier.CompilationResult> results =
                 new CompilationVerifier().compileAll(outputPath, modules);
@@ -382,61 +286,46 @@ public class VerifyMojo extends AbstractMojo {
         int fails = 0;
         for (CompilationVerifier.CompilationResult r : results) {
             if (r.success()) {
-                getLog().info("  [PASS] " + r.serviceName()
-                        + " compiled successfully (" + r.durationMs() + "ms)");
+                pass(r.serviceName() + " compiled successfully (" + r.durationMs() + "ms)");
             } else {
-                getLog().error("  [FAIL] " + r.serviceName() + " — compilation errors:");
-                for (String err : r.errors()) {
-                    getLog().error("         " + err);
-                }
+                fail(r.serviceName() + " \u2014 compilation errors:");
+                for (String err : r.errors()) out.println("         " + a(DIM) + err + a(RST));
                 fails++;
             }
         }
-
-        getLog().info("");
-        getLog().info("  " + (results.size() - fails) + " compiled  |  " + fails + " failed");
+        out.println("    " + a(DIM) + (results.size() - fails) + " compiled  |  " + fails + " failed" + a(RST));
         return fails;
     }
 
-    // ── Level 5: smoke test generation ───────────────────────────────────────
+    // ── Level 6: smoke test generation ───────────────────────────────────────
 
     private void runSmokeTestGeneration(Path outputPath, List<FractalModule> modules) {
-        getLog().info("");
-        getLog().info("[ Level 5 ] Smoke test generation");
-        getLog().info(banner('-'));
-
         List<SmokeTestGenerator.GenerationResult> results =
                 new SmokeTestGenerator().generate(outputPath, modules);
-
         for (SmokeTestGenerator.GenerationResult r : results) {
-            if (r.success()) {
-                getLog().info("  [PASS] " + r.serviceName()
-                        + " — FractalXSmokeTest.java written");
-            } else {
-                getLog().warn("  [WARN] " + r.serviceName() + " — " + r.detail());
-            }
+            if (r.success()) pass(r.serviceName() + " \u2014 FractalXSmokeTest.java written");
+            else             warn(r.serviceName() + " \u2014 " + r.detail());
         }
-        getLog().info("");
-        getLog().info("  Run smoke tests with: cd <service-dir> && mvn test");
-        getLog().info("  Spring context must load cleanly for each test to pass.");
+        out.println();
+        out.println("  " + a(DIM) + "Run with: cd <service-dir> && mvn test" + a(RST));
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Row helpers ───────────────────────────────────────────────────────────
 
     private void printCheck(String status, String description, String detail) {
-        String icon = switch (status) {
-            case "PASS" -> "    [PASS] ";
-            case "WARN" -> "    [WARN] ";
-            default     -> "    [FAIL] ";
-        };
-        String line = icon + description;
-        if (detail != null && !detail.isBlank()) line += "  (" + detail + ")";
-        if ("FAIL".equals(status)) getLog().error(line);
-        else if ("WARN".equals(status)) getLog().warn(line);
-        else getLog().info(line);
+        String line = "    " + description + (detail != null && !detail.isBlank() ? "  (" + detail + ")" : "");
+        switch (status) {
+            case "PASS" -> pass(description + (detail != null && !detail.isBlank() ? "  (" + detail + ")" : ""));
+            case "WARN" -> warn(description + (detail != null && !detail.isBlank() ? "  (" + detail + ")" : ""));
+            default     -> fail(description + (detail != null && !detail.isBlank() ? "  (" + detail + ")" : ""));
+        }
     }
 
-    private static String banner(char ch) {
-        return String.valueOf(ch).repeat(60);
+    private void pass(String msg) {
+        out.println("    " + a(GRN) + "\u25AA" + a(RST) + "  " + msg);
+    }
+
+    private void fail(String msg) {
+        out.println("    " + a(RED) + "\u2718" + a(RST) + "  " + a(RED) + msg + a(RST));
     }
 }
