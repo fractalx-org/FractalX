@@ -371,21 +371,25 @@ public class SagaOrchestratorGenerator {
                 """
                 -- FractalX Saga Orchestrator — Initial Schema
                 CREATE TABLE IF NOT EXISTS saga_instance (
-                    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    saga_id         VARCHAR(255) NOT NULL,
-                    correlation_id  VARCHAR(36)  NOT NULL UNIQUE,
-                    owner_service   VARCHAR(255),
-                    status          VARCHAR(50)  NOT NULL,
-                    current_step    VARCHAR(255),
-                    payload         TEXT,
-                    error_message   TEXT,
-                    started_at      TIMESTAMP    NOT NULL,
-                    updated_at      TIMESTAMP
+                    id                           BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    saga_id                      VARCHAR(255) NOT NULL,
+                    correlation_id               VARCHAR(36)  NOT NULL UNIQUE,
+                    owner_service                VARCHAR(255),
+                    status                       VARCHAR(50)  NOT NULL,
+                    current_step                 VARCHAR(255),
+                    payload                      TEXT,
+                    error_message                TEXT,
+                    started_at                   TIMESTAMP    NOT NULL,
+                    updated_at                   TIMESTAMP,
+                    owner_notified               BOOLEAN      NOT NULL DEFAULT FALSE,
+                    notification_retry_count     INT          NOT NULL DEFAULT 0,
+                    last_notification_attempt    TIMESTAMP
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_saga_status     ON saga_instance (status);
-                CREATE INDEX IF NOT EXISTS idx_saga_id         ON saga_instance (saga_id);
-                CREATE INDEX IF NOT EXISTS idx_saga_corr       ON saga_instance (correlation_id);
+                CREATE INDEX IF NOT EXISTS idx_saga_status          ON saga_instance (status);
+                CREATE INDEX IF NOT EXISTS idx_saga_id              ON saga_instance (saga_id);
+                CREATE INDEX IF NOT EXISTS idx_saga_corr            ON saga_instance (correlation_id);
+                CREATE INDEX IF NOT EXISTS idx_saga_notify_pending  ON saga_instance (owner_notified, status);
                 """);
     }
 
@@ -466,6 +470,17 @@ public class SagaOrchestratorGenerator {
 
                     private LocalDateTime updatedAt;
 
+                    /** Whether the owner service has been successfully notified of the final outcome. */
+                    @Column(nullable = false)
+                    private boolean ownerNotified = false;
+
+                    /** How many times notification has been attempted (capped at MAX_NOTIFICATION_RETRIES). */
+                    @Column(nullable = false)
+                    private int notificationRetryCount = 0;
+
+                    /** Timestamp of the most recent notification attempt (null = never attempted). */
+                    private LocalDateTime lastNotificationAttempt;
+
                     @PrePersist
                     protected void onCreate() { startedAt = LocalDateTime.now(); updatedAt = startedAt; }
 
@@ -490,6 +505,12 @@ public class SagaOrchestratorGenerator {
                     public void   setErrorMessage(String v)  { errorMessage = v; }
                     public LocalDateTime getStartedAt()  { return startedAt; }
                     public LocalDateTime getUpdatedAt()  { return updatedAt; }
+                    public boolean isOwnerNotified()          { return ownerNotified; }
+                    public void    setOwnerNotified(boolean v){ ownerNotified = v; }
+                    public int  getNotificationRetryCount()   { return notificationRetryCount; }
+                    public void setNotificationRetryCount(int v) { notificationRetryCount = v; }
+                    public LocalDateTime getLastNotificationAttempt() { return lastNotificationAttempt; }
+                    public void setLastNotificationAttempt(LocalDateTime v) { lastNotificationAttempt = v; }
                 }
                 """.formatted(BASE_PACKAGE);
     }
@@ -512,6 +533,8 @@ public class SagaOrchestratorGenerator {
                     Optional<SagaInstance> findByCorrelationId(String correlationId);
                     List<SagaInstance> findBySagaId(String sagaId);
                     List<SagaInstance> findByStatus(SagaStatus status);
+                    /** Used by the notification retry poller to find sagas whose owner wasn't notified yet. */
+                    List<SagaInstance> findByOwnerNotifiedFalseAndStatusIn(List<SagaStatus> statuses);
                 }
                 """.formatted(BASE_PACKAGE, BASE_PACKAGE, BASE_PACKAGE);
     }
@@ -779,7 +802,7 @@ public class SagaOrchestratorGenerator {
         sb.append("     * Calls {@code POST {ownerServiceBaseUrl}/internal/saga-failed/{correlationId}}\n");
         sb.append("     * so the owner can revert its own state (e.g. cancel / delete the Order).\n");
         sb.append("     */\n");
-        sb.append("    private void notifyOwnerFailed(SagaInstance instance) {\n");
+        sb.append("    void notifyOwnerFailed(SagaInstance instance) {\n");
         sb.append("        String url = ownerServiceBaseUrl + \"/internal/saga-failed/\"\n");
         sb.append("                + instance.getCorrelationId();\n");
         sb.append("        try {\n");
@@ -799,15 +822,20 @@ public class SagaOrchestratorGenerator {
         sb.append("                    : \"{\\\"errorMessage\\\":\\\"\" + escapedError + \"\\\"}\";\n");
         sb.append("            HttpEntity<String> request = new HttpEntity<>(failureBody, headers);\n");
         sb.append("            restTemplate.postForObject(url, request, String.class);\n");
+        sb.append("            instance.setOwnerNotified(true);\n");
+        sb.append("            sagaRepository.save(instance);\n");
         sb.append("            log.info(\"Notified owner service of saga FAILURE: url={} correlationId={}\",\n");
         sb.append("                    url, instance.getCorrelationId());\n");
         sb.append("        } catch (Exception e) {\n");
-        sb.append("            log.warn(\"Failed to notify owner service of saga failure: url={} error={}\",\n");
-        sb.append("                    url, e.getMessage());\n");
+        sb.append("            instance.setNotificationRetryCount(instance.getNotificationRetryCount() + 1);\n");
+        sb.append("            instance.setLastNotificationAttempt(java.time.LocalDateTime.now());\n");
+        sb.append("            sagaRepository.save(instance);\n");
+        sb.append("            log.warn(\"Failed to notify owner service of saga failure: url={} attempt={} error={}\",\n");
+        sb.append("                    url, instance.getNotificationRetryCount(), e.getMessage());\n");
         sb.append("        }\n");
         sb.append("    }\n\n");
 
-        sb.append("    private void notifyOwnerComplete(SagaInstance instance) {\n");
+        sb.append("    void notifyOwnerComplete(SagaInstance instance) {\n");
         sb.append("        String url = ownerServiceBaseUrl + \"/internal/saga-complete/\"\n");
         sb.append("                + instance.getCorrelationId();\n");
         sb.append("        try {\n");
@@ -818,11 +846,16 @@ public class SagaOrchestratorGenerator {
         sb.append("            }\n");
         sb.append("            HttpEntity<String> request = new HttpEntity<>(instance.getPayload(), headers);\n");
         sb.append("            restTemplate.postForObject(url, request, String.class);\n");
+        sb.append("            instance.setOwnerNotified(true);\n");
+        sb.append("            sagaRepository.save(instance);\n");
         sb.append("            log.info(\"Notified owner service of saga completion: url={} correlationId={}\",\n");
         sb.append("                    url, instance.getCorrelationId());\n");
         sb.append("        } catch (Exception e) {\n");
-        sb.append("            log.warn(\"Failed to notify owner service of saga completion: url={} error={}\",\n");
-        sb.append("                    url, e.getMessage());\n");
+        sb.append("            instance.setNotificationRetryCount(instance.getNotificationRetryCount() + 1);\n");
+        sb.append("            instance.setLastNotificationAttempt(java.time.LocalDateTime.now());\n");
+        sb.append("            sagaRepository.save(instance);\n");
+        sb.append("            log.warn(\"Failed to notify owner service of saga completion: url={} attempt={} error={}\",\n");
+        sb.append("                    url, instance.getNotificationRetryCount(), e.getMessage());\n");
         sb.append("        }\n");
         sb.append("    }\n\n");
 
@@ -847,6 +880,41 @@ public class SagaOrchestratorGenerator {
             sb.append(String.join(",\n", recordComponents));
             sb.append("\n    ) {}\n");
         }
+
+        // retryPendingNotifications — @Scheduled poller that retries owner notifications
+        // that failed during the initial attempt (e.g. owner service was down).
+        sb.append("    private static final int MAX_NOTIFICATION_RETRIES = 10;\n\n");
+        sb.append("    /**\n");
+        sb.append("     * Retries owner-service notifications that failed during the initial attempt.\n");
+        sb.append("     *\n");
+        sb.append("     * <p>Runs every 2 seconds. Finds saga instances in DONE or FAILED state whose\n");
+        sb.append("     * {@code ownerNotified} flag is still {@code false} (meaning the HTTP callback\n");
+        sb.append("     * to the owner service has not succeeded yet). Retries up to\n");
+        sb.append("     * {@code MAX_NOTIFICATION_RETRIES} times, after which the failure is logged\n");
+        sb.append("     * as a dead-letter requiring manual intervention.\n");
+        sb.append("     */\n");
+        sb.append("    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 2000)\n");
+        sb.append("    @Transactional\n");
+        sb.append("    public void retryPendingNotifications() {\n");
+        sb.append("        java.util.List<SagaInstance> pending = sagaRepository\n");
+        sb.append("                .findByOwnerNotifiedFalseAndStatusIn(\n");
+        sb.append("                        java.util.List.of(SagaStatus.DONE, SagaStatus.FAILED));\n");
+        sb.append("        if (pending.isEmpty()) return;\n\n");
+        sb.append("        for (SagaInstance instance : pending) {\n");
+        sb.append("            if (instance.getNotificationRetryCount() >= MAX_NOTIFICATION_RETRIES) {\n");
+        sb.append("                log.error(\"Saga notification dead-letter: correlationId={} sagaId={} status={} \"\n");
+        sb.append("                        + \"— exceeded {} retries. Manual intervention required.\",\n");
+        sb.append("                        instance.getCorrelationId(), instance.getSagaId(),\n");
+        sb.append("                        instance.getStatus(), MAX_NOTIFICATION_RETRIES);\n");
+        sb.append("                continue;\n");
+        sb.append("            }\n");
+        sb.append("            if (instance.getStatus() == SagaStatus.DONE) {\n");
+        sb.append("                notifyOwnerComplete(instance);\n");
+        sb.append("            } else {\n");
+        sb.append("                notifyOwnerFailed(instance);\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
 
         sb.append("}\n");
         return sb.toString();
