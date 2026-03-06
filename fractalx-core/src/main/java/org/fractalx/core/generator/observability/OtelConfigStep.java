@@ -31,6 +31,12 @@ public class OtelConfigStep implements ServiceFileGenerator {
     @Override
     public void generate(GenerationContext context) throws IOException {
         FractalModule module = context.getModule();
+
+        if (!context.getFractalxConfig().isTracingEnabled(module.getServiceName())) {
+            log.info("Tracing disabled for {} — skipping OTel config generation", module.getServiceName());
+            return;
+        }
+
         log.debug("Generating OtelConfig for {}", module.getServiceName());
 
         String pkg     = "org.fractalx.generated." + toJavaId(module.getServiceName()).toLowerCase();
