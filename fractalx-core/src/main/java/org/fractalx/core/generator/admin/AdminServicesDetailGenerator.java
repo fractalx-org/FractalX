@@ -57,7 +57,7 @@ class AdminServicesDetailGenerator {
         }
         // Always-present infra services
         entries.append("        new ServiceMeta(\"fractalx-registry\", 8761, 0, \"infrastructure\", List.of(), \"\", \"\"),\n");
-        entries.append("        new ServiceMeta(\"api-gateway\",       8080, 0, \"infrastructure\", List.of(), \"\", \"\"),\n");
+        entries.append("        new ServiceMeta(\"api-gateway\",       9999, 0, \"infrastructure\", List.of(), \"\", \"\"),\n");
         entries.append("        new ServiceMeta(\"admin-service\",     9090, 0, \"infrastructure\", List.of(), \"\", \"\"),\n");
         entries.append("        new ServiceMeta(\"logger-service\",    9099, 0, \"infrastructure\", List.of(), \"\", \"\")\n");
 
