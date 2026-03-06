@@ -73,8 +73,8 @@ class AdminCommunicationGenerator {
                  * GET /api/communication/topology            — full dependency graph (nodes + gRPC edges)
                  * GET /api/communication/netscope            — all NetScope dependency links
                  * GET /api/communication/netscope/{service} — NetScope links for one service
-                 * GET /api/communication/gateway/health     — proxy → gateway :8080/actuator/health
-                 * GET /api/communication/gateway/metrics    — proxy → gateway :8080/actuator/metrics
+                 * GET /api/communication/gateway/health     — proxy → gateway :9999/actuator/health
+                 * GET /api/communication/gateway/metrics    — proxy → gateway :9999/actuator/metrics
                  * GET /api/communication/discovery/stats    — proxy → registry /services summary
                  * </pre>
                  */
@@ -83,7 +83,7 @@ class AdminCommunicationGenerator {
                 @CrossOrigin(origins = "*")
                 public class CommunicationController {
 
-                    private static final int GATEWAY_PORT = 8080;
+                    private static final int GATEWAY_PORT = 9999;
 
                     private final ServiceMetaRegistry registry;
                     private final RestTemplate        restTemplate = new RestTemplate();

@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -31,12 +30,19 @@ public class GatewayRouteLocatorGenerator {
     private void generateDynamicRouteLocator(Path pkg, List<FractalModule> modules) throws IOException {
         StringBuilder staticRoutesBuilder = new StringBuilder();
         for (FractalModule m : modules) {
-            String path = m.getServiceName().replace("-service", "");
-            if (!path.endsWith("s")) path += "s";
+            String base = m.getServiceName().replace("-service", "");
+            String plural;
+            if (base.endsWith("y")) {
+                plural = base.substring(0, base.length() - 1) + "ies";
+            } else if (base.endsWith("s") || base.endsWith("sh") || base.endsWith("ch")) {
+                plural = base + "es";
+            } else {
+                plural = base + "s";
+            }
 
             staticRoutesBuilder.append("        // ").append(m.getServiceName()).append(" static route\n");
             staticRoutesBuilder.append("        routeBuilder.route(\"").append(m.getServiceName()).append("-static\",\n");
-            staticRoutesBuilder.append("                r -> r.path(\"/api/").append(path).append("/**\")\n");
+            staticRoutesBuilder.append("                r -> r.path(\"/api/").append(base).append("/**\", \"/api/").append(plural).append("/**\")\n");
             staticRoutesBuilder.append("                        .filters(f -> f.circuitBreaker(c -> c.setName(\"").append(m.getServiceName()).append("\")\n");
             staticRoutesBuilder.append("                                .setFallbackUri(\"forward:/fallback/").append(m.getServiceName()).append("\")))\n");
             staticRoutesBuilder.append("                        .uri(\"http://localhost:").append(m.getPort()).append("\"));\n\n");
@@ -119,9 +125,7 @@ public class GatewayRouteLocatorGenerator {
                 import org.springframework.web.client.ResourceAccessException;
                 import org.springframework.web.client.HttpClientErrorException;
                 import org.springframework.web.client.RestTemplate;
-                import org.springframework.web.client.ResourceAccessException;
-                import org.springframework.web.client.HttpClientErrorException;
-                            
+
                 import java.util.ArrayList;
                 import java.util.List;
                 import java.util.Map;
@@ -163,16 +167,17 @@ public class GatewayRouteLocatorGenerator {
                                 String name = (String) svc.get("name");
                                 String host = (String) svc.get("host");
                                 int port = ((Number) svc.get("port")).intValue();
-                                String prefix = toPathPrefix(name);
+                                String base = toPathBase(name);
+                                String plural = toPathPlural(name);
                                 String uri = "http://" + host + ":" + port;
-                                
+
                                 routeBuilder.route(name + "-live",
-                                    r -> r.path("/api/" + prefix + "/**")
+                                    r -> r.path("/api/" + base + "/**", "/api/" + plural + "/**")
                                         .filters(f -> f.circuitBreaker(c -> c.setName(name)
                                             .setFallbackUri("forward:/fallback/" + name)))
                                         .uri(uri));
-                                        
-                                log.info("Live route added: /api/{}/** -> {}", prefix, uri);
+
+                                log.info("Live routes added: /api/{}/** and /api/{}/** -> {}", base, plural, uri);
                             }
                             
                             routeBuilder.build().getRoutes().subscribe(routes::add);
@@ -187,18 +192,19 @@ public class GatewayRouteLocatorGenerator {
                         return routes;
                     }
 
-                    private String toPathPrefix(String serviceName) {
-                        String path = serviceName.replace("-service", "");
-                        // Handle common pluralization
-                        if (path.endsWith("y")) {
-                            path = path.substring(0, path.length() - 1) + "ies";
-                        } else if (path.endsWith("s") || path.endsWith("sh") || path.endsWith("ch")) {
-                            path = path + "es";
-                        } else if (!path.endsWith("s")) {
-                            path = path + "s";
-                        }
-                        return path;
+                    private String toPathBase(String serviceName) {
+                        return serviceName.replace("-service", "");
+                    }
 
+                    private String toPathPlural(String serviceName) {
+                        String path = serviceName.replace("-service", "");
+                        if (path.endsWith("y")) {
+                            return path.substring(0, path.length() - 1) + "ies";
+                        } else if (path.endsWith("s") || path.endsWith("sh") || path.endsWith("ch")) {
+                            return path + "es";
+                        } else {
+                            return path + "s";
+                        }
                     }
                 }
                 """;

@@ -1662,7 +1662,7 @@ class AdminTemplateGenerator {
                             document.getElementById('gateway-info').innerHTML = `
                                 <div class="d-flex align-items-center gap-2 mb-2">
                                     <span class="badge ${status==='UP'?'badge-up':'badge-down'} fs-6">${status}</span>
-                                    <span class="text-muted small">API Gateway (port 8080)</span>
+                                    <span class="text-muted small">API Gateway (port 9999)</span>
                                 </div>
                                 <button class="btn btn-sm btn-outline-primary" onclick="loadGatewayMetrics()">
                                     <i class="fas fa-chart-bar me-1"></i>View Metrics
