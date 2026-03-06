@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.saga;
 
+import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.datamanagement.DataReadmeGenerator;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.MethodParam;
@@ -39,7 +40,7 @@ public class SagaOrchestratorGenerator {
     private static final String ORCHESTRATOR_NAME    = "fractalx-saga-orchestrator";
     private static final int    ORCHESTRATOR_PORT    = 8099;
     private static final String BASE_PACKAGE         = "org.fractalx.generated.sagaorchestrator";
-    private static final String FRACTALX_RUNTIME_VER = "0.2.0-SNAPSHOT";
+    private static final String FRACTALX_RUNTIME_VER = FractalxVersion.get();
 
     public void generateOrchestratorService(List<FractalModule> modules,
                                             List<SagaDefinition> sagas,

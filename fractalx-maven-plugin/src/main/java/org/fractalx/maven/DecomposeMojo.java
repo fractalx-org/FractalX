@@ -77,6 +77,9 @@ public class DecomposeMojo extends AbstractMojo {
     @Parameter(property = "fractalx.color",   defaultValue = "true")
     private boolean colorParam;
 
+    @Parameter(defaultValue = "${project.version}", readonly = true)
+    private String projectVersion;
+
     // ── State ─────────────────────────────────────────────────────────────────
     private boolean     ansi;
     private PrintStream out = System.out;
@@ -93,7 +96,7 @@ public class DecomposeMojo extends AbstractMojo {
         out.println();
         out.println("  " + a(BLD) + a(WHT) + "\u2042" + a(RST)
                 + "  " + a(BLD) + "FractalX" + a(RST)
-                + a(DIM) + "  Decomposition Engine  0.3.2" + a(RST));
+                + a(DIM) + "  Decomposition Engine  " + projectVersion + a(RST));
         out.println();
 
         try {
@@ -376,7 +379,7 @@ public class DecomposeMojo extends AbstractMojo {
             sb.append("\r\033[2K  ")
               .append(ca(BLD)).append(ca(WHT)).append("\u2042").append(ca(RST))
               .append("  ").append(ca(BLD)).append("FractalX").append(ca(RST))
-              .append(ca(DIM)).append("  Decomposition Engine  0.3.2").append(ca(RST))
+              .append(ca(DIM)).append("  Decomposition Engine  ").append(projectVersion).append(ca(RST))
               .append("\r\n");
             sb.append("\r\033[2K\r\n");
 

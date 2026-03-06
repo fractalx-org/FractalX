@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.admin;
 
+import org.fractalx.core.FractalxVersion;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,7 +70,7 @@ class AdminPomGenerator {
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>fractalx-runtime</artifactId>
-                            <version>0.2.0-SNAPSHOT</version>
+                            <version>" + FractalxVersion.get() + "</version>
                         </dependency>
                         <dependency>
                             <groupId>org.springframework.boot</groupId>

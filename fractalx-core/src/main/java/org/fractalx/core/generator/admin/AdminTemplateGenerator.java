@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.admin;
 
+import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,7 +99,7 @@ class AdminTemplateGenerator {
                                 </button>
                             </form>
                         </div>
-                        <div class="footer">FractalX v0.2.0 &mdash; Microservices Framework</div>
+                        <div class="footer">FractalX v" + FractalxVersion.release() + " &mdash; Microservices Framework</div>
                     </div>
                 </body>
                 </html>
