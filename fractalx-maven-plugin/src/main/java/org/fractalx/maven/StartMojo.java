@@ -16,12 +16,12 @@ import java.util.List;
  * Starts generated services using the generated start scripts.
  *
  * <pre>
- *   mvn fractalx:run                                    # start all services
- *   mvn fractalx:run -Dfractalx.service=order-service   # start one service
+ *   mvn fractalx:start                                    # start all services
+ *   mvn fractalx:start -Dfractalx.service=order-service   # start one service
  * </pre>
  */
-@Mojo(name = "run")
-public class RunMojo extends FractalxBaseMojo {
+@Mojo(name = "start")
+public class StartMojo extends FractalxBaseMojo {
 
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
     private MavenProject project;

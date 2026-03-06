@@ -156,7 +156,7 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
 
     protected final class Dashboard {
 
-        private enum Status { PENDING, RUNNING, DONE, SKIPPED, ERROR }
+        private enum Status { PENDING, RUNNING, DONE, WARNING, SKIPPED, ERROR }
 
         private final class Step {
             final    String  label;
@@ -214,6 +214,18 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
                     + "  " + cc(DIM) + "[" + fmt(s.elapsedMs) + "]" + cc(RST));
         }
 
+        /** Level completed but with check failures — yellow ⚠, does NOT stop the ticker. */
+        void onWarn(String label, String detail) {
+            int i = find(label); if (i < 0) return;
+            Step s    = steps.get(i);
+            s.elapsedMs = System.currentTimeMillis() - s.startMs;
+            s.errorMsg  = detail;
+            s.status    = Status.WARNING;
+            if (clr) synchronized (ps) { drawAll(); }
+            else ps.println("  " + cc(YLW) + "\u26A0" + cc(RST) + "  " + label
+                    + "  " + cc(DIM) + detail + cc(RST));
+        }
+
         void onFail(String label, String msg) {
             stopTicker();
             int i = find(label);
@@ -255,14 +267,24 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
         private void drawAll() {
             StringBuilder sb = new StringBuilder();
             sb.append(HOME);
+
+            // ── Full FRACTALX banner with sunset gradient ──────────────────────
+            sb.append("\r\033[2K\r\n");
+            for (int i = 0; i < BANNER.length; i++) {
+                String color = (clr && i < BANNER_COLORS.length) ? BANNER_COLORS[i] : "";
+                sb.append("\r\033[2K").append(color).append(BANNER[i])
+                  .append(clr ? RST : "").append("\r\n");
+            }
+
+            // ── Subtitle line ─────────────────────────────────────────────────
             sb.append("\r\033[2K\r\n");
             sb.append("\r\033[2K  ")
-              .append(cc(BLD)).append(cc(WHT)).append("\u2042").append(cc(RST))
-              .append("  ").append(cc(BLD)).append("FractalX").append(cc(RST))
-              .append(cc(DIM)).append("  ").append(subtitle)
+              .append(cc(DIM)).append(subtitle)
               .append("  ").append(FractalxVersion.get()).append(cc(RST))
               .append("\r\n");
             sb.append("\r\033[2K\r\n");
+
+            // ── Step rows ─────────────────────────────────────────────────────
             for (Step s : steps) {
                 sb.append("\r\033[2K").append(stepRow(s)).append("\r\n");
             }
@@ -278,6 +300,10 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
                         + "  " + s.label + cc(DIM) + "..." + cc(RST);
                 case DONE:    return "  " + cc(GRN) + "\u25AA" + cc(RST)
                         + "  " + s.label + "  " + cc(DIM) + "[" + fmt(s.elapsedMs) + "]" + cc(RST);
+                case WARNING: return "  " + cc(YLW) + "\u26A0" + cc(RST)
+                        + "  " + s.label
+                        + (s.errorMsg != null ? "  " + cc(DIM) + s.errorMsg + cc(RST) : "")
+                        + "  " + cc(DIM) + "[" + fmt(s.elapsedMs) + "]" + cc(RST);
                 case SKIPPED: return "  " + cc(DIM) + "\u2013  " + s.label + "  skipped" + cc(RST);
                 case ERROR:   return "  " + cc(RED) + "\u2718" + cc(RST)
                         + "  " + cc(RED) + s.label + cc(RST) + "  " + cc(DIM) + "[failed]" + cc(RST);

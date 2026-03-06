@@ -65,7 +65,7 @@ public class ServicesMojo extends FractalxBaseMojo {
         out.println();
 
         section("Get started");
-        cmd("mvn fractalx:run");
+        cmd("mvn fractalx:start");
         cmd("mvn fractalx:ps");
         cmd("docker-compose -f " + outputDirectory.getAbsolutePath() + "/docker-compose.yml up -d");
         out.println();

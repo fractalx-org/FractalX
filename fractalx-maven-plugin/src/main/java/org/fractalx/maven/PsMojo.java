@@ -74,7 +74,7 @@ public class PsMojo extends FractalxBaseMojo {
         } else if (running == 0) {
             out.println("  " + a(DIM) + "\u25AB  " + status + a(RST));
             out.println();
-            cmd("mvn fractalx:run");
+            cmd("mvn fractalx:start");
         } else {
             out.println("  " + a(YLW) + "\u26A0" + a(RST) + "  " + status);
         }
