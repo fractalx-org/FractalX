@@ -153,7 +153,7 @@ public class DockerComposeGenerator {
 
                 WORKDIR /app
 
-                RUN groupadd -r fractalx && useradd -r -g fractalx fractalx
+                RUN groupadd -r fractalx && useradd -r -g fractalx fractalx && mkdir -p /app/logs && chown fractalx:fractalx /app/logs
 
                 COPY --from=build --chown=fractalx:fractalx /app/target/*.jar app.jar
 
