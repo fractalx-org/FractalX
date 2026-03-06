@@ -146,9 +146,9 @@ public class DockerComposeGenerator {
                 COPY src ./src
                 RUN mvn package -DskipTests -q
 
-                FROM eclipse-temurin:17-jre-alpine
+                FROM eclipse-temurin:17-jre-jammy
                 WORKDIR /app
-                RUN addgroup -S fractalx && adduser -S fractalx -G fractalx
+                RUN groupadd -r fractalx && useradd -r -g fractalx fractalx
                 USER fractalx
                 COPY --from=build /app/target/*.jar app.jar
                 ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]

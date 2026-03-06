@@ -151,7 +151,7 @@ class DockerComposeGeneratorSpec extends Specification {
         then:
         def dockerfile = Files.readString(outputRoot.resolve("order-service/Dockerfile"))
         dockerfile.contains("FROM maven:3.9-eclipse-temurin-17 AS build")
-        dockerfile.contains("FROM eclipse-temurin:17-jre-alpine")
+        dockerfile.contains("FROM eclipse-temurin:17-jre-jammy")
     }
 
     def "Jaeger all-in-one service is included with OTLP enabled"() {
