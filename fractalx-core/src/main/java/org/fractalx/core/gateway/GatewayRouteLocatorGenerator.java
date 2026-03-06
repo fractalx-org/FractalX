@@ -116,6 +116,8 @@ public class GatewayRouteLocatorGenerator {
                 import org.springframework.cloud.gateway.route.Route;
                 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
                 import org.springframework.stereotype.Component;
+                import org.springframework.web.client.ResourceAccessException;
+                import org.springframework.web.client.HttpClientErrorException;
                 import org.springframework.web.client.RestTemplate;
                 import org.springframework.web.client.ResourceAccessException;
                 import org.springframework.web.client.HttpClientErrorException;
@@ -151,6 +153,7 @@ public class GatewayRouteLocatorGenerator {
                             RouteLocatorBuilder.Builder routeBuilder = builder.routes();
                             
                             for (Map<String, Object> svc : services) {
+
                                 if (!"UP".equals(svc.get("status"))) {
                                     log.debug("Skipping service {} - status: {}",
                                         svc.get("name"), svc.get("status"));
@@ -195,6 +198,7 @@ public class GatewayRouteLocatorGenerator {
                             path = path + "s";
                         }
                         return path;
+
                     }
                 }
                 """;

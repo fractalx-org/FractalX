@@ -1,12 +1,14 @@
 package org.fractalx.core.datamanagement;
 
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.model.SagaDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Generates the transactional outbox pattern for services that participate in
@@ -22,20 +24,22 @@ import java.nio.file.Path;
  *   <li>{@code OutboxEvent.java} — JPA entity stored in {@code fractalx_outbox}</li>
  *   <li>{@code OutboxRepository.java} — Spring Data repository</li>
  *   <li>{@code OutboxPublisher.java} — bean used inside business {@code @Transactional} methods</li>
- *   <li>{@code OutboxPoller.java} — scheduled publisher that forwards pending events</li>
+ *   <li>{@code OutboxPoller.java} — scheduled publisher that forwards pending events to saga orchestrator</li>
+ *   <li>{@code SagaOutboxAspect.java} — AOP aspect that auto-publishes to outbox after each saga method (saga-owning services only)</li>
  * </ul>
  */
 public class OutboxGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxGenerator.class);
 
-    public void generateOutbox(FractalModule module, Path serviceRoot) throws IOException {
-        String basePackage    = "org.fractalx.generated." + module.getServiceName().replace("-", "");
-        String outboxPackage  = basePackage + ".outbox";
+    public void generateOutbox(FractalModule module, Path serviceRoot,
+                               List<SagaDefinition> sagaDefinitions) throws IOException {
+        String basePackage   = "org.fractalx.generated." + module.getServiceName().replace("-", "");
+        String outboxPackage = basePackage + ".outbox";
 
         Path outboxPath = createPackagePath(serviceRoot.resolve("src/main/java"), outboxPackage);
 
-        writeFile(outboxPath, "OutboxEvent.java",     buildOutboxEvent(outboxPackage));
+        writeFile(outboxPath, "OutboxEvent.java",      buildOutboxEvent(outboxPackage));
         writeFile(outboxPath, "OutboxRepository.java", buildOutboxRepository(outboxPackage));
         writeFile(outboxPath, "OutboxPublisher.java",  buildOutboxPublisher(outboxPackage));
         writeFile(outboxPath, "OutboxPoller.java",     buildOutboxPoller(module, outboxPackage));
@@ -68,7 +72,7 @@ public class OutboxGenerator {
                     @GeneratedValue(strategy = GenerationType.IDENTITY)
                     private Long id;
 
-                    /** Logical event type (e.g., "OrderCreated", "PaymentProcessed"). */
+                    /** Logical event type — matches a saga ID (e.g., "place-order-saga"). */
                     @Column(nullable = false)
                     private String eventType;
 
@@ -79,6 +83,14 @@ public class OutboxGenerator {
                     /** JSON-serialized event payload. */
                     @Column(columnDefinition = "TEXT")
                     private String payload;
+
+                    /**
+                     * Correlation ID from the originating HTTP request.
+                     * Captured while still in the HTTP thread (MDC is populated) so it
+                     * can be forwarded even when the OutboxPoller runs on a scheduler thread.
+                     */
+                    @Column
+                    private String correlationId;
 
                     /** Whether this event has been successfully forwarded. */
                     @Column(nullable = false)
@@ -103,6 +115,8 @@ public class OutboxGenerator {
                     public void setAggregateId(String v) { aggregateId = v; }
                     public String getPayload()           { return payload; }
                     public void setPayload(String v)     { payload = v; }
+                    public String getCorrelationId()     { return correlationId; }
+                    public void setCorrelationId(String v) { correlationId = v; }
                     public boolean isPublished()         { return published; }
                     public void setPublished(boolean v)  { published = v; }
                     public int getRetryCount()           { return retryCount; }
@@ -152,6 +166,7 @@ public class OutboxGenerator {
                 import com.fasterxml.jackson.databind.ObjectMapper;
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
+                import org.slf4j.MDC;
                 import org.springframework.stereotype.Component;
 
                 /**
@@ -159,14 +174,7 @@ public class OutboxGenerator {
                  *
                  * <p>Must be called inside an active {@code @Transactional} method so the
                  * outbox record is written atomically with the business state change.
-                 *
-                 * <pre>
-                 * // Example usage inside a @Transactional service method:
-                 * orderRepository.save(order);
-                 * outboxPublisher.publish("OrderCreated", order.getId().toString(), order);
-                 * </pre>
-                 *
-                 * Auto-generated by FractalX.
+                 * Auto-generated by FractalX — called automatically by the saga method transformer.
                  */
                 @Component
                 public class OutboxPublisher {
@@ -184,7 +192,7 @@ public class OutboxGenerator {
                     /**
                      * Writes an outbox record for the given event.
                      *
-                     * @param eventType   logical event name (e.g., "OrderCreated")
+                     * @param eventType   saga ID (e.g., "place-order-saga")
                      * @param aggregateId ID of the aggregate that produced this event
                      * @param payload     the event payload object — will be JSON-serialized
                      */
@@ -192,6 +200,12 @@ public class OutboxGenerator {
                         OutboxEvent event = new OutboxEvent();
                         event.setEventType(eventType);
                         event.setAggregateId(aggregateId);
+                        // Capture correlationId while still in the HTTP thread — MDC is populated here.
+                        // The OutboxPoller runs on a @Scheduled thread with an empty MDC, so we must
+                        // persist the ID now and read it from the entity later.
+                        String correlationId = MDC.get("correlationId");
+                        if (correlationId == null) correlationId = MDC.get("traceId");
+                        event.setCorrelationId(correlationId);
                         try {
                             event.setPayload(objectMapper.writeValueAsString(payload));
                         } catch (JsonProcessingException e) {
@@ -199,7 +213,8 @@ public class OutboxGenerator {
                             event.setPayload(String.valueOf(payload));
                         }
                         outboxRepository.save(event);
-                        log.debug("Outbox event queued: type={} aggregateId={}", eventType, aggregateId);
+                        log.debug("Outbox event queued: type={} aggregateId={} correlationId={}",
+                                eventType, aggregateId, correlationId);
                     }
                 }
                 """.formatted(pkg);
@@ -215,33 +230,40 @@ public class OutboxGenerator {
 
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.http.HttpEntity;
+                import org.springframework.http.HttpHeaders;
                 import org.springframework.scheduling.annotation.Scheduled;
                 import org.springframework.stereotype.Component;
                 import org.springframework.transaction.annotation.Transactional;
+                import org.springframework.web.client.RestTemplate;
                 import java.time.LocalDateTime;
                 import java.util.List;
 
                 /**
-                 * Polls the transactional outbox for unpublished events and forwards them.
+                 * Polls the transactional outbox for unpublished events and forwards them
+                 * to the FractalX saga orchestrator (http://localhost:8099 by default).
                  *
-                 * <p>Runs every second by default. Retries are capped at {@link #MAX_RETRIES};
+                 * <p>Runs every second. Retries are capped at {@link #MAX_RETRIES};
                  * events that exceed the cap are left as unpublished for manual inspection.
-                 *
-                 * <p>To integrate with the saga orchestrator or another consumer, inject the
-                 * appropriate NetScope client and call it in {@code forwardEvent()}.
                  *
                  * Auto-generated by FractalX — service: %s.
                  */
                 @Component
                 public class OutboxPoller {
 
-                    private static final Logger log   = LoggerFactory.getLogger(OutboxPoller.class);
-                    private static final int MAX_RETRIES = 5;
+                    private static final Logger log        = LoggerFactory.getLogger(OutboxPoller.class);
+                    private static final int    MAX_RETRIES = 5;
 
                     private final OutboxRepository outboxRepository;
+                    private final RestTemplate     restTemplate;
+
+                    @Value("${fractalx.saga.orchestrator.url:http://localhost:8099}")
+                    private String orchestratorUrl;
 
                     public OutboxPoller(OutboxRepository outboxRepository) {
                         this.outboxRepository = outboxRepository;
+                        this.restTemplate     = new RestTemplate();
                     }
 
                     @Scheduled(fixedDelay = 1000)
@@ -263,32 +285,35 @@ public class OutboxGenerator {
                                 forwardEvent(event);
                                 event.setPublished(true);
                                 event.setPublishedAt(LocalDateTime.now());
-                                log.debug("Published outbox event id={} type={}", event.getId(), event.getEventType());
+                                log.info("Forwarded outbox event id={} type={} aggregateId={}",
+                                        event.getId(), event.getEventType(), event.getAggregateId());
                             } catch (Exception e) {
                                 event.setRetryCount(event.getRetryCount() + 1);
-                                log.warn("Failed to publish outbox event id={} type={} attempt={}: {}",
+                                log.warn("Failed to forward outbox event id={} type={} attempt={}: {}",
                                         event.getId(), event.getEventType(), event.getRetryCount(), e.getMessage());
                             }
                         }
                     }
 
                     /**
-                     * Forwards a single outbox event to its consumer(s).
+                     * Forwards a single outbox event to the saga orchestrator via HTTP POST.
+                     * The URL follows the pattern: {orchestratorUrl}/saga/{eventType}/start
+                     * where eventType is the saga ID (e.g., "place-order-saga").
                      *
-                     * <p>TODO: Inject the saga orchestrator NetScope client (or HTTP client)
-                     * and call the appropriate endpoint based on {@code event.getEventType()}.
-                     *
-                     * <pre>
-                     * Example:
-                     *   sagaOrchestratorClient.notify(event.getEventType(),
-                     *                                  event.getAggregateId(),
-                     *                                  event.getPayload());
-                     * </pre>
+                     * <p>The original correlationId is forwarded as {@code X-Correlation-Id} so
+                     * the saga orchestrator and all downstream services share the same trace ID.
                      */
                     protected void forwardEvent(OutboxEvent event) {
-                        // TODO: implement event forwarding — inject the consumer client
-                        log.debug("forwardEvent called for type={} aggregateId={}",
-                                event.getEventType(), event.getAggregateId());
+                        String url = orchestratorUrl + "/saga/" + event.getEventType() + "/start";
+                        HttpHeaders headers = new HttpHeaders();
+                        headers.set("Content-Type", "application/json");
+                        if (event.getCorrelationId() != null && !event.getCorrelationId().isBlank()) {
+                            headers.set("X-Correlation-Id", event.getCorrelationId());
+                        }
+                        HttpEntity<String> request = new HttpEntity<>(event.getPayload(), headers);
+                        restTemplate.postForObject(url, request, String.class);
+                        log.debug("Dispatched saga event id={} type={} correlationId={} to {}",
+                                event.getId(), event.getEventType(), event.getCorrelationId(), url);
                     }
                 }
                 """.formatted(pkg, module.getServiceName());

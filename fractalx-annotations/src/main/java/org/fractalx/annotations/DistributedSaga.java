@@ -24,6 +24,13 @@ public @interface DistributedSaga {
     long timeout() default 30000;
 
     /**
+     * Ordered step names that this saga executes.
+     * Used as a hint for the SagaAnalyzer to validate detected steps against
+     * the declared intent. Example: {@code {"create-order", "process-payment", "reserve-inventory"}}
+     */
+    String[] steps() default {};
+
+    /**
      * Human-readable description of what this saga does.
      * Used in generated documentation and the admin UI.
      */

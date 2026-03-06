@@ -57,19 +57,24 @@ public class OtelConfigStep implements ServiceFileGenerator {
                 import io.opentelemetry.semconv.ResourceAttributes;
                 import io.opentelemetry.api.common.Attributes;
                 import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
                 import org.springframework.context.annotation.Bean;
                 import org.springframework.context.annotation.Configuration;
 
                 /**
                  * OpenTelemetry SDK configuration for this service.
                  *
-                 * <p>Spans are exported via OTLP/gRPC to Jaeger (or any compatible OTLP collector).
-                 * Configure the endpoint with:
+                 * <p>This bean is a fallback — if Spring Boot's Micrometer Tracing auto-configuration
+                 * already provides an {@link OpenTelemetry} bean (e.g. via
+                 * {@code management.otlp.tracing.endpoint}), this config is skipped.
+                 * Otherwise, spans are exported via OTLP/gRPC to the configured endpoint.
+                 *
+                 * <p>Configure the endpoint with:
                  * <pre>
-                 * fractalx:
-                 *   observability:
-                 *     otel:
-                 *       endpoint: http://jaeger:4317
+                 * management:
+                 *   otlp:
+                 *     tracing:
+                 *       endpoint: http://localhost:4318/v1/traces
                  * </pre>
                  * or via environment variable {@code OTEL_EXPORTER_OTLP_ENDPOINT}.
                  */
@@ -79,7 +84,13 @@ public class OtelConfigStep implements ServiceFileGenerator {
                     @Value("${spring.application.name}")
                     private String serviceName;
 
+                    /**
+                     * Fallback OTEL SDK bean — only created when Spring Boot auto-config has not
+                     * already registered an {@link OpenTelemetry} instance (e.g. when
+                     * {@code management.otlp.tracing.endpoint} is not set).
+                     */
                     @Bean
+                    @ConditionalOnMissingBean(OpenTelemetry.class)
                     public OpenTelemetry openTelemetry(
                             @Value("${fractalx.observability.otel.endpoint:http://localhost:4317}") String endpoint) {
 

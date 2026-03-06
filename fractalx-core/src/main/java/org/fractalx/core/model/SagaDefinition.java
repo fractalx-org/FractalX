@@ -47,6 +47,14 @@ public final class SagaDefinition {
      */
     private final List<MethodParam> sagaMethodParams;
 
+    /**
+     * Local variables in the saga method body that are used as arguments to cross-service
+     * step calls but are NOT saga method parameters (e.g., {@code orderId} derived from
+     * a local {@code draftOrder.getId()} call). These must be included in the payload DTO
+     * so the orchestrator can receive and forward them to the step clients.
+     */
+    private final List<MethodParam> extraLocalVars;
+
     public SagaDefinition(String sagaId,
                           String ownerServiceName,
                           String ownerClassName,
@@ -55,7 +63,8 @@ public final class SagaDefinition {
                           String compensationMethod,
                           long timeoutMs,
                           String description,
-                          List<MethodParam> sagaMethodParams) {
+                          List<MethodParam> sagaMethodParams,
+                          List<MethodParam> extraLocalVars) {
         this.sagaId             = sagaId;
         this.ownerServiceName   = ownerServiceName;
         this.ownerClassName     = ownerClassName;
@@ -65,6 +74,7 @@ public final class SagaDefinition {
         this.timeoutMs          = timeoutMs;
         this.description        = description;
         this.sagaMethodParams   = List.copyOf(sagaMethodParams);
+        this.extraLocalVars     = List.copyOf(extraLocalVars);
     }
 
     public String getSagaId()                    { return sagaId; }
@@ -76,6 +86,7 @@ public final class SagaDefinition {
     public long getTimeoutMs()                   { return timeoutMs; }
     public String getDescription()               { return description; }
     public List<MethodParam> getSagaMethodParams(){ return sagaMethodParams; }
+    public List<MethodParam> getExtraLocalVars() { return extraLocalVars; }
 
     /** Derives a PascalCase class name from the sagaId. Example: {@code "place-order-saga" → "PlaceOrderSaga"}. */
     public String toClassName() {

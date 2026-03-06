@@ -137,22 +137,24 @@ public class GatewayConfigGenerator {
         // Handle port conflicts
         int servicePort = resolvePortConflict(module.getPort(), module.getServiceName());
 
-        // Only remove "-service" suffix and handle pluralization
+        // Extract base path (e.g. inventory-service -> inventory)
         String serviceName = module.getServiceName();
-        String servicePath = serviceName.replace("-service", "");
+        String baseName = serviceName.replace("-service", "");
 
-        // Convert to plural if it's not already plural
-        // For common cases like order->orders, payment->payments
-        if (!servicePath.endsWith("s")) {
-            servicePath = servicePath + "s"; // Simple pluralization
-        }
+        // Support both singular and simple plural (e.g. /api/inventory and /api/inventorys).
+        // While 'inventorys' isn't grammatically correct, it's what the simple pluralizer produced.
+        // Matching both ensures backward compatibility and fixes 404s for singular calls.
+        String pluralName = baseName.endsWith("s") ? baseName : baseName + "s";
+        String pathPattern = baseName.equals(pluralName)
+                ? "/api/" + baseName + "/**"
+                : "/api/" + baseName + "/**,/api/" + pluralName + "/**";
 
         StringBuilder route = new StringBuilder();
         route.append("        # ").append(module.getServiceName()).append(" Service\n");
         route.append("        - id: ").append(module.getServiceName()).append("-service\n");
         route.append("          uri: http://localhost:").append(servicePort).append("\n");
         route.append("          predicates:\n");
-        route.append("            - Path=/api/").append(servicePath).append("/**\n");
+        route.append("            - Path=").append(pathPattern).append("\n");
         route.append("          filters:\n");
         route.append("            - StripPrefix=0\n");
         route.append("            - name: CircuitBreaker\n");

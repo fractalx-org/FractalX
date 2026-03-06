@@ -1,6 +1,8 @@
 package org.fractalx.core.generator.admin;
 
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.model.SagaDefinition;
+import org.fractalx.core.model.SagaStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,9 +23,14 @@ class AdminDataConsistencyGenerator {
     private static final Logger log = LoggerFactory.getLogger(AdminDataConsistencyGenerator.class);
 
     void generate(Path srcMainJava, String basePackage, List<FractalModule> modules) throws IOException {
+        generate(srcMainJava, basePackage, modules, List.of());
+    }
+
+    void generate(Path srcMainJava, String basePackage, List<FractalModule> modules,
+                  List<SagaDefinition> sagaDefinitions) throws IOException {
         Path pkg = AdminPackageUtil.createPackagePath(srcMainJava, basePackage + ".data");
 
-        generateSagaMetaRegistry(pkg, modules);
+        generateSagaMetaRegistry(pkg, modules, sagaDefinitions);
         generateDataConsistencyController(pkg, modules);
 
         log.debug("Generated admin data consistency components");
@@ -31,22 +38,54 @@ class AdminDataConsistencyGenerator {
 
     // -------------------------------------------------------------------------
 
-    private void generateSagaMetaRegistry(Path pkg, List<FractalModule> modules) throws IOException {
-        // Derive saga entries from modules that have cross-service dependencies
+    private void generateSagaMetaRegistry(Path pkg, List<FractalModule> modules,
+                                           List<SagaDefinition> sagaDefinitions) throws IOException {
         StringBuilder sagaEntries = new StringBuilder();
-        for (FractalModule m : modules) {
-            if (m.getDependencies() != null && !m.getDependencies().isEmpty()) {
-                // Generate a representative saga definition for each service with dependencies
-                String sagaId = toCamelCase(m.getServiceName()) + "Saga";
+
+        if (!sagaDefinitions.isEmpty()) {
+            // Use real @DistributedSaga definitions detected at generation time
+            for (SagaDefinition saga : sagaDefinitions) {
                 StringBuilder steps = new StringBuilder("List.of(");
-                for (int i = 0; i < m.getDependencies().size(); i++) {
-                    steps.append("\"Call ").append(m.getDependencies().get(i)).append("\"");
-                    if (i < m.getDependencies().size() - 1) steps.append(", ");
+                List<SagaStep> stepList = saga.getSteps();
+                for (int i = 0; i < stepList.size(); i++) {
+                    SagaStep s = stepList.get(i);
+                    steps.append("\"").append(s.getTargetServiceName())
+                         .append(":").append(s.getMethodName()).append("\"");
+                    if (i < stepList.size() - 1) steps.append(", ");
                 }
                 steps.append(")");
+
+                StringBuilder compensations = new StringBuilder("List.of(");
+                for (int i = 0; i < stepList.size(); i++) {
+                    SagaStep s = stepList.get(i);
+                    if (s.hasCompensation()) {
+                        compensations.append("\"").append(s.getTargetServiceName())
+                                     .append(":").append(s.getCompensationMethodName()).append("\"");
+                        if (i < stepList.size() - 1) compensations.append(", ");
+                    }
+                }
+                compensations.append(")");
+
                 sagaEntries.append(String.format(
-                        "        new SagaInfo(\"%s\", \"%s\", %s, List.of(\"Compensate\"), true),\n",
-                        sagaId, m.getServiceName(), steps.toString()));
+                        "        new SagaInfo(\"%s\", \"%s\", %s, %s, true),\n",
+                        saga.getSagaId(), saga.getOwnerServiceName(),
+                        steps.toString(), compensations.toString()));
+            }
+        } else {
+            // Fallback: derive approximate saga entries from module dependencies
+            for (FractalModule m : modules) {
+                if (m.getDependencies() != null && !m.getDependencies().isEmpty()) {
+                    String sagaId = toCamelCase(m.getServiceName()) + "Saga";
+                    StringBuilder steps = new StringBuilder("List.of(");
+                    for (int i = 0; i < m.getDependencies().size(); i++) {
+                        steps.append("\"Call ").append(m.getDependencies().get(i)).append("\"");
+                        if (i < m.getDependencies().size() - 1) steps.append(", ");
+                    }
+                    steps.append(")");
+                    sagaEntries.append(String.format(
+                            "        new SagaInfo(\"%s\", \"%s\", %s, List.of(\"Compensate\"), true),\n",
+                            sagaId, m.getServiceName(), steps.toString()));
+                }
             }
         }
 
@@ -190,6 +229,60 @@ class AdminDataConsistencyGenerator {
                                     "http://localhost:" + SAGA_ORCHESTRATOR_PORT + "/saga?sagaId=" + sagaId,
                                     Object.class);
                             return ResponseEntity.ok(resp);
+                        } catch (Exception e) {
+                            return ResponseEntity.ok(Map.of(
+                                "error", "Saga orchestrator unavailable: " + e.getMessage()));
+                        }
+                    }
+
+                    /**
+                     * Returns saga instances enriched with per-step status derived from
+                     * the baked SagaMetaRegistry definitions.
+                     */
+                    @GetMapping("/sagas/instances/enriched")
+                    @SuppressWarnings("unchecked")
+                    public ResponseEntity<Object> getEnrichedInstances() {
+                        try {
+                            List<Map<String, Object>> instances = (List<Map<String, Object>>)
+                                    restTemplate.getForObject(
+                                            "http://localhost:" + SAGA_ORCHESTRATOR_PORT + "/saga",
+                                            List.class);
+                            if (instances == null) return ResponseEntity.ok(new ArrayList<>());
+
+                            List<Map<String, Object>> result = new ArrayList<>();
+                            for (Map<String, Object> inst : instances) {
+                                Map<String, Object> enriched = new LinkedHashMap<>(inst);
+                                String sagaId     = (String) inst.get("sagaId");
+                                String currentStep = (String) inst.get("currentStep");
+                                String sagaStatus  = String.valueOf(inst.get("status"));
+                                registry.findById(sagaId).ifPresent(def -> {
+                                    enriched.put("steps", def.steps());
+                                    enriched.put("compensationSteps", def.compensationSteps());
+                                    List<Map<String, Object>> progress = new ArrayList<>();
+                                    boolean[] found = {false};
+                                    for (String step : def.steps()) {
+                                        Map<String, Object> sp = new LinkedHashMap<>();
+                                        sp.put("step", step);
+                                        String st;
+                                        if ("DONE".equals(sagaStatus)) {
+                                            st = "COMPLETED";
+                                        } else if (step.equals(currentStep)) {
+                                            st = ("FAILED".equals(sagaStatus) || "COMPENSATING".equals(sagaStatus))
+                                                    ? "FAILED" : "IN_PROGRESS";
+                                            found[0] = true;
+                                        } else if (!found[0]) {
+                                            st = "COMPLETED";
+                                        } else {
+                                            st = "PENDING";
+                                        }
+                                        sp.put("status", st);
+                                        progress.add(sp);
+                                    }
+                                    enriched.put("stepProgress", progress);
+                                });
+                                result.add(enriched);
+                            }
+                            return ResponseEntity.ok(result);
                         } catch (Exception e) {
                             return ResponseEntity.ok(Map.of(
                                 "error", "Saga orchestrator unavailable: " + e.getMessage()));
