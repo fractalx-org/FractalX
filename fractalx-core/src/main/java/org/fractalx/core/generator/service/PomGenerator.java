@@ -20,7 +20,7 @@ public class PomGenerator implements ServiceFileGenerator {
     // Use release() so generated POMs reference e.g. "0.2.0" not "0.2.0-SNAPSHOT".
     // SNAPSHOT artifacts are not served by Maven Central, and Docker builds have no
     // local Maven cache — they resolve exclusively from remote repositories.
-    private static final String FRACTALX_RUNTIME_VERSION = FractalxVersion.release();
+    private static final String FRACTALX_RUNTIME_VERSION = FractalxVersion.get();
     private static final String NETSCOPE_VERSION = "1.0.1";
 
     private final ObservabilityInjector observabilityInjector;
