@@ -48,7 +48,7 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
     protected static final String CLR_END = "\033[0J";
 
     // ── FRACTALX block banner ─────────────────────────────────────────────────
-    private static final String[] BANNER = {
+    protected static final String[] BANNER = {
         "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557     \u2588\u2588\u2557  \u2588\u2588\u2557",
         "\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551     \u255a\u2588\u2588\u2557\u2588\u2588\u2554\u255d",
         "\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551        \u2588\u2588\u2551   \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551      \u255a\u2588\u2588\u2588\u2554\u255d ",
@@ -56,7 +56,7 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
         "\u2588\u2588\u2551     \u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557   \u2588\u2588\u2551   \u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2554\u255d \u2588\u2588\u2557",
         "\u255a\u2550\u255d     \u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d   \u255a\u2550\u255d   \u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d"
     };
-    private static final String[] BANNER_COLORS = { S1, S2, S3, S4, S5, S6 };
+    protected static final String[] BANNER_COLORS = { S1, S2, S3, S4, S5, S6 };
 
     // ── Parameters ───────────────────────────────────────────────────────────
     @Parameter(property = "fractalx.color", defaultValue = "true")
@@ -96,7 +96,7 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
     // ── Summary helpers (Vercel-style) ────────────────────────────────────────
 
     protected void section(String title) {
-        out.println("  " + a(BLD) + a(WHT) + "\u2042  " + title + a(RST));
+        out.println("  " + a(BLD) + a(WHT) + "\u25F1  " + title + a(RST));
         out.println();
     }
 
