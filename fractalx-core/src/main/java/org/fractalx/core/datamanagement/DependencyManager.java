@@ -47,6 +47,15 @@ public class DependencyManager {
         injectDependency(module, serviceRoot, "postgresql", dependency);
     }
 
+    public void provisionAop(FractalModule module, Path serviceRoot) {
+        String dependency = """
+        <dependency>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-aop</artifactId>
+                </dependency>""";
+        injectDependency(module, serviceRoot, "spring-boot-starter-aop", dependency);
+    }
+
     private void injectDependency(FractalModule module, Path serviceRoot, String checkString, String rawXml) {
         try {
             Path pomPath = serviceRoot.resolve("pom.xml");

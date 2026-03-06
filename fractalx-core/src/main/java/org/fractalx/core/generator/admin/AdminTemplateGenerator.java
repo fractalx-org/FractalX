@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.admin;
 
+import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,7 +99,7 @@ class AdminTemplateGenerator {
                                 </button>
                             </form>
                         </div>
-                        <div class="footer">FractalX v0.3.2 &mdash; Microservices Framework</div>
+                        <div class="footer">FractalX v" + FractalxVersion.release() + " &mdash; Microservices Framework</div>
                     </div>
                 </body>
                 </html>
@@ -859,17 +860,17 @@ class AdminTemplateGenerator {
                                         <span>Saga Definitions</span>
                                     </div>
                                     <button class="btn btn-outline-secondary btn-sm"
-                                            onclick="loadSagaInstances()">
-                                        View Instances
+                                            onclick="loadSagaInstances(null)">
+                                        <i class="fas fa-list-ul"></i> All Instances
                                     </button>
                                 </div>
                                 <div class="card-bd table-wrap">
                                     <table class="table table-sm mb-0">
                                         <thead><tr>
-                                            <th>Saga ID</th><th>Service</th><th>Steps</th><th>Compensation</th>
+                                            <th>Saga ID</th><th>Owner</th><th>Steps</th><th>Compensation</th><th></th>
                                         </tr></thead>
                                         <tbody id="sagas-tbody">
-                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
+                                            <tr><td colspan="5" class="text-muted p-3">Loading…</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -893,6 +894,29 @@ class AdminTemplateGenerator {
                                 </div>
                             </div>
                         </div>
+                        <!-- Saga Instances Panel (shown on demand) -->
+                        <div id="instances-panel" class="card2" style="margin-top:12px;display:none">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-stream" style="color:#6366f1"></i>
+                                    <span id="instances-panel-title">Saga Instances</span>
+                                </div>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="closeInstancesPanel()">
+                                    <i class="fas fa-times"></i> Close
+                                </button>
+                            </div>
+                            <div class="card-bd table-wrap">
+                                <table class="table table-sm mb-0">
+                                    <thead><tr>
+                                        <th>#</th><th>Correlation ID</th><th>Status</th>
+                                        <th>Step Progress</th><th>Started</th><th>Updated</th><th></th>
+                                    </tr></thead>
+                                    <tbody id="instances-tbody">
+                                        <tr><td colspan="7" class="text-muted p-3 text-center">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                         <div class="card2" style="margin-top:12px">
                             <div class="card-hd">
                                 <div class="card-hd-l">
@@ -902,6 +926,22 @@ class AdminTemplateGenerator {
                             </div>
                             <div class="card-bd p-3" id="outbox-info">
                                 <span class="text-muted">Loading…</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Saga Instance Detail Modal -->
+                    <div class="modal fade" id="instanceDetailModal" tabindex="-1">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <div class="modal-header" style="border-bottom:1px solid #e5e7eb">
+                                    <h5 class="modal-title">
+                                        <i class="fas fa-info-circle me-2" style="color:#6366f1"></i>Saga Instance Detail
+                                    </h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body" id="instance-detail-body" style="padding:20px">
+                                    Loading…
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1695,22 +1735,28 @@ class AdminTemplateGenerator {
                             const tbody = document.getElementById('sagas-tbody');
                             tbody.innerHTML = '';
                             if (!sagas.length) {
-                                tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No saga definitions</td></tr>';
+                                tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No saga definitions</td></tr>';
                                 return;
                             }
                             sagas.forEach(s => {
+                                const stepsList = (s.steps||[]).map((st, i) => {
+                                    const parts = st.split(':');
+                                    const svc = parts[0], method = parts[1] || st;
+                                    return `<div style="font-size:11px;padding:1px 0"><span style="color:#9ca3af">${i+1}.</span> <span style="color:#6366f1">${svc}</span> → <strong>${method}</strong></div>`;
+                                }).join('');
                                 tbody.innerHTML += `<tr>
-                                    <td><code>${s.sagaId}</code></td>
-                                    <td>${s.orchestratedBy}</td>
-                                    <td>${(s.steps||[]).length} steps</td>
-                                    <td>${(s.compensationSteps||[]).length > 0 ?
-                                        '<span class="badge bg-success">Yes</span>' :
-                                        '<span class="badge bg-secondary">No</span>'}</td>
+                                    <td><code style="font-size:12px">${s.sagaId}</code></td>
+                                    <td><small>${s.orchestratedBy}</small></td>
+                                    <td><div style="min-width:200px">${stepsList}</div></td>
+                                    <td style="text-align:center">${(s.compensationSteps||[]).length > 0 ?
+                                        '<span class="badge bg-success small">Yes</span>' :
+                                        '<span class="badge bg-secondary small">No</span>'}</td>
+                                    <td><button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:#6366f115;color:#6366f1;border:1px solid #6366f130;border-radius:4px" onclick="loadSagaInstances('${s.sagaId}')"><i class="fas fa-list-ul me-1"></i>Instances</button></td>
                                 </tr>`;
                             });
                         }).catch(() => {
                             document.getElementById('sagas-tbody').innerHTML =
-                                '<tr><td colspan="4" class="text-muted">No sagas configured</td></tr>';
+                                '<tr><td colspan="5" class="text-muted">No sagas configured</td></tr>';
                         });
 
                     fetch('/api/data/databases')
@@ -1748,10 +1794,116 @@ class AdminTemplateGenerator {
                         });
                 }
 
-                function loadSagaInstances() {
-                    fetch('/api/data/sagas/instances')
-                        .then(r => r.json()).then(d => alert(JSON.stringify(d, null, 2)))
-                        .catch(() => alert('Saga orchestrator unavailable'));
+                function loadSagaInstances(sagaIdFilter) {
+                    const panel = document.getElementById('instances-panel');
+                    const title = document.getElementById('instances-panel-title');
+                    panel.style.display = 'block';
+                    title.textContent = sagaIdFilter ? `Instances — ${sagaIdFilter}` : 'All Saga Instances';
+                    const tbody = document.getElementById('instances-tbody');
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted p-3"><i class="fas fa-spinner fa-spin me-2"></i>Loading…</td></tr>';
+                    panel.scrollIntoView({behavior:'smooth', block:'start'});
+
+                    fetch('/api/data/sagas/instances/enriched')
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data && data.error) {
+                                tbody.innerHTML = `<tr><td colspan="7" class="text-danger p-3 text-center">${data.error}</td></tr>`;
+                                return;
+                            }
+                            const instances = sagaIdFilter ? (data||[]).filter(i => i.sagaId === sagaIdFilter) : (data||[]);
+                            if (!instances.length) {
+                                tbody.innerHTML = '<tr><td colspan="7" class="text-muted p-3 text-center">No instances found</td></tr>';
+                                return;
+                            }
+                            const statusClass = {DONE:'badge-up',IN_PROGRESS:'bg-primary',STARTED:'bg-info text-dark',COMPENSATING:'bg-warning text-dark',FAILED:'badge-down'};
+                            tbody.innerHTML = '';
+                            instances.forEach(inst => {
+                                const sc = statusClass[inst.status] || 'bg-secondary';
+                                const shortId = (inst.correlationId||'').substring(0,8)+'…';
+                                const progress = buildStepProgressBubbles(inst.stepProgress||[]);
+                                const started = fmtTs(inst.startedAt);
+                                const updated = fmtTs(inst.updatedAt);
+                                const dataAttr = encodeURIComponent(JSON.stringify(inst));
+                                tbody.innerHTML += `<tr>
+                                    <td class="text-muted small">${inst.id||'—'}</td>
+                                    <td><code title="${inst.correlationId}" style="font-size:11px">${shortId}</code></td>
+                                    <td><span class="badge ${sc}" style="font-size:11px">${inst.status}</span></td>
+                                    <td>${progress}</td>
+                                    <td class="text-muted small">${started}</td>
+                                    <td class="text-muted small">${updated}</td>
+                                    <td><button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px" onclick="showInstanceDetail(decodeURIComponent('${dataAttr}'))">Detail</button></td>
+                                </tr>`;
+                            });
+                        })
+                        .catch(() => {
+                            tbody.innerHTML = '<tr><td colspan="7" class="text-danger p-3 text-center">Saga orchestrator unavailable</td></tr>';
+                        });
+                }
+
+                function buildStepProgressBubbles(steps) {
+                    if (!steps.length) return '<span class="text-muted small">—</span>';
+                    const icons = {COMPLETED:'<span style="color:#22c55e" title="COMPLETED">✓</span>',IN_PROGRESS:'<span style="color:#3b82f6;font-weight:bold" title="IN_PROGRESS">▶</span>',FAILED:'<span style="color:#ef4444" title="FAILED">✗</span>',PENDING:'<span style="color:#d1d5db" title="PENDING">○</span>'};
+                    return '<span style="font-size:14px;letter-spacing:2px">' + steps.map(sp => `<span title="${sp.step}">${(icons[sp.status]||'○')}</span>`).join('<span style="color:#d1d5db;font-size:10px"> › </span>') + '</span>';
+                }
+
+                function fmtTs(ts) {
+                    if (!ts) return '—';
+                    if (Array.isArray(ts)) {
+                        const [y,mo,d,h,mi,s] = ts;
+                        return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')} ${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+                    }
+                    return new Date(ts).toLocaleString();
+                }
+
+                function showInstanceDetail(raw) {
+                    const inst = JSON.parse(raw);
+                    const statusColor = {DONE:'#22c55e',IN_PROGRESS:'#3b82f6',STARTED:'#06b6d4',COMPENSATING:'#f59e0b',FAILED:'#ef4444'};
+                    const sc = statusColor[inst.status] || '#6b7280';
+                    const stepIcons = {COMPLETED:'✓',IN_PROGRESS:'▶',FAILED:'✗',PENDING:'○'};
+                    const stepColors = {COMPLETED:'#22c55e',IN_PROGRESS:'#3b82f6',FAILED:'#ef4444',PENDING:'#9ca3af'};
+
+                    const stepsHtml = (inst.stepProgress||[]).map((sp, i) => {
+                        const parts = sp.step.split(':');
+                        const svc = parts[0], method = parts[1]||sp.step;
+                        const ic = stepIcons[sp.status]||'○';
+                        const col = stepColors[sp.status]||'#9ca3af';
+                        const isCurrent = sp.status === 'IN_PROGRESS' || sp.status === 'FAILED';
+                        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f3f4f6${isCurrent?';background:#f0f9ff;margin:0 -8px;padding:8px':''}" >
+                            <span style="width:24px;height:24px;border-radius:50%;background:${col}20;display:flex;align-items:center;justify-content:center;color:${col};font-size:13px;font-weight:bold;flex-shrink:0">${ic}</span>
+                            <div style="flex:1">
+                                <div style="font-weight:500;font-size:13px">${i+1}. ${method}</div>
+                                <div style="color:#6b7280;font-size:11px">${svc}</div>
+                            </div>
+                            <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${col}20;color:${col};font-weight:600">${sp.status}</span>
+                        </div>`;
+                    }).join('');
+
+                    let payload = '—';
+                    try { payload = JSON.stringify(JSON.parse(inst.payload||'{}'), null, 2); } catch(e) { payload = inst.payload||'—'; }
+
+                    document.getElementById('instance-detail-body').innerHTML = `
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #f3f4f6">
+                            <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">SAGA ID</div><code style="font-size:13px">${inst.sagaId||'—'}</code></div>
+                            <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">STATUS</div><span style="font-weight:700;color:${sc};font-size:14px">${inst.status}</span></div>
+                            <div style="grid-column:1/-1"><div class="text-muted" style="font-size:11px;margin-bottom:2px">CORRELATION ID</div><code style="font-size:11px;word-break:break-all">${inst.correlationId||'—'}</code></div>
+                            <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">OWNER SERVICE</div><span style="font-size:13px">${inst.ownerService||'—'}</span></div>
+                            <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">STARTED</div><span style="font-size:12px">${fmtTs(inst.startedAt)}</span></div>
+                            <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">LAST UPDATED</div><span style="font-size:12px">${fmtTs(inst.updatedAt)}</span></div>
+                        </div>
+                        ${inst.errorMessage ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;margin-bottom:16px;font-size:12px;color:#dc2626"><strong>Error:</strong> ${inst.errorMessage}</div>` : ''}
+                        <div style="margin-bottom:16px">
+                            <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:#374151">Step Execution (${(inst.stepProgress||[]).length} steps)</div>
+                            <div style="border:1px solid #e5e7eb;border-radius:8px;padding:0 12px">${stepsHtml||'<div class="text-muted small p-3 text-center">No step data</div>'}</div>
+                        </div>
+                        <div>
+                            <div style="font-weight:600;font-size:13px;margin-bottom:6px;color:#374151">Payload</div>
+                            <pre style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:12px;font-size:11px;max-height:160px;overflow:auto;margin:0;color:#374151">${payload}</pre>
+                        </div>`;
+                    new bootstrap.Modal(document.getElementById('instanceDetailModal')).show();
+                }
+
+                function closeInstancesPanel() {
+                    document.getElementById('instances-panel').style.display = 'none';
                 }
                 """;
     }

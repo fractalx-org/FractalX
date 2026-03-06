@@ -51,6 +51,7 @@ class AdminSecurityConfigGenerator {
                             .authorizeHttpRequests(auth -> auth
                                 .requestMatchers("/css/**", "/js/**", "/webjars/**").permitAll()
                                 .requestMatchers("/login").permitAll()
+                                .requestMatchers("/actuator/**").permitAll()
                                 .requestMatchers("/api/users/**").hasRole("ADMIN")
                                 .requestMatchers("/api/config/**").hasAnyRole("ADMIN", "OPERATOR")
                                 .anyRequest().authenticated()

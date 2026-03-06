@@ -309,10 +309,12 @@ class AdminObservabilityGenerator {
     private void generateAlertEvaluator(Path pkg, List<FractalModule> modules) throws IOException {
         StringBuilder checks = new StringBuilder();
         for (FractalModule m : modules) {
+            String envVar = m.getServiceName().toUpperCase().replace("-", "_") + "_BASE_URL";
             checks.append("""
-                        evaluate("%s", "http://localhost:%d/actuator/health",
-                                "http://localhost:%d/actuator/metrics/http.server.requests");
-                    """.formatted(m.getServiceName(), m.getPort(), m.getPort()));
+                        evaluate("%s", 
+                                 System.getenv("%s") != null ? System.getenv("%s") + "/actuator/health" : "http://localhost:%d/actuator/health",
+                                 System.getenv("%s") != null ? System.getenv("%s") + "/actuator/metrics/http.server.requests" : "http://localhost:%d/actuator/metrics/http.server.requests");
+                    """.formatted(m.getServiceName(), envVar, envVar, m.getPort(), envVar, envVar, m.getPort()));
         }
 
         Files.writeString(pkg.resolve("AlertEvaluator.java"), """

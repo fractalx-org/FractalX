@@ -225,6 +225,99 @@ class SagaAnalyzerSpec extends Specification {
         sagas[0].ownerServiceName == "order-service"
     }
 
+    def "compensation method is resolved from actual target bean methods (cancel prefix)"() {
+        given: "PaymentService declares cancelProcessPayment — the analyzer should find it"
+        write("org/fractalx/test/payment/PaymentService.java", """
+            package org.fractalx.test.payment;
+            public class PaymentService {
+                public void processPayment(String id, double amount) {}
+                public void cancelProcessPayment(String id, double amount) {}
+            }
+        """)
+        write("org/fractalx/test/order/OrderService.java", """
+            package org.fractalx.test.order;
+            import org.fractalx.annotations.DistributedSaga;
+            public class OrderService {
+                private PaymentService paymentService;
+                @DistributedSaga(sagaId = "pay-saga", compensationMethod = "cancelOrder")
+                public void placeOrder(String id) {
+                    paymentService.processPayment(id, 99.0);
+                }
+                public void cancelOrder(String id) {}
+            }
+        """)
+
+        when:
+        def sagas = analyzer.analyzeSagas(sourceRoot, [orderModule(), paymentModule()])
+
+        then:
+        def step = sagas[0].steps[0]
+        step.methodName             == "processPayment"
+        step.compensationMethodName == "cancelProcessPayment"
+        step.hasCompensation()
+    }
+
+    def "compensation method is resolved via alternative prefixes (refund prefix)"() {
+        given: "PaymentService uses refund* — analyzer should prefer it over cancel*"
+        write("org/fractalx/test/payment/PaymentService.java", """
+            package org.fractalx.test.payment;
+            public class PaymentService {
+                public void processPayment(String id, double amount) {}
+                public void refundProcessPayment(String id, double amount) {}
+            }
+        """)
+        write("org/fractalx/test/order/OrderService.java", """
+            package org.fractalx.test.order;
+            import org.fractalx.annotations.DistributedSaga;
+            public class OrderService {
+                private PaymentService paymentService;
+                @DistributedSaga(sagaId = "pay-saga", compensationMethod = "cancelOrder")
+                public void placeOrder(String id) {
+                    paymentService.processPayment(id, 99.0);
+                }
+                public void cancelOrder(String id) {}
+            }
+        """)
+
+        when:
+        def sagas = analyzer.analyzeSagas(sourceRoot, [orderModule(), paymentModule()])
+
+        then:
+        def step = sagas[0].steps[0]
+        step.compensationMethodName == "refundProcessPayment"
+        step.hasCompensation()
+    }
+
+    def "compensation is empty and hasCompensation false when no matching method exists on target bean"() {
+        given: "InventoryService has no cancel/rollback/etc. method for getProduct"
+        write("org/fractalx/test/inventory/InventoryService.java", """
+            package org.fractalx.test.inventory;
+            public class InventoryService {
+                public void getProduct(String id) {}
+            }
+        """)
+        write("org/fractalx/test/order/OrderService.java", """
+            package org.fractalx.test.order;
+            import org.fractalx.annotations.DistributedSaga;
+            public class OrderService {
+                private InventoryService inventoryService;
+                @DistributedSaga(sagaId = "order-saga", compensationMethod = "cancel")
+                public void placeOrder(String id) {
+                    inventoryService.getProduct(id);
+                }
+                public void cancel(String id) {}
+            }
+        """)
+
+        when:
+        def sagas = analyzer.analyzeSagas(sourceRoot, [orderModule(), inventoryModule()])
+
+        then:
+        def step = sagas[0].steps[0]
+        step.compensationMethodName == ""
+        !step.hasCompensation()
+    }
+
     def "ownerClassName is the simple name of the annotated class"() {
         given:
         write("org/fractalx/test/order/OrderService.java", """

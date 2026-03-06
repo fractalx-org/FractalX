@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.service;
 
+import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.FractalModule;
@@ -16,7 +17,7 @@ import java.nio.file.Files;
 public class PomGenerator implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(PomGenerator.class);
-    private static final String FRACTALX_RUNTIME_VERSION = "0.2.0-SNAPSHOT";
+    private static final String FRACTALX_RUNTIME_VERSION = FractalxVersion.get();
 
     private final ObservabilityInjector observabilityInjector;
 

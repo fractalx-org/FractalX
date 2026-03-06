@@ -14,6 +14,7 @@ import org.fractalx.core.generator.resilience.ResilienceConfigStep;
 import org.fractalx.core.generator.saga.SagaOrchestratorGenerator;
 import org.fractalx.core.generator.service.ApplicationGenerator;
 import org.fractalx.core.generator.service.ConfigurationGenerator;
+import org.fractalx.core.generator.service.CorrelationIdGenerator;
 import org.fractalx.core.generator.service.NetScopeClientGenerator;
 import org.fractalx.core.generator.service.NetScopeRegistryBridgeStep;
 import org.fractalx.core.generator.service.PomGenerator;
@@ -26,6 +27,7 @@ import org.fractalx.core.generator.transformation.ImportCleaner;
 import org.fractalx.core.generator.transformation.ImportPreserver;
 import org.fractalx.core.generator.transformation.NetScopeClientWiringStep;
 import org.fractalx.core.generator.transformation.NetScopeServerAnnotationStep;
+import org.fractalx.core.generator.transformation.SagaMethodTransformer;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.SagaDefinition;
 import org.fractalx.core.observability.LoggerServiceGenerator;
@@ -66,6 +68,15 @@ public class ServiceGenerator {
     private final RegistryServiceGenerator  registryServiceGenerator;
     private final DockerComposeGenerator    dockerComposeGenerator;
 
+    private java.util.function.Consumer<String> onStepStart    = lbl -> {};
+    private java.util.function.Consumer<String> onStepComplete = lbl -> {};
+
+    public void setProgressCallbacks(java.util.function.Consumer<String> onStart,
+                                     java.util.function.Consumer<String> onComplete) {
+        this.onStepStart    = onStart;
+        this.onStepComplete = onComplete;
+    }
+
     public ServiceGenerator(Path sourceRoot, Path outputRoot) {
         this.sourceRoot = sourceRoot;
         this.outputRoot = outputRoot;
@@ -101,9 +112,11 @@ public class ServiceGenerator {
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
+                new SagaMethodTransformer(),    // replaces cross-service calls with outboxPublisher.publish()
                 context -> distributedServiceHelper.upgradeService(
                         context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
                         context.getSagaDefinitions()),
+                new CorrelationIdGenerator(),    // generates logback-spring.xml with %X{correlationId}
                 new OtelConfigStep(),
                 new HealthMetricsStep(),
                 new ServiceRegistrationStep(),
@@ -117,7 +130,7 @@ public class ServiceGenerator {
     // -------------------------------------------------------------------------
 
     public void generateServices(List<FractalModule> modules) throws IOException {
-        log.info("Starting code generation for {} modules", modules.size());
+        log.debug("Starting code generation for {} modules", modules.size());
         FractalxConfig fractalxConfig = new FractalxConfigReader()
                 .read(sourceRoot.resolve("src/main/resources"));
         Files.createDirectories(outputRoot);
@@ -132,29 +145,43 @@ public class ServiceGenerator {
         List<SagaDefinition> sagaDefinitions = sagaAnalyzer.analyzeSagas(sourceRoot, modules);
 
         // Generate the service registry first so it is available for all other generators
+        onStepStart.accept("fractalx-registry");
         registryServiceGenerator.generate(modules, outputRoot);
+        onStepComplete.accept("fractalx-registry");
 
         for (FractalModule module : modules) {
+            onStepStart.accept(module.getServiceName());
             generateService(module, modules, fractalxConfig, sagaDefinitions);
+            onStepComplete.accept(module.getServiceName());
         }
 
         new LoggerServiceGenerator().generate(outputRoot);
 
         if (modules.size() > 1) {
+            onStepStart.accept("fractalx-gateway");
             generateApiGateway(modules, fractalxConfig);
+            onStepComplete.accept("fractalx-gateway");
         }
 
-        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig);
-
-        // Generate saga orchestrator service if any sagas were detected
-        sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
+        onStepStart.accept("fractalx-admin");
+        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions);
+        onStepComplete.accept("fractalx-admin");
 
         boolean hasSagas = !sagaDefinitions.isEmpty();
+        if (hasSagas) {
+            onStepStart.accept("fractalx-saga-orchestrator");
+            sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
+            onStepComplete.accept("fractalx-saga-orchestrator");
+        } else {
+            sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
+        }
+
+        onStepStart.accept("docker-compose + scripts");
         dockerComposeGenerator.generate(modules, outputRoot, hasSagas);
-
         generateStartScripts(modules, sagaDefinitions);
+        onStepComplete.accept("docker-compose + scripts");
 
-        log.info("Code generation complete!");
+        log.debug("Code generation complete!");
     }
 
     // -------------------------------------------------------------------------
@@ -164,7 +191,7 @@ public class ServiceGenerator {
     private void generateService(FractalModule module, List<FractalModule> allModules,
                                   FractalxConfig fractalxConfig,
                                   List<SagaDefinition> sagaDefinitions) throws IOException {
-        log.info("Generating service: {}", module.getServiceName());
+        log.debug("Generating service: {}", module.getServiceName());
 
         Path serviceRoot = outputRoot.resolve(module.getServiceName());
         Files.createDirectories(serviceRoot.resolve("src/main/java"));
@@ -178,15 +205,15 @@ public class ServiceGenerator {
             step.generate(context);
         }
 
-        log.info("Generated: {}", module.getServiceName());
+        log.debug("Generated: {}", module.getServiceName());
     }
 
     private void generateApiGateway(List<FractalModule> modules,
                                      FractalxConfig fractalxConfig) throws IOException {
-        log.info("Generating API Gateway for {} services", modules.size());
+        log.debug("Generating API Gateway for {} services", modules.size());
         try {
             new GatewayGenerator(sourceRoot, outputRoot, fractalxConfig).generateGateway(modules);
-            log.info("Generated API Gateway — http://localhost:{}", GATEWAY_PORT);
+            log.debug("Generated API Gateway — http://localhost:{}", GATEWAY_PORT);
             updateReadmeWithGatewayInfo(modules);
         } catch (Exception e) {
             log.error("Failed to generate API Gateway: {}", e.getMessage(), e);
@@ -202,7 +229,7 @@ public class ServiceGenerator {
         generateStopScript(gatewayPath, !sagaDefinitions.isEmpty());
         generateReadme(modules, !sagaDefinitions.isEmpty());
 
-        log.info("Generated start scripts");
+        log.debug("Generated start scripts");
     }
 
     private void generateStartScript(List<FractalModule> modules, Path gatewayPath,
@@ -325,7 +352,7 @@ public class ServiceGenerator {
         readme.append("```\n");
 
         Files.writeString(outputRoot.resolve("README.md"), readme.toString());
-        log.info("Generated README.md");
+        log.debug("Generated README.md");
     }
 
     private void updateReadmeWithGatewayInfo(List<FractalModule> modules) throws IOException {
@@ -358,6 +385,6 @@ public class ServiceGenerator {
                 "## Services\n\n" + gatewaySection + "\n"
         );
         Files.writeString(readmePath, updated);
-        log.info("Updated README with gateway information");
+        log.debug("Updated README with gateway information");
     }
 }
