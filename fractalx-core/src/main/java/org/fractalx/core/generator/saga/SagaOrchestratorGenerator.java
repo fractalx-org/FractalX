@@ -102,6 +102,11 @@ public class SagaOrchestratorGenerator {
         writeFile(packagePath(basePkg, "controller"), "SagaController.java",
                 buildSagaController(sagas));
 
+        // ── Observability (OTel + correlation tracing) ───────────────────────
+        writeFile(basePkg, "OtelConfig.java",               buildOtelConfig());
+        writeFile(basePkg, "CorrelationTracingConfig.java", buildCorrelationTracingConfig());
+        writeFile(basePkg, "TracingExclusionConfig.java",   buildTracingExclusionConfig());
+
         // ── README ────────────────────────────────────────────────────────────
         new DataReadmeGenerator().generateSagaOrchestratorReadme(sagas, modules, serviceRoot);
 
@@ -180,6 +185,22 @@ public class SagaOrchestratorGenerator {
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-starter-actuator</artifactId>
+                        </dependency>
+
+                        <!-- Distributed tracing: Micrometer OTel bridge + OTLP gRPC exporter -->
+                        <dependency>
+                            <groupId>io.micrometer</groupId>
+                            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+                        </dependency>
+                        <dependency>
+                            <groupId>io.opentelemetry</groupId>
+                            <artifactId>opentelemetry-exporter-otlp</artifactId>
+                            <version>1.32.0</version>
+                        </dependency>
+                        <dependency>
+                            <groupId>io.opentelemetry.semconv</groupId>
+                            <artifactId>opentelemetry-semconv</artifactId>
+                            <version>1.21.0-alpha</version>
                         </dependency>
                     </dependencies>
 
@@ -314,6 +335,8 @@ public class SagaOrchestratorGenerator {
                 + "    tracing: true\n"
                 + "    metrics: true\n"
                 + "    logger-url: ${FRACTALX_LOGGER_URL:http://localhost:9099/api/logs}\n"
+                + "    otel:\n"
+                + "      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}\n"
                 + "  saga:\n"
                 + "    owner-urls:\n"
                 + ownerUrlsBlock
@@ -334,9 +357,6 @@ public class SagaOrchestratorGenerator {
                 + "  tracing:\n"
                 + "    sampling:\n"
                 + "      probability: 1.0\n"
-                + "  otlp:\n"
-                + "    tracing:\n"
-                + "      endpoint: ${OTEL_EXPORTER_OTLP_HTTP_ENDPOINT:http://localhost:4318/v1/traces}\n"
                 + "\n"
                 + "logging:\n"
                 + "  level:\n"
@@ -1070,6 +1090,139 @@ public class SagaOrchestratorGenerator {
         sb.append("}\n");
 
         return sb.toString();
+    }
+
+    // =========================================================================
+    // Observability helpers
+    // =========================================================================
+
+    private String buildOtelConfig() {
+        return """
+                package org.fractalx.generated.sagaorchestrator;
+
+                import io.opentelemetry.api.OpenTelemetry;
+                import io.opentelemetry.api.baggage.propagation.W3CBaggagePropagator;
+                import io.opentelemetry.api.common.Attributes;
+                import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
+                import io.opentelemetry.context.propagation.ContextPropagators;
+                import io.opentelemetry.context.propagation.TextMapPropagator;
+                import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
+                import io.opentelemetry.sdk.OpenTelemetrySdk;
+                import io.opentelemetry.sdk.resources.Resource;
+                import io.opentelemetry.sdk.trace.SdkTracerProvider;
+                import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+                import io.opentelemetry.semconv.ResourceAttributes;
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.Configuration;
+
+                @Configuration
+                public class OtelConfig {
+
+                    @Bean
+                    @ConditionalOnMissingBean(OpenTelemetry.class)
+                    public OpenTelemetry openTelemetry(
+                            @Value("${fractalx.observability.otel.endpoint:http://localhost:4317}") String endpoint) {
+
+                        Resource resource = Resource.getDefault()
+                                .merge(Resource.create(Attributes.of(
+                                        ResourceAttributes.SERVICE_NAME, "fractalx-saga-orchestrator")));
+
+                        OtlpGrpcSpanExporter exporter = OtlpGrpcSpanExporter.builder()
+                                .setEndpoint(endpoint)
+                                .build();
+
+                        SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+                                .addSpanProcessor(BatchSpanProcessor.builder(exporter).build())
+                                .setResource(resource)
+                                .build();
+
+                        return OpenTelemetrySdk.builder()
+                                .setTracerProvider(tracerProvider)
+                                .setPropagators(ContextPropagators.create(
+                                        TextMapPropagator.composite(
+                                                W3CTraceContextPropagator.getInstance(),
+                                                W3CBaggagePropagator.getInstance())))
+                                .buildAndRegisterGlobal();
+                    }
+                }
+                """;
+    }
+
+    private String buildCorrelationTracingConfig() {
+        return """
+                package org.fractalx.generated.sagaorchestrator;
+
+                import io.micrometer.tracing.Tracer;
+                import jakarta.servlet.http.HttpServletRequest;
+                import jakarta.servlet.http.HttpServletResponse;
+                import org.slf4j.MDC;
+                import org.springframework.context.annotation.Configuration;
+                import org.springframework.lang.NonNull;
+                import org.springframework.web.servlet.HandlerInterceptor;
+                import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+                import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+                @Configuration
+                public class CorrelationTracingConfig implements WebMvcConfigurer {
+
+                    private final Tracer tracer;
+
+                    public CorrelationTracingConfig(Tracer tracer) {
+                        this.tracer = tracer;
+                    }
+
+                    @Override
+                    public void addInterceptors(@NonNull InterceptorRegistry registry) {
+                        registry.addInterceptor(new HandlerInterceptor() {
+                            @Override
+                            public boolean preHandle(@NonNull HttpServletRequest request,
+                                                     @NonNull HttpServletResponse response,
+                                                     @NonNull Object handler) {
+                                String correlationId = MDC.get("correlationId");
+                                if (correlationId != null && !correlationId.isBlank()) {
+                                    io.micrometer.tracing.Span span = tracer.currentSpan();
+                                    if (span != null) {
+                                        span.tag("correlation.id", correlationId);
+                                    }
+                                }
+                                return true;
+                            }
+                        });
+                    }
+                }
+                """;
+    }
+
+    private String buildTracingExclusionConfig() {
+        return """
+                package org.fractalx.generated.sagaorchestrator;
+
+                import io.micrometer.observation.ObservationPredicate;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.Configuration;
+                import org.springframework.http.server.observation.ServerRequestObservationContext;
+
+                @Configuration
+                public class TracingExclusionConfig {
+
+                    @Bean
+                    public ObservationPredicate noActuatorTracing() {
+                        return (name, context) -> {
+                            if (context instanceof ServerRequestObservationContext sroc) {
+                                return !sroc.getCarrier().getRequestURI().startsWith("/actuator");
+                            }
+                            return true;
+                        };
+                    }
+
+                    @Bean
+                    public ObservationPredicate noScheduledTaskTracing() {
+                        return (name, context) -> !name.startsWith("tasks.scheduled");
+                    }
+                }
+                """;
     }
 
     // =========================================================================

@@ -1099,16 +1099,17 @@ class AdminTemplateGenerator {
                                 <div class="table-wrap">
                                     <table class="table table-sm mb-0">
                                         <thead><tr>
-                                            <th>Trace ID</th><th>Service</th><th>Duration</th>
-                                            <th>Spans</th><th>Jaeger</th>
+                                            <th>Trace ID</th><th>Correlation ID</th><th>Service</th>
+                                            <th>Duration</th><th>Spans</th><th>Jaeger</th><th>Logs</th>
                                         </tr></thead>
                                         <tbody id="traces-tbody">
-                                            <tr><td colspan="5" class="text-center text-muted p-4">
+                                            <tr><td colspan="7" class="text-center text-muted p-4">
                                                 Enter a Correlation ID or service to search
                                             </td></tr>
                                         </tbody>
                                     </table>
                                 </div>
+                                <div id="trace-pagination" class="d-flex gap-2 flex-wrap mt-2"></div>
                                 <div class="mt-2">
                                     <a href="http://localhost:16686" target="_blank"
                                        style="font-size:12px;color:#3b82f6;text-decoration:none">
@@ -2054,50 +2055,129 @@ class AdminTemplateGenerator {
     private String buildScriptsTracesLogs2() {
         return """
                 function loadTraceServices() {
-                    fetch('/api/services/all')
-                        .then(r => r.json()).then(services => {
+                    // Load from Jaeger's own service list (services that have actually reported spans)
+                    fetch('/api/traces/services')
+                        .then(r => r.json()).then(resp => {
                             const sel = document.getElementById('trace-service-select');
+                            sel.innerHTML = '<option value="">— All Services —</option>';
+                            const services = resp.data || resp || [];
                             services.forEach(s => {
                                 const o = document.createElement('option');
-                                o.value = o.textContent = s.meta.name;
+                                o.value = o.textContent = typeof s === 'string' ? s : (s.meta?.name || s.name || s);
                                 sel.appendChild(o);
                             });
-                        }).catch(() => {});
+                        }).catch(() => {
+                            // Fallback: load from FractalX internal service registry
+                            fetch('/api/services/all')
+                                .then(r => r.json()).then(services => {
+                                    const sel = document.getElementById('trace-service-select');
+                                    sel.innerHTML = '<option value="">— All Services —</option>';
+                                    services.forEach(s => {
+                                        const o = document.createElement('option');
+                                        o.value = o.textContent = s.meta?.name || s;
+                                        sel.appendChild(o);
+                                    });
+                                }).catch(() => {});
+                        });
                 }
 
-                function searchTraces() {
-                    const cid    = document.getElementById('trace-correlation-id').value.trim();
-                    const svc    = document.getElementById('trace-service-select').value;
-                    const params = new URLSearchParams();
-                    if (cid) params.set('correlationId', cid);
-                    if (svc) params.set('service', svc);
-                    params.set('limit', '20');
-                    fetch('/api/traces?' + params)
-                        .then(r => r.json()).then(data => {
-                            const tbody = document.getElementById('traces-tbody');
-                            tbody.innerHTML = '';
-                            const traces = data.data || data || [];
-                            if (!traces.length) {
-                                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No traces found</td></tr>';
-                                return;
-                            }
-                            traces.forEach(t => {
-                                const traceId = t.traceID || t.traceId || '';
-                                const svcName = t.processes ? Object.values(t.processes)[0]?.serviceName || '-' : '-';
-                                const dur     = t.duration ? (t.duration / 1000).toFixed(2) + 'ms' : '-';
-                                const spans   = t.spans ? t.spans.length : '-';
-                                tbody.innerHTML += `<tr>
-                                    <td><code style="font-size:.75rem">${traceId.substring(0,16)}...</code></td>
-                                    <td>${svcName}</td><td>${dur}</td><td>${spans}</td>
-                                    <td><a href="http://localhost:16686/trace/${traceId}" target="_blank"
-                                           class="btn btn-xs btn-sm btn-outline-info py-0">
-                                        <i class="fas fa-external-link-alt"></i></a></td>
-                                </tr>`;
+                let allTraces = [];
+                let currentTracePage = 0;
+
+                function searchTraces(page) {
+                    if (page === undefined || page === 0) {
+                        currentTracePage = 0;
+                        const cid    = document.getElementById('trace-correlation-id').value.trim();
+                        const svc    = document.getElementById('trace-service-select').value;
+                        const params = new URLSearchParams();
+                        if (cid) params.set('correlationId', cid);
+                        if (svc) params.set('service', svc);
+                        params.set('limit', '100');
+                        fetch('/api/traces?' + params)
+                            .then(r => r.json()).then(data => {
+                                allTraces = (data.data || data || []).slice().reverse();
+                                renderTracesPage(0);
+                            }).catch(() => {
+                                document.getElementById('traces-tbody').innerHTML =
+                                    '<tr><td colspan="7" class="text-warning">Jaeger unavailable or no traces found</td></tr>';
+                                document.getElementById('trace-pagination').innerHTML = '';
                             });
-                        }).catch(() => {
-                            document.getElementById('traces-tbody').innerHTML =
-                                '<tr><td colspan="5" class="text-warning">Jaeger unavailable or no traces found</td></tr>';
-                        });
+                    } else {
+                        currentTracePage = page;
+                        renderTracesPage(page);
+                    }
+                }
+
+                function renderTracesPage(page) {
+                    const pageSize = 20;
+                    const start = page * pageSize;
+                    const pageTraces = allTraces.slice(start, start + pageSize);
+                    const tbody = document.getElementById('traces-tbody');
+                    tbody.innerHTML = '';
+                    if (!pageTraces.length) {
+                        tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">No traces found</td></tr>';
+                        renderTracePagination(page, 0);
+                        return;
+                    }
+                    const searchCid = document.getElementById('trace-correlation-id').value.trim();
+                    pageTraces.forEach(t => {
+                        const traceId = t.traceID || t.traceId || '';
+                        const svcName = t.processes ? Object.values(t.processes)[0]?.serviceName || '-' : '-';
+                        const dur     = t.duration ? (t.duration / 1000).toFixed(2) + 'ms' : '-';
+                        const spans   = t.spans ? t.spans.length : '-';
+                        let cid = '';
+                        if (t.spans && t.spans.length > 0) {
+                            for (const sp of t.spans) {
+                                const tag = (sp.tags || []).find(tg =>
+                                    tg.key === 'correlation.id' || tg.key === 'correlationId' || tg.key === 'x-correlation-id');
+                                if (tag) { cid = tag.value; break; }
+                            }
+                        }
+                        if (!cid) cid = searchCid;
+                        const cidShort = cid ? cid.substring(0, 12) + (cid.length > 12 ? '…' : '') : '-';
+                        const cidEsc = cid.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
+                        tbody.innerHTML += `<tr>
+                            <td><code style="font-size:.75rem" title="${traceId}">${traceId.substring(0,16)}…</code></td>
+                            <td><code style="font-size:.72rem" title="${cid}">${cidShort}</code></td>
+                            <td>${svcName}</td><td>${dur}</td><td>${spans}</td>
+                            <td><a href="http://localhost:16686/trace/${traceId}" target="_blank"
+                                   class="btn btn-xs btn-sm btn-outline-info py-0">
+                                <i class="fas fa-external-link-alt"></i></a></td>
+                            <td>${cid ? `<button class="btn btn-xs btn-sm btn-outline-success py-0" title="View logs for this correlation ID" onclick="goToLogsWithCorrelation('${cidEsc}')"><i class="fas fa-file-alt"></i></button>` : ''}</td>
+                        </tr>`;
+                    });
+                    renderTracePagination(page, pageTraces.length);
+                }
+
+                function renderTracePagination(page, count) {
+                    const div = document.getElementById('trace-pagination');
+                    div.innerHTML = '';
+                    if (page > 0) {
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-sm btn-outline-secondary';
+                        btn.textContent = '\\u2190 Previous';
+                        btn.onclick = () => searchTraces(page - 1);
+                        div.appendChild(btn);
+                    }
+                    if (count >= 20) {
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-sm btn-outline-primary';
+                        btn.textContent = 'Next \\u2192';
+                        btn.onclick = () => searchTraces(page + 1);
+                        div.appendChild(btn);
+                    }
+                    if (allTraces.length > 0) {
+                        const info = document.createElement('span');
+                        info.className = 'text-muted small align-self-center';
+                        info.textContent = 'Page ' + (page + 1) + ' \\u00b7 ' + allTraces.length + ' total';
+                        div.appendChild(info);
+                    }
+                }
+
+                function goToLogsWithCorrelation(cid) {
+                    document.getElementById('log-correlation-id').value = cid;
+                    showSection('logs');
+                    searchLogs(0);
                 }
 
                 let currentLogPage = 0;
@@ -2126,6 +2206,7 @@ class AdminTemplateGenerator {
                     if (level) params.set('level', level);
                     fetch('/api/logs?' + params)
                         .then(r => r.json()).then(logs => {
+                            if (Array.isArray(logs)) logs.reverse();
                             const tbody = document.getElementById('logs-tbody');
                             tbody.innerHTML = '';
                             if (!logs.length) {

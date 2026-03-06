@@ -37,7 +37,72 @@ public class OtelConfigStep implements ServiceFileGenerator {
         Path   pkgPath = resolvePackage(context.getSrcMainJava(), pkg);
 
         Files.writeString(pkgPath.resolve("OtelConfig.java"), buildContent(pkg));
-        log.debug("Generated OtelConfig for {}", module.getServiceName());
+        Files.writeString(pkgPath.resolve("CorrelationTracingConfig.java"), buildCorrelationConfig(pkg));
+        Files.writeString(pkgPath.resolve("TracingExclusionConfig.java"), buildTracingExclusion(pkg));
+        log.debug("Generated OtelConfig + CorrelationTracingConfig for {}", module.getServiceName());
+    }
+
+    /**
+     * Generates a WebMvcConfigurer + HandlerInterceptor that reads the correlationId
+     * from MDC (set by TraceFilter at HIGHEST_PRECEDENCE) and tags the active Micrometer
+     * span with "correlation.id". preHandle() is called AFTER all filters including the
+     * Spring Boot observation filter that creates the span, so tracer.currentSpan() is
+     * always valid here. The span tag makes traces searchable in Jaeger by correlation ID.
+     */
+    private String buildCorrelationConfig(String pkg) {
+        return """
+                package %s;
+
+                import io.micrometer.tracing.Tracer;
+                import jakarta.servlet.http.HttpServletRequest;
+                import jakarta.servlet.http.HttpServletResponse;
+                import org.slf4j.MDC;
+                import org.springframework.context.annotation.Configuration;
+                import org.springframework.lang.NonNull;
+                import org.springframework.web.servlet.HandlerInterceptor;
+                import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+                import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+                /**
+                 * Tags the active Micrometer/OTel span with the current request's correlation ID.
+                 *
+                 * <p>The tag key "correlation.id" matches what the admin service uses when querying
+                 * Jaeger ({@code /api/traces?tags=correlation.id%%3D<value>}), so correlation ID
+                 * search in the admin UI traces tab will work out of the box.
+                 *
+                 * <p>This interceptor runs in {@code preHandle()} which is guaranteed to execute
+                 * after Spring Boot's {@code ServerHttpObservationFilter} has already started the
+                 * span. The {@link Tracer#currentSpan()} call is therefore always safe here.
+                 */
+                @Configuration
+                public class CorrelationTracingConfig implements WebMvcConfigurer {
+
+                    private final Tracer tracer;
+
+                    public CorrelationTracingConfig(Tracer tracer) {
+                        this.tracer = tracer;
+                    }
+
+                    @Override
+                    public void addInterceptors(@NonNull InterceptorRegistry registry) {
+                        registry.addInterceptor(new HandlerInterceptor() {
+                            @Override
+                            public boolean preHandle(@NonNull HttpServletRequest request,
+                                                     @NonNull HttpServletResponse response,
+                                                     @NonNull Object handler) {
+                                String correlationId = MDC.get("correlationId");
+                                if (correlationId != null && !correlationId.isBlank()) {
+                                    io.micrometer.tracing.Span span = tracer.currentSpan();
+                                    if (span != null) {
+                                        span.tag("correlation.id", correlationId);
+                                    }
+                                }
+                                return true;
+                            }
+                        });
+                    }
+                }
+                """.formatted(pkg);
     }
 
     private String buildContent(String pkg) {
@@ -114,6 +179,43 @@ public class OtelConfigStep implements ServiceFileGenerator {
                                                 W3CTraceContextPropagator.getInstance(),
                                                 W3CBaggagePropagator.getInstance())))
                                 .buildAndRegisterGlobal();
+                    }
+                }
+                """.formatted(pkg);
+    }
+
+    private String buildTracingExclusion(String pkg) {
+        return """
+                package %s;
+
+                import io.micrometer.observation.ObservationPredicate;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.Configuration;
+                import org.springframework.http.server.observation.ServerRequestObservationContext;
+
+                /**
+                 * Excludes noisy observations from tracing so Jaeger stays clean:
+                 * <ul>
+                 *   <li>Actuator health/metrics endpoints</li>
+                 *   <li>Scheduled tasks (e.g. outbox poller running every second)</li>
+                 * </ul>
+                 */
+                @Configuration
+                public class TracingExclusionConfig {
+
+                    @Bean
+                    public ObservationPredicate noActuatorTracing() {
+                        return (name, context) -> {
+                            if (context instanceof ServerRequestObservationContext sroc) {
+                                return !sroc.getCarrier().getRequestURI().startsWith("/actuator");
+                            }
+                            return true;
+                        };
+                    }
+
+                    @Bean
+                    public ObservationPredicate noScheduledTaskTracing() {
+                        return (name, context) -> !name.startsWith("tasks.scheduled");
                     }
                 }
                 """.formatted(pkg);

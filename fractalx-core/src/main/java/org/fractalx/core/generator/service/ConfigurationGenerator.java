@@ -89,9 +89,6 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   tracing:
                     sampling:
                       probability: 1.0
-                  otlp:
-                    tracing:
-                      endpoint: ${OTEL_EXPORTER_OTLP_HTTP_ENDPOINT:http://localhost:4318/v1/traces}
 
                 logging:
                   level:
