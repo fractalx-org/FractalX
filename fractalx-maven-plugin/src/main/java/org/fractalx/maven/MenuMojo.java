@@ -15,8 +15,9 @@ import java.util.Arrays;
 import java.util.Scanner;
 
 /**
- * Interactive CLI menu — shows the FRACTALX banner once, then lets the user
- * navigate commands with arrow keys and execute the selected one.
+ * Interactive CLI menu — shows the FRACTALX banner, lets the user navigate
+ * commands with arrow keys, executes the selected one, then returns to the
+ * menu to ask what's next. Choose Exit (or press q / Ctrl-C) to leave.
  *
  * <pre>
  *   mvn fractalx:menu
@@ -38,10 +39,10 @@ public class MenuMojo extends FractalxBaseMojo {
                defaultValue = "${project.basedir}/fractalx-output")
     private File outputDirectory;
 
-    // ── Menu options ──────────────────────────────────────────────────────────
+    // ── Menu options (Exit is rendered separately as the last item) ───────────
 
     private static final String[] NAMES = {
-        "decompose", "verify", "start", "stop", "restart", "ps", "services"
+        "decompose", "verify", "start", "stop", "restart", "ps", "services", "logs"
     };
 
     private static final String[] DESCS = {
@@ -51,11 +52,17 @@ public class MenuMojo extends FractalxBaseMojo {
         "Stop running services",
         "Restart services",
         "Show service process status",
-        "List all generated services"
+        "List all generated services",
+        "Stream a service log file"
     };
 
     private static final int NAME_W =
             Arrays.stream(NAMES).mapToInt(String::length).max().orElse(8) + 3;
+
+    /** Sentinel index meaning the user chose "Exit". */
+    private static final int EXIT_IDX = NAMES.length;
+    /** Total selectable rows = commands + Exit. */
+    private static final int TOTAL    = NAMES.length + 1;
 
     // ── Execute ───────────────────────────────────────────────────────────────
 
@@ -64,61 +71,85 @@ public class MenuMojo extends FractalxBaseMojo {
         initCli();
 
         if (!ansi) {
-            runNumberedMenu();
+            runNumberedMenuLoop();
             return;
         }
 
-        out.print(ALT_ON);
-        out.flush();
+        enableRawMode();
+        Runtime.getRuntime().addShutdownHook(new Thread(MenuMojo::restoreTerminal));
 
-        boolean rawEnabled = enableRawMode();
-        if (rawEnabled) {
-            Runtime.getRuntime().addShutdownHook(new Thread(MenuMojo::restoreTerminal));
-        }
-
-        int selected = 0;
         try (FileInputStream tty = new FileInputStream("/dev/tty")) {
-            drawMenu(selected);
+            int selected = 0;
 
+            outer:
             while (true) {
-                int b = tty.read();
 
-                if (b == 27) {                           // ESC / arrow key
-                    try { Thread.sleep(10); } catch (InterruptedException ignored) {}
-                    if (tty.available() > 0) {
-                        int b2 = tty.read();
-                        if (b2 == '[' && tty.available() > 0) {
-                            int b3 = tty.read();
-                            if      (b3 == 'A') selected = (selected - 1 + NAMES.length) % NAMES.length;
-                            else if (b3 == 'B') selected = (selected + 1) % NAMES.length;
+                // ── Show menu on alternate screen ──────────────────────────────
+                out.print(ALT_ON);
+                out.flush();
+                drawMenu(selected);
+
+                // ── Navigation loop ────────────────────────────────────────────
+                inner:
+                while (true) {
+                    int b = tty.read();
+
+                    if (b == 27) {
+                        try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+                        if (tty.available() > 0) {
+                            int b2 = tty.read();
+                            if (b2 == '[' && tty.available() > 0) {
+                                int b3 = tty.read();
+                                if      (b3 == 'A') selected = (selected - 1 + TOTAL) % TOTAL;
+                                else if (b3 == 'B') selected = (selected + 1) % TOTAL;
+                            }
+                        } else {
+                            // bare ESC → quit
+                            out.print(ALT_OFF); out.flush();
+                            break outer;
                         }
-                        // any other ESC sequence — ignore
-                    } else {
-                        selected = -1; break;            // bare ESC → quit
-                    }
-                } else if (b == '\r' || b == '\n') {     // Enter → confirm
-                    break;
-                } else if (b == 'q' || b == 3 || b == 4) { // q / Ctrl-C / Ctrl-D → quit
-                    selected = -1; break;
-                } else if (b == 'k') {
-                    selected = (selected - 1 + NAMES.length) % NAMES.length;
-                } else if (b == 'j') {
-                    selected = (selected + 1) % NAMES.length;
+                    } else if (b == '\r' || b == '\n') {
+                        break inner;                  // Enter → confirmed
+                    } else if (b == 'q' || b == 3 || b == 4) {
+                        out.print(ALT_OFF); out.flush();
+                        break outer;
+                    } else if (b == 'k') selected = (selected - 1 + TOTAL) % TOTAL;
+                    else if  (b == 'j') selected = (selected + 1) % TOTAL;
+
+                    drawMenu(selected);
                 }
 
-                drawMenu(selected);
+                // ── Exit alt screen before running ─────────────────────────────
+                out.print(ALT_OFF);
+                out.flush();
+
+                if (selected == EXIT_IDX) break;       // Exit chosen
+
+                // ── Run command on main screen ─────────────────────────────────
+                try {
+                    invokeCommand(NAMES[selected]);
+                } catch (MojoExecutionException e) {
+                    out.println();
+                    warn("Command failed: " + e.getMessage());
+                }
+
+                // Sub-mojos may restore the terminal — re-enable raw mode so
+                // the "press any key" read and next menu loop work correctly.
+                enableRawMode();
+
+                // ── "Press any key to return to menu" ──────────────────────────
+                out.println();
+                out.print("  " + a(DIM) + "\u21B5  press any key to return to menu" + a(RST));
+                out.flush();
+                int k = tty.read();
+                out.println();
+                if (k == 'q' || k == 3 || k == 4) break; // q/Ctrl-C here also exits
             }
 
-        } catch (IOException e) {
-            selected = -1;   // no TTY available
+        } catch (IOException ignored) {
+            // no TTY — fall through
         } finally {
             restoreTerminal();
-            out.print(ALT_OFF);
-            out.flush();
-        }
-
-        if (selected >= 0) {
-            invokeCommand(NAMES[selected]);
         }
     }
 
@@ -128,37 +159,44 @@ public class MenuMojo extends FractalxBaseMojo {
         StringBuilder sb = new StringBuilder();
         sb.append(HOME);
 
-        // blank line
         sb.append("\r\033[2K\r\n");
 
-        // FRACTALX banner — rendered once at the top, never re-announced
+        // FRACTALX banner — static at top, redrawn in-place so it never flickers
         for (int i = 0; i < BANNER.length; i++) {
             String color = i < BANNER_COLORS.length ? BANNER_COLORS[i] : "";
             sb.append("\r\033[2K").append(color).append(BANNER[i]).append(RST).append("\r\n");
         }
 
-        // subtitle
         sb.append("\r\033[2K\r\n");
         sb.append("\r\033[2K  ").append(DIM)
           .append("Interactive CLI  ").append(FractalxVersion.get()).append(RST).append("\r\n");
         sb.append("\r\033[2K\r\n");
 
-        // navigation hint
         sb.append("\r\033[2K  ").append(DIM)
           .append("\u2191\u2193 navigate   Enter select   q quit").append(RST).append("\r\n");
         sb.append("\r\033[2K\r\n");
 
-        // menu items
+        // Command items
         for (int i = 0; i < NAMES.length; i++) {
             boolean sel    = (i == selected);
             String  cursor = sel ? GRN + "\u25B6" + RST : " ";
-            String  name   = sel
-                    ? BLD + pad(NAMES[i], NAME_W) + RST
-                    : DIM + pad(NAMES[i], NAME_W) + RST;
+            String  name   = sel ? BLD + pad(NAMES[i], NAME_W) + RST
+                                 : DIM + pad(NAMES[i], NAME_W) + RST;
             String  desc   = sel ? DESCS[i] : DIM + DESCS[i] + RST;
             sb.append("\r\033[2K  ").append(cursor).append("  ")
               .append(name).append("  ").append(desc).append("\r\n");
         }
+
+        // Separator + Exit item
+        sb.append("\r\033[2K\r\n");
+        boolean exitSel = (selected == EXIT_IDX);
+        String exitCursor = exitSel ? RED + "\u25B6" + RST : " ";
+        String exitName   = exitSel ? RED + BLD + pad("exit", NAME_W) + RST
+                                    : DIM + pad("exit", NAME_W) + RST;
+        String exitDesc   = exitSel ? RED + "Exit interactive CLI" + RST
+                                    : DIM + "Exit interactive CLI" + RST;
+        sb.append("\r\033[2K  ").append(exitCursor).append("  ")
+          .append(exitName).append("  ").append(exitDesc).append("\r\n");
 
         sb.append(CLR_END);
         out.print(sb);
@@ -167,23 +205,30 @@ public class MenuMojo extends FractalxBaseMojo {
 
     // ── Numbered fallback (no ANSI / dumb terminal) ───────────────────────────
 
-    private void runNumberedMenu() throws MojoExecutionException {
-        printHeader("Interactive CLI");
-        for (int i = 0; i < NAMES.length; i++) {
-            out.println("  [" + (i + 1) + "] " + pad(NAMES[i], NAME_W) + "  " + DESCS[i]);
-        }
-        out.println();
-        out.print("  Select (1-" + NAMES.length + "): ");
-        out.flush();
+    private void runNumberedMenuLoop() throws MojoExecutionException {
         try (Scanner sc = new Scanner(System.in)) {
-            if (sc.hasNextInt()) {
+            while (true) {
+                printHeader("Interactive CLI");
+                for (int i = 0; i < NAMES.length; i++) {
+                    out.println("  [" + (i + 1) + "] " + pad(NAMES[i], NAME_W) + "  " + DESCS[i]);
+                }
+                out.println("  [0] exit              Exit interactive CLI");
+                out.println();
+                out.print("  Select (0 to exit): ");
+                out.flush();
+
+                if (!sc.hasNextInt()) break;
                 int choice = sc.nextInt();
+                if (choice == 0) break;
                 if (choice >= 1 && choice <= NAMES.length) {
-                    invokeCommand(NAMES[choice - 1]);
+                    try {
+                        invokeCommand(NAMES[choice - 1]);
+                    } catch (MojoExecutionException e) {
+                        warn("Command failed: " + e.getMessage());
+                    }
+                    out.println();
                 }
             }
-        } catch (Exception e) {
-            warn("Could not read input.");
         }
     }
 
@@ -217,15 +262,15 @@ public class MenuMojo extends FractalxBaseMojo {
             case "restart"   -> new RestartMojo();
             case "ps"        -> new PsMojo();
             case "services"  -> new ServicesMojo();
+            case "logs"      -> new LogsMojo();
             default -> throw new MojoExecutionException("Unknown command: " + name);
         };
 
-        // colorParam is @Parameter(defaultValue="true") — not injected by Maven when
-        // instantiated directly, so inject it explicitly so initCli() detects the TTY.
-        inject(mojo, "colorParam", true);
+        // @Parameter defaultValue isn't applied for direct instantiation — inject manually.
+        inject(mojo, "colorParam",      true);
         inject(mojo, "project",         project);
         inject(mojo, "outputDirectory", outputDirectory);
-        inject(mojo, "sourceDirectory", sourceDirectory);   // ignored silently if absent
+        inject(mojo, "sourceDirectory", sourceDirectory);  // silently ignored if absent
         try {
             mojo.execute();
         } catch (MojoFailureException e) {
