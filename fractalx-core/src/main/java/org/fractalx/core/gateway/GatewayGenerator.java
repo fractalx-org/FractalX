@@ -96,6 +96,9 @@ public class GatewayGenerator {
         // Step 11: Request tracing + structured logging + metrics filter
         new GatewayObservabilityGenerator().generate(srcMainJava, modules);
 
+        // Step 12: OpenAPI 3.0.3 spec + Postman Collection v2.1 (with inline tests)
+        new GatewayOpenApiGenerator().generate(gatewayRoot, modules);
+
         log.info("✓ API Gateway generated at: {}", gatewayRoot.toAbsolutePath());
     }
 }
