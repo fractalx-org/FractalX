@@ -43,9 +43,11 @@ public class GatewayRouteLocatorGenerator {
             staticFallbacks.append("""
                             builder.routes()
                                 .route("%s-static", r -> r.path(%s)
+                                    .filters(f -> f.circuitBreaker(c -> c.setName("%s")
+                                        .setFallbackUri("forward:/fallback/%s")))
                                     .uri("http://localhost:%d"))
                                 .build().getRoutes().toIterable().forEach(routes::add);
-                    """.formatted(m.getServiceName(), paths, m.getPort()));
+                    """.formatted(m.getServiceName(), paths, m.getServiceName(), m.getServiceName(), m.getPort()));
         }
 
         String content = """
@@ -108,6 +110,8 @@ public class GatewayRouteLocatorGenerator {
                 import org.springframework.cloud.gateway.route.Route;
                 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
                 import org.springframework.stereotype.Component;
+                import org.springframework.web.client.ResourceAccessException;
+                import org.springframework.web.client.HttpClientErrorException;
                 import org.springframework.web.client.RestTemplate;
 
                 import java.util.ArrayList;
@@ -146,6 +150,10 @@ public class GatewayRouteLocatorGenerator {
                                         .forEach(routes::add);
                                 log.debug("Live route: {} -> {}", patterns, uri);
                             }
+                        } catch (ResourceAccessException e) {
+                            log.warn("Cannot connect to registry at {}: {}", registryUrl, e.getMessage());
+                        } catch (HttpClientErrorException e) {
+                            log.warn("Registry returned error: {}", e.getMessage());
                         } catch (Exception e) {
                             log.warn("Could not fetch routes from registry: {}", e.getMessage());
                         }
