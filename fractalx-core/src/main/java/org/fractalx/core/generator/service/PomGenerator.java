@@ -17,7 +17,11 @@ import java.nio.file.Files;
 public class PomGenerator implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(PomGenerator.class);
-    private static final String FRACTALX_RUNTIME_VERSION = FractalxVersion.get();
+    // Use release() so generated POMs reference e.g. "0.2.0" not "0.2.0-SNAPSHOT".
+    // SNAPSHOT artifacts are not served by Maven Central, and Docker builds have no
+    // local Maven cache — they resolve exclusively from remote repositories.
+    private static final String FRACTALX_RUNTIME_VERSION = FractalxVersion.release();
+    private static final String NETSCOPE_VERSION = "1.0.1";
 
     private final ObservabilityInjector observabilityInjector;
 
@@ -83,13 +87,13 @@ public class PomGenerator implements ServiceFileGenerator {
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>netscope-server</artifactId>
-                            <version>1.0.0</version>
+                            <version>%s</version>
                         </dependency>
 
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>netscope-client</artifactId>
-                            <version>1.0.0</version>
+                            <version>%s</version>
                         </dependency>
 
                         <dependency>
@@ -158,7 +162,9 @@ public class PomGenerator implements ServiceFileGenerator {
                 """.formatted(
                 module.getServiceName(),
                 module.getServiceName(),
-                FRACTALX_RUNTIME_VERSION,
+                NETSCOPE_VERSION,            // netscope-server
+                NETSCOPE_VERSION,            // netscope-client
+                FRACTALX_RUNTIME_VERSION,   // fractalx-runtime
                 observabilityInjector.getDependencies()
         );
     }
