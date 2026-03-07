@@ -48,20 +48,41 @@ public class ServicesMojo extends FractalxBaseMojo {
             return;
         }
 
-        int pw = services.stream().mapToInt(s -> s.name.length()).max().orElse(10) + 2;
+        int pw = services.stream().mapToInt(s -> s.name.length()).max().orElse(10) + 4;
 
-        section("Generated Services");
-        for (ServiceEntry s : services) {
-            String portStr = s.port > 0 ? a(DIM) + ":" + s.port + a(RST) : a(DIM) + "port unknown" + a(RST);
-            out.println("  " + a(GRN) + "\u25AA" + a(RST)
-                    + "  " + a(BLD) + pad(s.name, pw) + a(RST)
-                    + "  " + portStr
-                    + (s.hasDocker ? "  " + a(DIM) + "[docker]" + a(RST) : ""));
+        List<ServiceEntry> microservices = services.stream()
+                .filter(s -> "service".equals(s.type)).toList();
+        List<ServiceEntry> infra = services.stream()
+                .filter(s -> !"service".equals(s.type)).toList();
+
+        if (!microservices.isEmpty()) {
+            section("Microservices  (" + microservices.size() + ")");
+            for (ServiceEntry s : microservices) {
+                String portStr  = s.port > 0 ? a(DIM) + "http  :" + s.port + a(RST) : a(DIM) + "port unknown" + a(RST);
+                String grpcStr  = s.port > 0 ? "  " + a(DIM) + "grpc  :" + (s.port + 10000) + a(RST) : "";
+                String docker   = s.hasDocker ? "  " + a(DIM) + "[docker]" + a(RST) : "";
+                out.println("  " + a(GRN) + "\u25AA" + a(RST)
+                        + "  " + a(BLD) + pad(s.name, pw) + a(RST)
+                        + "  " + portStr + grpcStr + docker);
+            }
+            out.println();
         }
-        out.println();
 
-        section("Output");
-        out.println("  " + a(DIM) + outputDirectory.getAbsolutePath() + a(RST));
+        if (!infra.isEmpty()) {
+            section("Infrastructure  (" + infra.size() + ")");
+            for (ServiceEntry s : infra) {
+                String portStr = s.port > 0 ? a(DIM) + "http  :" + s.port + a(RST) : a(DIM) + "port unknown" + a(RST);
+                String tag     = "  " + a(DIM) + "[" + s.type + "]" + a(RST);
+                String docker  = s.hasDocker ? "  " + a(DIM) + "[docker]" + a(RST) : "";
+                out.println("  " + a(CYN) + "\u25AA" + a(RST)
+                        + "  " + a(BLD) + pad(s.name, pw) + a(RST)
+                        + "  " + portStr + tag + docker);
+            }
+            out.println();
+        }
+
+        out.println("  " + a(DIM) + "Total  " + services.size() + " service(s)  "
+                + outputDirectory.getAbsolutePath() + a(RST));
         out.println();
 
         section("Get started");
@@ -82,7 +103,7 @@ public class ServicesMojo extends FractalxBaseMojo {
                       String name    = dir.getFileName().toString();
                       int    port    = readPortFromYaml(dir);
                       boolean docker = Files.exists(dir.resolve("Dockerfile"));
-                      result.add(new ServiceEntry(name, port, docker));
+                      result.add(new ServiceEntry(name, port, docker, serviceType(name)));
                   });
         } catch (IOException e) {
             throw new MojoExecutionException("Failed to list services", e);
@@ -105,5 +126,14 @@ public class ServicesMojo extends FractalxBaseMojo {
         return -1;
     }
 
-    private record ServiceEntry(String name, int port, boolean hasDocker) {}
+    private record ServiceEntry(String name, int port, boolean hasDocker, String type) {}
+
+    private static String serviceType(String name) {
+        return switch (name) {
+            case "fractalx-gateway"  -> "gateway";
+            case "fractalx-registry" -> "registry";
+            case "admin-service"     -> "admin";
+            default                  -> "service";
+        };
+    }
 }

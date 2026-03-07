@@ -50,20 +50,32 @@ public class PsMojo extends FractalxBaseMojo {
         }
 
         int running = (int) entries.stream().filter(e -> e.up).count();
-        int pw = entries.stream().mapToInt(e -> e.name.length()).max().orElse(10) + 2;
+        int pw = entries.stream().mapToInt(e -> e.name.length()).max().orElse(10) + 4;
 
         section("Service Status");
         for (ProcessEntry e : entries) {
+            String type = serviceType(e.name);
+            String tag  = a(DIM) + "[" + type + "]" + a(RST);
             if (e.port < 0) {
-                out.println("  " + a(DIM) + "\u2013  " + pad(e.name, pw) + "  port unknown" + a(RST));
+                out.println("  " + a(DIM) + "\u2013  " + pad(e.name, pw) + "  port unknown" + a(RST)
+                        + "  " + tag);
             } else if (e.up) {
+                String grpc = "service".equals(type)
+                        ? "  " + a(DIM) + "grpc:" + (e.port + 10000) + a(RST) : "";
+                String logIndicator = Files.exists(e.svcDir.resolve("logs/startup.log"))
+                        ? "" : "  " + a(DIM) + "[no log]" + a(RST);
                 out.println("  " + a(GRN) + "\u25AA" + a(RST)
                         + "  " + a(BLD) + pad(e.name, pw) + a(RST)
                         + "  " + a(GRN) + "running" + a(RST)
-                        + "  " + a(DIM) + "http://localhost:" + e.port + a(RST));
+                        + "  " + a(DIM) + "http://localhost:" + e.port + a(RST)
+                        + grpc + "  " + tag + logIndicator);
             } else {
+                boolean hasLog = Files.exists(e.svcDir.resolve("logs/startup.log"));
+                String logHint = hasLog
+                        ? "  " + a(DIM) + "logs/" + a(RST) : "  " + a(DIM) + "[never started]" + a(RST);
                 out.println("  " + a(DIM) + "\u25AB  " + pad(e.name, pw) + a(RST)
-                        + "  " + a(DIM) + "stopped" + "  :" + e.port + a(RST));
+                        + "  " + a(DIM) + "stopped  :" + e.port + a(RST)
+                        + "  " + tag + logHint);
             }
         }
         out.println();
@@ -78,6 +90,15 @@ public class PsMojo extends FractalxBaseMojo {
         } else {
             out.println("  " + a(YLW) + "\u26A0" + a(RST) + "  " + status);
         }
+
+        // Show admin dashboard link if admin-service is running
+        entries.stream()
+               .filter(e -> "admin".equals(serviceType(e.name)) && e.up)
+               .findFirst()
+               .ifPresent(e -> {
+                   out.println();
+                   out.println("  " + a(DIM) + "Admin   \u2192  " + a(RST) + "http://localhost:" + e.port);
+               });
         out.println();
     }
 
@@ -91,7 +112,7 @@ public class PsMojo extends FractalxBaseMojo {
                       String name = dir.getFileName().toString();
                       int    port = readPort(dir);
                       boolean up  = port > 0 && isPortOpen(port);
-                      result.add(new ProcessEntry(name, port, up));
+                      result.add(new ProcessEntry(name, port, up, dir));
                   });
         } catch (IOException e) {
             throw new MojoExecutionException("Failed to list services", e);
@@ -116,5 +137,14 @@ public class PsMojo extends FractalxBaseMojo {
         catch (IOException e) { return false; }
     }
 
-    private record ProcessEntry(String name, int port, boolean up) {}
+    private record ProcessEntry(String name, int port, boolean up, Path svcDir) {}
+
+    private static String serviceType(String name) {
+        return switch (name) {
+            case "fractalx-gateway"  -> "gateway";
+            case "fractalx-registry" -> "registry";
+            case "admin-service"     -> "admin";
+            default                  -> "service";
+        };
+    }
 }

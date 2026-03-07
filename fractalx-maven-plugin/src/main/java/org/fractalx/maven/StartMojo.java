@@ -299,7 +299,8 @@ public class StartMojo extends FractalxBaseMojo {
         out.println();
         section("Start");
         out.println("  " + a(DIM) + "Logs  <service>/logs/startup.log" + a(RST));
-        out.println("  " + a(DIM) + "Run 'mvn fractalx:ps' to check status." + a(RST));
+        out.println();
+        cmd("mvn fractalx:ps                 # check all service status");
         out.println();
         done(System.currentTimeMillis() - t0);
     }

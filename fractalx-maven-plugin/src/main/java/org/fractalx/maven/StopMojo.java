@@ -69,8 +69,12 @@ public class StopMojo extends FractalxBaseMojo {
             List<String> labels = new ArrayList<>();
             services.forEach(d -> labels.add(d.getFileName().toString()));
 
-            runWithDashboard(labels, "Stop", t0, () -> {
-                for (Path svc : services) killByPort(readPort(svc));
+            runWithDashboardPer(labels, "Stop", t0, (dash, lbls) -> {
+                for (int i = 0; i < services.size(); i++) {
+                    dash.onStart(lbls.get(i));
+                    killByPort(readPort(services.get(i)));
+                    dash.onDone(lbls.get(i));
+                }
             });
         }
     }
@@ -133,6 +137,33 @@ public class StopMojo extends FractalxBaseMojo {
 
     @FunctionalInterface
     private interface Action { void run() throws Exception; }
+
+    @FunctionalInterface
+    private interface DashAction { void run(Dashboard dash, List<String> labels) throws Exception; }
+
+    private void runWithDashboardPer(List<String> labels, String subtitle, long t0, DashAction action)
+            throws MojoExecutionException {
+        if (ansi) { out.print(ALT_ON); out.flush(); }
+        Dashboard dash = new Dashboard(labels, out, ansi, subtitle);
+        dash.render();
+        try {
+            action.run(dash, labels);
+        } catch (Exception e) {
+            dash.onFail(labels.get(0), e.getMessage());
+            if (ansi) {
+                try { Thread.sleep(2500); } catch (InterruptedException ignored) {}
+                out.print(ALT_OFF); out.flush();
+            }
+            throw new MojoExecutionException("Stop failed", e);
+        }
+        dash.finish();
+        if (ansi) {
+            try { Thread.sleep(250); } catch (InterruptedException ignored) {}
+            out.print(ALT_OFF); out.flush();
+        }
+        out.println();
+        done(System.currentTimeMillis() - t0);
+    }
 
     private void runWithDashboard(List<String> labels, String subtitle, long t0, Action action)
             throws MojoExecutionException {
