@@ -736,22 +736,56 @@ class AdminTemplateGenerator {
     private String buildSectionOverviewB() {
         return """
                         <div class="two-col" style="gap:16px;margin-top:16px">
-                            <div class="card-box">
-                                <div class="section-hdr">
-                                    <span class="section-title"><i class="fas fa-bell" style="color:#f59e0b;margin-right:6px"></i>Active Alerts</span>
-                                    <a href="#" onclick="showSection('alerts')" style="font-size:11px;color:#6366f1">View all</a>
+                            <!-- Active Alerts card -->
+                            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.05);overflow:hidden">
+                                <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #f1f5f9">
+                                    <div style="display:flex;align-items:center;gap:8px">
+                                        <div style="width:30px;height:30px;border-radius:8px;background:#fff7ed;display:flex;align-items:center;justify-content:center">
+                                            <i class="fas fa-bell" style="color:#f59e0b;font-size:13px"></i>
+                                        </div>
+                                        <div>
+                                            <div style="font-size:13px;font-weight:700;color:#111827">Active Alerts</div>
+                                            <div style="font-size:10px;color:#9ca3af;margin-top:1px">Firing right now</div>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:10px">
+                                        <span id="ov-alert-badge" style="display:none;background:#fef2f2;color:#ef4444;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #fecaca"></span>
+                                        <a href="#" onclick="showSection('alerts')" style="font-size:11px;color:#6366f1;text-decoration:none;font-weight:500">View all →</a>
+                                    </div>
                                 </div>
-                                <div id="ov-alerts-list" style="padding:6px 10px;max-height:200px;overflow-y:auto">
-                                    <p style="font-size:12px;color:#9ca3af">Loading…</p>
+                                <div id="ov-alerts-list" style="max-height:230px;overflow-y:auto;padding:10px 12px">
+                                    <div style="text-align:center;padding:20px;color:#d1d5db;font-size:12px">
+                                        <i class="fas fa-spinner fa-spin" style="font-size:16px;margin-bottom:6px;display:block"></i>Loading…
+                                    </div>
+                                </div>
+                                <div style="padding:10px 16px;border-top:1px solid #f8fafc;background:#fafafa">
+                                    <span style="font-size:10px;color:#9ca3af">Last checked: <span id="ov-alerts-ts">—</span></span>
                                 </div>
                             </div>
-                            <div class="card-box">
-                                <div class="section-hdr">
-                                    <span class="section-title"><i class="fas fa-fire" style="color:#ef4444;margin-right:6px"></i>Open Incidents</span>
-                                    <a href="#" onclick="showSection('incidents')" style="font-size:11px;color:#6366f1">View all</a>
+                            <!-- Open Incidents card -->
+                            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 4px rgba(0,0,0,.05);overflow:hidden">
+                                <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #f1f5f9">
+                                    <div style="display:flex;align-items:center;gap:8px">
+                                        <div style="width:30px;height:30px;border-radius:8px;background:#fef2f2;display:flex;align-items:center;justify-content:center">
+                                            <i class="fas fa-fire-alt" style="color:#ef4444;font-size:13px"></i>
+                                        </div>
+                                        <div>
+                                            <div style="font-size:13px;font-weight:700;color:#111827">Open Incidents</div>
+                                            <div style="font-size:10px;color:#9ca3af;margin-top:1px">Requires attention</div>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:10px">
+                                        <span id="ov-inc-badge" style="display:none;background:#fef2f2;color:#ef4444;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #fecaca"></span>
+                                        <a href="#" onclick="showSection('incidents')" style="font-size:11px;color:#6366f1;text-decoration:none;font-weight:500">View all →</a>
+                                    </div>
                                 </div>
-                                <div id="ov-incidents-list" style="padding:6px 10px;max-height:200px;overflow-y:auto">
-                                    <p style="font-size:12px;color:#9ca3af">Loading…</p>
+                                <div id="ov-incidents-list" style="max-height:230px;overflow-y:auto;padding:10px 12px">
+                                    <div style="text-align:center;padding:20px;color:#d1d5db;font-size:12px">
+                                        <i class="fas fa-spinner fa-spin" style="font-size:16px;margin-bottom:6px;display:block"></i>Loading…
+                                    </div>
+                                </div>
+                                <div style="padding:10px 16px;border-top:1px solid #f8fafc;background:#fafafa">
+                                    <span style="font-size:10px;color:#9ca3af">Last checked: <span id="ov-incidents-ts">—</span></span>
                                 </div>
                             </div>
                         </div>
@@ -1323,13 +1357,6 @@ class AdminTemplateGenerator {
                                                    value="FractalX Admin">
                                         </div>
                                         <div class="mb-3">
-                                            <label class="form-label">Theme</label>
-                                            <select class="form-select" id="setting-theme">
-                                                <option value="light">Light</option>
-                                                <option value="dark">Dark</option>
-                                            </select>
-                                        </div>
-                                        <div class="mb-3">
                                             <label class="form-label">Session Timeout (minutes)</label>
                                             <input type="number" class="form-control"
                                                    id="setting-session-timeout" value="30" min="5" max="1440">
@@ -1697,7 +1724,8 @@ class AdminTemplateGenerator {
                                         </div>` : ''}
                                         ${connErr ? `
                                         <div style="margin-top:8px;padding:8px 10px;border-radius:8px;
-                                            background:#fef2f2;border:1px solid #fecaca;font-size:11px;color:#b91c1c">
+                                            background:#fef2f2;border:1px solid #fecaca;font-size:11px;color:#b91c1c;
+                                            overflow-wrap:break-word;word-break:break-word;max-width:100%">
                                             <strong>✗ Unreachable</strong><br>${escHtml(connErr)}
                                         </div>` : ''}
                                     </div>
@@ -2468,28 +2496,41 @@ class AdminTemplateGenerator {
                 }
 
                 function loadUsers() {
+                    const tbody = document.getElementById('users-tbody');
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4"><span class="text-muted" style="font-size:12px">Loading users…</span></td></tr>';
                     fetch('/api/users')
                         .then(r => r.json()).then(users => {
-                            const tbody = document.getElementById('users-tbody');
-                            tbody.innerHTML = '';
-                            users.forEach(u => {
-                                tbody.innerHTML += `<tr>
-                                    <td><strong>${u.username}</strong></td>
-                                    <td><small>${(u.roles || []).join(', ')}</small></td>
-                                    <td>${u.active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
-                                    <td><small>${u.lastLoginAt || 'Never'}</small></td>
-                                    <td><small>${u.createdAt || ''}</small></td>
-                                    <td>
-                                        <button class="btn btn-xs btn-sm btn-outline-warning py-0 me-1"
-                                            onclick="openChangePassword('${u.username}')"><i class="fas fa-key"></i></button>
-                                        <button class="btn btn-xs btn-sm btn-outline-danger py-0"
-                                            onclick="deleteUser('${u.username}')"><i class="fas fa-trash"></i></button>
-                                    </td>
-                                </tr>`;
-                            });
+                            if (!users || !users.length) {
+                                tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4"><span class="text-muted" style="font-size:12px">No users found</span></td></tr>';
+                                return;
+                            }
+                            tbody.innerHTML = users.map(u => `<tr>
+                                <td>
+                                    <div style="display:flex;align-items:center;gap:8px">
+                                        <span style="width:30px;height:30px;border-radius:50%;background:#6366f1;color:#fff;
+                                            display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">
+                                            ${(u.username||'?')[0].toUpperCase()}
+                                        </span>
+                                        <strong style="font-size:13px">${u.username}</strong>
+                                    </div>
+                                </td>
+                                <td>${(u.roles||[]).map(r=>`<span class="badge bg-light text-dark me-1" style="font-size:10px">${r}</span>`).join('')||'<span class="text-muted small">—</span>'}</td>
+                                <td>${u.active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
+                                <td><small class="text-muted">${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never'}</small></td>
+                                <td><small class="text-muted">${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}</small></td>
+                                <td>
+                                    <button class="btn btn-xs btn-sm btn-outline-secondary py-0 px-2 me-1"
+                                        onclick="openChangePassword('${u.username}')" title="Change password">
+                                        <i class="fas fa-key"></i>
+                                    </button>
+                                    <button class="btn btn-xs btn-sm btn-outline-danger py-0 px-2"
+                                        onclick="deleteUser('${u.username}')" title="Delete user">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>`).join('');
                         }).catch(() => {
-                            document.getElementById('users-tbody').innerHTML =
-                                '<tr><td colspan="6" class="text-danger">Failed to load users</td></tr>';
+                            tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4"><span class="text-danger" style="font-size:12px"><i class="fas fa-exclamation-circle me-1"></i>Failed to load users — is the admin service running?</span></td></tr>';
                         });
                 }
 
@@ -2601,7 +2642,6 @@ class AdminTemplateGenerator {
                     fetch('/api/settings')
                         .then(r => r.json()).then(s => {
                             document.getElementById('setting-site-name').value       = s.siteName || '';
-                            document.getElementById('setting-theme').value           = s.theme || 'light';
                             document.getElementById('setting-session-timeout').value = s.sessionTimeoutMin || 30;
                             document.getElementById('setting-alert-email').value     = s.defaultAlertEmail || '';
                             document.getElementById('setting-maintenance').checked   = s.maintenanceMode || false;
@@ -2612,7 +2652,6 @@ class AdminTemplateGenerator {
                     e.preventDefault();
                     const settings = {
                         siteName:          document.getElementById('setting-site-name').value,
-                        theme:             document.getElementById('setting-theme').value,
                         sessionTimeoutMin: parseInt(document.getElementById('setting-session-timeout').value),
                         defaultAlertEmail: document.getElementById('setting-alert-email').value,
                         maintenanceMode:   document.getElementById('setting-maintenance').checked
@@ -2720,70 +2759,97 @@ class AdminTemplateGenerator {
                 <div class="section" id="section-explorer">
                     <div class="page-header">
                         <h1 class="page-title-h">API Explorer</h1>
-                        <p class="page-sub">Browse endpoints and make REST calls directly from the browser</p>
+                        <p class="page-sub">Browse REST endpoints and make live API calls directly from the browser</p>
                     </div>
-                    <div class="explorer-layout">
-                        <!-- Left: endpoint list -->
-                        <div>
-                            <div class="card-box mb-2" style="padding:10px">
-                                <select id="explorer-svc-select" class="form-select form-select-sm mb-2"
-                                        onchange="loadServiceMappings()">
+                    <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;height:calc(100vh - 180px);min-height:600px">
+                        <!-- Left panel: service + endpoint picker -->
+                        <div style="display:flex;flex-direction:column;gap:10px;overflow:hidden">
+                            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px">
+                                <label style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Service</label>
+                                <select id="explorer-svc-select" class="form-select form-select-sm"
+                                        onchange="loadServiceMappings()" style="font-size:13px">
                                     <option value="">— select service —</option>
                                 </select>
-                                <input type="text" id="explorer-filter" class="form-control form-control-sm"
-                                       placeholder="Filter endpoints…" oninput="filterEndpoints()">
+                                <div style="margin-top:8px;position:relative">
+                                    <i class="fas fa-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:11px"></i>
+                                    <input type="text" id="explorer-filter" class="form-control form-control-sm"
+                                           style="padding-left:26px;font-size:12px" placeholder="Filter endpoints…"
+                                           oninput="filterEndpoints()">
+                                </div>
                             </div>
-                            <div class="ep-list card-box" id="ep-list" style="padding:8px">
-                                <p class="text-muted p-2" style="font-size:13px">Select a service above</p>
+                            <div style="flex:1;overflow-y:auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px" id="ep-list">
+                                <div style="padding:32px 16px;text-align:center;color:#9ca3af">
+                                    <i class="fas fa-layer-group" style="font-size:28px;margin-bottom:10px;display:block;color:#d1d5db"></i>
+                                    <span style="font-size:12px">Select a service to browse endpoints</span>
+                                </div>
                             </div>
                         </div>
-                        <!-- Right: request builder -->
-                        <div>
-                            <div class="card-box mb-2">
-                                <div class="section-hdr"><span class="section-title">Request</span></div>
-                                <div class="d-flex gap-2 mb-2 flex-wrap">
-                                    <select id="req-method" class="form-select form-select-sm" style="width:90px">
-                                        <option>GET</option><option>POST</option><option>PUT</option>
-                                        <option>DELETE</option><option>PATCH</option>
+                        <!-- Right panel: request + response -->
+                        <div style="display:flex;flex-direction:column;gap:10px;overflow:hidden">
+                            <!-- URL bar -->
+                            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px">
+                                <div style="display:flex;gap:8px;align-items:center">
+                                    <select id="req-method" style="width:96px;font-size:12px;font-weight:700;
+                                        border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;background:#f9fafb;cursor:pointer"
+                                        onchange="updateMethodColor()">
+                                        <option style="color:#16a34a">GET</option>
+                                        <option style="color:#2563eb">POST</option>
+                                        <option style="color:#d97706">PUT</option>
+                                        <option style="color:#dc2626">DELETE</option>
+                                        <option style="color:#7c3aed">PATCH</option>
                                     </select>
-                                    <input type="text" id="req-url" class="form-control form-control-sm"
-                                           placeholder="http://localhost:8081/api/...">
+                                    <input type="text" id="req-url" class="form-control form-control-sm" style="flex:1;font-family:monospace;font-size:12px"
+                                           placeholder="http://localhost:8081/api/…">
+                                    <button onclick="executeRequest()" id="btn-send"
+                                        style="padding:6px 18px;background:#6366f1;color:#fff;border:none;border-radius:6px;
+                                               font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px">
+                                        <i class="fas fa-paper-plane" style="font-size:11px"></i> Send
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- Request tabs -->
+                            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;display:flex;flex-direction:column">
+                                <div style="display:flex;border-bottom:1px solid #f1f5f9;padding:0 12px">
+                                    <button onclick="showReqTab('headers')" id="rtab-headers"
+                                        style="padding:10px 14px;border:none;background:none;font-size:12px;font-weight:600;color:#6366f1;border-bottom:2px solid #6366f1;cursor:pointer">Headers</button>
+                                    <button onclick="showReqTab('body')" id="rtab-body"
+                                        style="padding:10px 14px;border:none;background:none;font-size:12px;color:#9ca3af;border-bottom:2px solid transparent;cursor:pointer">Body</button>
+                                </div>
+                                <div id="rtab-panel-headers" style="padding:12px">
+                                    <textarea id="req-headers" style="width:100%;height:80px;font-family:monospace;font-size:12px;
+                                        border:1px solid #e5e7eb;border-radius:6px;padding:8px;resize:vertical;color:#374151"
+                                        placeholder='{"Authorization": "Bearer token", "Content-Type": "application/json"}'></textarea>
                                 </div>
                 """;
     }
 
     private String buildSectionApiExplorerB() {
         return """
-                                <div class="mb-2">
-                                    <label class="form-label" style="font-size:12px;font-weight:500">Headers (JSON)</label>
-                                    <textarea id="req-headers" class="form-control form-control-sm" rows="2"
-                                              style="font-family:monospace;font-size:12px"
-                                              placeholder='{"Authorization":"Bearer token"}'></textarea>
+                                <div id="rtab-panel-body" style="padding:12px;display:none">
+                                    <textarea id="req-body" style="width:100%;height:80px;font-family:monospace;font-size:12px;
+                                        border:1px solid #e5e7eb;border-radius:6px;padding:8px;resize:vertical;color:#374151"
+                                        placeholder='{"key": "value"}'></textarea>
                                 </div>
-                                <div class="mb-2">
-                                    <label class="form-label" style="font-size:12px;font-weight:500">Body (JSON)</label>
-                                    <textarea id="req-body" class="form-control form-control-sm" rows="4"
-                                              style="font-family:monospace;font-size:12px"
-                                              placeholder='{"key":"value"}'></textarea>
-                                </div>
-                                <button class="btn btn-sm btn-primary" onclick="executeRequest()" id="btn-send">
-                                    <i class="fas fa-paper-plane"></i> Send
-                                </button>
                             </div>
-                            <div class="card-box">
-                                <div class="section-hdr" id="resp-status-row">
-                                    <span class="section-title">Response</span>
+                            <!-- Response -->
+                            <div style="flex:1;background:#fff;border:1px solid #e5e7eb;border-radius:10px;display:flex;flex-direction:column;overflow:hidden">
+                                <div style="padding:10px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:12px;flex-shrink:0">
+                                    <span style="font-size:13px;font-weight:600;color:#111827">Response</span>
                                     <span id="resp-status-badge"></span>
-                                    <span id="resp-duration" class="text-muted" style="font-size:11px"></span>
+                                    <span id="resp-duration" style="font-size:11px;color:#9ca3af"></span>
+                                    <div style="margin-left:auto;display:flex;gap:6px">
+                                        <button onclick="showRespTab('body')" id="restab-body"
+                                            style="padding:3px 10px;border-radius:5px;border:1px solid #6366f1;background:#6366f1;color:#fff;font-size:11px;cursor:pointer">Body</button>
+                                        <button onclick="showRespTab('headers')" id="restab-headers"
+                                            style="padding:3px 10px;border-radius:5px;border:1px solid #e5e7eb;background:#fff;color:#6b7280;font-size:11px;cursor:pointer">Headers</button>
+                                    </div>
                                 </div>
-                                <div class="mb-2">
-                                    <div style="font-size:11px;font-weight:500;margin-bottom:4px">Headers</div>
-                                    <div id="resp-headers" style="font-family:monospace;font-size:11px;
-                                         max-height:80px;overflow:auto;background:#f9fafb;
-                                         border-radius:6px;padding:8px;color:var(--t2)"></div>
+                                <div id="restab-panel-body" style="flex:1;overflow:auto;padding:12px">
+                                    <pre id="resp-body" style="font-family:monospace;font-size:12px;margin:0;white-space:pre-wrap;word-break:break-word;color:#374151">No response yet — configure a request and click Send.</pre>
                                 </div>
-                                <div style="font-size:11px;font-weight:500;margin-bottom:4px">Body</div>
-                                <div id="resp-body" class="response-area">No response yet.</div>
+                                <div id="restab-panel-headers" style="flex:1;overflow:auto;padding:12px;display:none">
+                                    <pre id="resp-headers" style="font-family:monospace;font-size:11px;margin:0;white-space:pre-wrap;color:#374151"></pre>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2821,7 +2887,7 @@ class AdminTemplateGenerator {
                         .then(r => r.json()).then(data => {
                             const sel = document.getElementById('chart-svc-select');
                             const cur = sel.value;
-                            sel.innerHTML = Object.keys(data).map(s =>
+                            sel.innerHTML = Object.keys(data).sort().map(s =>
                                 `<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join('');
                             if (!cur && sel.options.length) loadHistoryChart();
                         }).catch(() => {});
@@ -2956,29 +3022,64 @@ class AdminTemplateGenerator {
                         });
                 }
 
+                function showReqTab(tab) {
+                    ['headers','body'].forEach(t => {
+                        document.getElementById('rtab-panel-'+t).style.display = t===tab ? '' : 'none';
+                        const btn = document.getElementById('rtab-'+t);
+                        btn.style.color      = t===tab ? '#6366f1' : '#9ca3af';
+                        btn.style.borderBottomColor = t===tab ? '#6366f1' : 'transparent';
+                    });
+                }
+                function showRespTab(tab) {
+                    ['body','headers'].forEach(t => {
+                        document.getElementById('restab-panel-'+t).style.display = t===tab ? '' : 'none';
+                        const btn = document.getElementById('restab-'+t);
+                        btn.style.background = t===tab ? '#6366f1' : '#fff';
+                        btn.style.color      = t===tab ? '#fff' : '#6b7280';
+                        btn.style.borderColor = t===tab ? '#6366f1' : '#e5e7eb';
+                    });
+                }
+                function updateMethodColor() {
+                    const m = document.getElementById('req-method').value;
+                    const colors = {GET:'#16a34a',POST:'#2563eb',PUT:'#d97706',DELETE:'#dc2626',PATCH:'#7c3aed'};
+                    document.getElementById('req-method').style.color = colors[m]||'#374151';
+                }
+
                 function renderEndpointList(eps, baseUrl) {
+                    const el = document.getElementById('ep-list');
                     if (!eps.length) {
-                        document.getElementById('ep-list').innerHTML =
-                            '<p class="text-muted p-2" style="font-size:12px">No endpoints found (is actuator enabled?)</p>';
+                        el.innerHTML = `<div style="padding:32px 16px;text-align:center;color:#9ca3af">
+                            <i class="fas fa-inbox" style="font-size:24px;margin-bottom:8px;display:block;color:#d1d5db"></i>
+                            <span style="font-size:12px">No endpoints found<br><span style="font-size:11px">Check if Spring Actuator mappings are enabled</span></span>
+                        </div>`;
                         return;
                     }
-                    document.getElementById('ep-list').innerHTML = eps.map((ep, i) => {
+                    const methodColor = {GET:'#16a34a',POST:'#2563eb',PUT:'#d97706',DELETE:'#dc2626',PATCH:'#7c3aed'};
+                    el.innerHTML = eps.map((ep, i) => {
                         const methods = Array.isArray(ep.methods) ? ep.methods : ['GET'];
                         const method = methods[0] || 'GET';
-                        return `<div class="ep-item" id="ep-${i}" onclick="selectEndpoint(${i}, '${baseUrl}')">
-                            <span class="method-badge method-${method}">${method}</span>
-                            <span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${ep.path}">${ep.path}</span>
+                        const color = methodColor[method] || '#6b7280';
+                        const pathShort = ep.path.length > 32 ? '…'+ep.path.slice(-30) : ep.path;
+                        return `<div id="ep-${i}" onclick="selectEndpoint(${i}, '${baseUrl}')"
+                            style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:background .12s"
+                            onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=this.classList.contains('ep-active')?'#eef2ff':''">
+                            <span style="font-size:9px;font-weight:700;color:${color};background:${color}14;padding:2px 5px;border-radius:4px;min-width:38px;text-align:center">${method}</span>
+                            <span style="font-size:11px;font-family:monospace;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${ep.path}">${pathShort}</span>
                         </div>`;
                     }).join('');
                 }
 
                 function selectEndpoint(idx, baseUrl) {
-                    document.querySelectorAll('.ep-item').forEach(e => e.classList.remove('active'));
-                    document.getElementById('ep-' + idx).classList.add('active');
+                    document.querySelectorAll('#ep-list > div').forEach(e => {
+                        e.classList.remove('ep-active'); e.style.background = '';
+                    });
+                    const selected = document.getElementById('ep-' + idx);
+                    if (selected) { selected.classList.add('ep-active'); selected.style.background = '#eef2ff'; }
                     const ep = explorerEndpoints[idx];
                     const methods = Array.isArray(ep.methods) ? ep.methods : ['GET'];
                     document.getElementById('req-method').value = methods[0] || 'GET';
                     document.getElementById('req-url').value = baseUrl + ep.path;
+                    updateMethodColor();
                 }
 
                 function filterEndpoints() {
@@ -3009,19 +3110,22 @@ class AdminTemplateGenerator {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ method, url, headers, body: bodyRaw || null })
                     }).then(r => r.json()).then(d => {
-                        btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+                        btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane" style="font-size:11px"></i> Send';
                         const ok = !d.error && d.status < 400;
+                        const stColor = ok ? '#16a34a' : '#dc2626';
+                        const stBg    = ok ? '#f0fdf4' : '#fef2f2';
                         document.getElementById('resp-status-badge').innerHTML =
-                            `<span class="${ok?'status-ok':'status-err'}">${d.status} ${d.statusText}</span>`;
-                        document.getElementById('resp-duration').textContent = d.durationMs + ' ms';
+                            `<span style="font-size:12px;font-weight:700;color:${stColor};background:${stBg};padding:2px 8px;border-radius:5px">${d.status} ${d.statusText||''}</span>`;
+                        document.getElementById('resp-duration').textContent = d.durationMs != null ? d.durationMs + ' ms' : '';
                         const hdrs = d.headers || {};
                         document.getElementById('resp-headers').textContent =
                             Object.entries(hdrs).map(([k,v]) => `${k}: ${v}`).join('\\n') || '(none)';
                         let body = d.body || '';
                         try { body = JSON.stringify(JSON.parse(body), null, 2); } catch {}
-                        document.getElementById('resp-body').textContent = body;
+                        document.getElementById('resp-body').textContent = body || '(empty)';
+                        showRespTab('body');
                     }).catch(e => {
-                        btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+                        btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane" style="font-size:11px"></i> Send';
                         document.getElementById('resp-body').textContent = 'Request failed: ' + e;
                     });
                 }
@@ -3096,58 +3200,83 @@ class AdminTemplateGenerator {
     private String buildSectionGrpcBrowser() {
         return """
                 <div class="section" id="section-grpc">
-                    <div class="page-header">
-                        <h1 class="page-title-h">gRPC Browser</h1>
-                        <p class="page-sub">Inspect NetScope/gRPC connections, view deps, and TCP-ping ports</p>
-                    </div>
-                    <div class="two-col" style="gap:16px;margin-bottom:16px">
-                        <!-- Service list -->
-                        <div class="card-box">
-                            <div class="section-hdr">
-                                <span class="section-title">gRPC Services</span>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="loadGrpcBrowser()">
-                                    <i class="fas fa-sync"></i>
-                                </button>
-                            </div>
-                            <div id="grpc-svc-list" style="max-height:420px;overflow-y:auto">
-                                <p class="text-muted p-3" style="font-size:12px">Loading…</p>
-                            </div>
-                        </div>
-                        <!-- Detail + ping -->
+                    <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
                         <div>
-                            <div class="card-box mb-3">
-                                <div class="section-hdr">
-                                    <span class="section-title" id="grpc-detail-title">Select a service</span>
-                                </div>
-                                <div id="grpc-detail-body" style="font-size:13px;color:#374151;padding:10px">
-                                    <p class="text-muted" style="font-size:12px">Click a service on the left to see upstream/downstream gRPC dependencies.</p>
-                                </div>
+                            <h1 class="page-title-h">gRPC / NetScope Browser</h1>
+                            <p class="page-sub">Inspect inter-service NetScope/gRPC connections, dependency graph, and connectivity</p>
+                        </div>
+                        <button onclick="loadGrpcBrowser()" style="padding:6px 14px;border:1px solid #e5e7eb;border-radius:7px;background:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px">
+                            <i class="fas fa-sync" style="font-size:11px"></i> Refresh
+                        </button>
+                    </div>
+
+                    <!-- Top: service cards -->
+                    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:16px">
+                        <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">
+                            <span style="font-size:13px;font-weight:600;color:#111827"><i class="fas fa-project-diagram" style="color:#6366f1;margin-right:8px"></i>gRPC Services</span>
+                            <span id="grpc-svc-count" style="font-size:11px;color:#9ca3af"></span>
+                        </div>
+                        <div id="grpc-svc-list" style="display:flex;flex-wrap:wrap;gap:12px;padding:16px;min-height:80px">
+                            <div style="color:#9ca3af;font-size:12px;padding:16px">Loading services…</div>
+                        </div>
+                    </div>
+
+                    <!-- Middle: dependency detail + TCP Ping -->
+                    <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;margin-bottom:16px">
+                        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+                            <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px">
+                                <i class="fas fa-sitemap" style="color:#6366f1;font-size:12px"></i>
+                                <span id="grpc-detail-title" style="font-size:13px;font-weight:600;color:#111827">Select a service card above</span>
                             </div>
-                            <div class="card-box">
-                                <div class="section-hdr"><span class="section-title">TCP Ping</span></div>
-                                <div style="padding:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-                                    <div>
-                                        <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:3px">Host</label>
-                                        <input id="ping-host" value="localhost" class="form-control form-control-sm" style="width:150px">
-                                    </div>
-                                    <div>
-                                        <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:3px">Port</label>
-                                        <input id="ping-port" type="number" placeholder="18081" class="form-control form-control-sm" style="width:100px">
-                                    </div>
-                                    <button class="btn btn-sm btn-primary" onclick="doGrpcPing()">Ping</button>
-                                    <span id="ping-result" style="font-size:12px"></span>
+                            <div id="grpc-detail-body" style="padding:16px;min-height:100px">
+                                <div style="text-align:center;padding:24px;color:#9ca3af">
+                                    <i class="fas fa-mouse-pointer" style="font-size:24px;margin-bottom:8px;display:block;color:#d1d5db"></i>
+                                    <span style="font-size:12px">Click a service card to view its upstream and downstream gRPC dependencies</span>
                                 </div>
                             </div>
                         </div>
+                        <!-- TCP Ping tool -->
+                        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+                            <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9">
+                                <span style="font-size:13px;font-weight:600;color:#111827"><i class="fas fa-satellite-dish" style="color:#10b981;margin-right:8px"></i>TCP Connectivity</span>
+                            </div>
+                            <div style="padding:16px;display:flex;flex-direction:column;gap:10px">
+                                <div>
+                                    <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px">HOST</label>
+                                    <input id="ping-host" value="localhost" class="form-control form-control-sm" style="font-family:monospace">
+                                </div>
+                                <div>
+                                    <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px">gRPC PORT</label>
+                                    <input id="ping-port" type="number" placeholder="e.g. 18081" class="form-control form-control-sm" style="font-family:monospace">
+                                </div>
+                                <button onclick="doGrpcPing()"
+                                    style="padding:8px;border:none;border-radius:7px;background:#6366f1;color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+                                    <i class="fas fa-paper-plane" style="margin-right:4px"></i> Ping Port
+                                </button>
+                                <div id="ping-result" style="min-height:32px;font-size:13px;text-align:center;padding:6px;border-radius:6px"></div>
+                            </div>
+                        </div>
                     </div>
-                    <!-- All connections -->
-                    <div class="card-box">
-                        <div class="section-hdr"><span class="section-title">All NetScope Connections</span></div>
+
+                    <!-- Bottom: full connections table -->
+                    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+                        <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9">
+                            <span style="font-size:13px;font-weight:600;color:#111827"><i class="fas fa-network-wired" style="color:#6366f1;margin-right:8px"></i>All NetScope Connections</span>
+                        </div>
                         <div style="overflow-x:auto">
-                            <table class="data-table" id="grpc-connections-table">
-                                <thead><tr><th>Service</th><th>HTTP Port</th><th>Depends On</th><th>gRPC Port</th><th>Protocol</th><th>Ping</th></tr></thead>
+                            <table style="width:100%;border-collapse:collapse;font-size:12px">
+                                <thead>
+                                    <tr style="background:#f8fafc;border-bottom:1px solid #e5e7eb">
+                                        <th style="padding:10px 14px;text-align:left;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Caller Service</th>
+                                        <th style="padding:10px 14px;text-align:left;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.06em">HTTP</th>
+                                        <th style="padding:10px 14px;text-align:left;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Depends On</th>
+                                        <th style="padding:10px 14px;text-align:left;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.06em">gRPC Port</th>
+                                        <th style="padding:10px 14px;text-align:left;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Protocol</th>
+                                        <th style="padding:10px 14px;text-align:left;font-weight:600;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Test</th>
+                                    </tr>
+                                </thead>
                                 <tbody id="grpc-connections-tbody">
-                                    <tr><td colspan="6" class="text-muted text-center p-3" style="font-size:12px">Loading…</td></tr>
+                                    <tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;font-size:12px">Loading…</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -3187,67 +3316,79 @@ class AdminTemplateGenerator {
 
     private String buildSectionIncidentsB() {
         return """
-                    <!-- Incident table -->
-                    <div class="card-box">
-                        <div class="section-hdr">
-                            <span class="section-title">Incident Log</span>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="loadIncidents()">
-                                <i class="fas fa-sync"></i>
-                            </button>
-                        </div>
-                        <div style="overflow-x:auto">
-                            <table class="data-table">
-                                <thead>
-                                    <tr><th>Severity</th><th>Title</th><th>Service</th><th>Status</th><th>Assignee</th><th>Age</th><th>Actions</th></tr>
-                                </thead>
-                                <tbody id="inc-tbody">
-                                    <tr><td colspan="7" class="text-muted text-center p-3">Loading…</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
+                    <!-- Filter bar -->
+                    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                        <select id="inc-filter-status" onchange="filterIncidents()"
+                            style="font-size:12px;border:1px solid #e5e7eb;border-radius:6px;padding:5px 10px;color:#374151;background:#f9fafb">
+                            <option value="">All Statuses</option>
+                            <option value="OPEN">Open</option>
+                            <option value="INVESTIGATING">Investigating</option>
+                            <option value="RESOLVED">Resolved</option>
+                        </select>
+                        <select id="inc-filter-sev" onchange="filterIncidents()"
+                            style="font-size:12px;border:1px solid #e5e7eb;border-radius:6px;padding:5px 10px;color:#374151;background:#f9fafb">
+                            <option value="">All Severities</option>
+                            <option value="P1">P1 — Critical</option>
+                            <option value="P2">P2 — High</option>
+                            <option value="P3">P3 — Medium</option>
+                            <option value="P4">P4 — Low</option>
+                        </select>
+                        <button onclick="loadIncidents()"
+                            style="padding:5px 12px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;font-size:12px;cursor:pointer;margin-left:auto">
+                            <i class="fas fa-sync" style="font-size:11px;margin-right:4px"></i> Refresh
+                        </button>
+                    </div>
+                    <!-- Incident cards -->
+                    <div id="inc-cards" style="display:flex;flex-direction:column;gap:10px">
+                        <div style="text-align:center;padding:32px;color:#9ca3af;font-size:12px">Loading incidents…</div>
                     </div>
                 </div>
 
                 <!-- Create Incident Modal -->
                 <div class="modal fade" id="inc-create-modal" tabindex="-1">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">New Incident</h5>
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 20px 60px rgba(0,0,0,.15)">
+                            <div class="modal-header" style="border-bottom:1px solid #f1f5f9;padding:18px 24px">
+                                <h5 class="modal-title" style="font-size:16px;font-weight:700">
+                                    <i class="fas fa-fire" style="color:#ef4444;margin-right:8px"></i>New Incident
+                                </h5>
                                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
-                            <div class="modal-body">
+                            <div class="modal-body" style="padding:20px 24px">
                                 <div class="mb-3">
-                                    <label class="form-label" style="font-size:13px">Title <span style="color:red">*</span></label>
-                                    <input id="inc-new-title" class="form-control form-control-sm" placeholder="Brief description">
+                                    <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">TITLE <span style="color:#ef4444">*</span></label>
+                                    <input id="inc-new-title" class="form-control" placeholder="Brief description of the incident" style="font-size:13px">
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label" style="font-size:13px">Affected Service</label>
-                                    <input id="inc-new-svc" class="form-control form-control-sm" placeholder="payment-service">
+                                    <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">AFFECTED SERVICE</label>
+                                    <input id="inc-new-svc" class="form-control" placeholder="e.g. payment-service" style="font-size:13px;font-family:monospace">
                                 </div>
-                                <div class="row mb-3">
-                                    <div class="col">
-                                        <label class="form-label" style="font-size:13px">Severity</label>
-                                        <select id="inc-new-sev" class="form-select form-select-sm">
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+                                    <div>
+                                        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">SEVERITY</label>
+                                        <select id="inc-new-sev" class="form-select" style="font-size:13px">
                                             <option value="P1">P1 — Critical</option>
                                             <option value="P2">P2 — High</option>
                                             <option value="P3" selected>P3 — Medium</option>
                                             <option value="P4">P4 — Low</option>
                                         </select>
                                     </div>
-                                    <div class="col">
-                                        <label class="form-label" style="font-size:13px">Assignee</label>
-                                        <input id="inc-new-assignee" class="form-control form-control-sm" placeholder="admin">
+                                    <div>
+                                        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">ASSIGNEE</label>
+                                        <input id="inc-new-assignee" class="form-control" placeholder="username" style="font-size:13px">
                                     </div>
                                 </div>
-                                <div class="mb-2">
-                                    <label class="form-label" style="font-size:13px">Description</label>
-                                    <textarea id="inc-new-desc" class="form-control form-control-sm" rows="3" placeholder="What happened?"></textarea>
+                                <div>
+                                    <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px">DESCRIPTION</label>
+                                    <textarea id="inc-new-desc" class="form-control" rows="3" placeholder="What happened? What is the impact?" style="font-size:13px;resize:none"></textarea>
                                 </div>
                             </div>
-                            <div class="modal-footer">
-                                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                                <button class="btn btn-sm btn-primary" onclick="createIncident()">Create Incident</button>
+                            <div class="modal-footer" style="border-top:1px solid #f1f5f9;padding:14px 24px;gap:8px">
+                                <button class="btn btn-sm btn-light" data-bs-dismiss="modal" style="font-size:13px;padding:6px 16px">Cancel</button>
+                                <button onclick="createIncident()"
+                                    style="padding:7px 20px;border:none;border-radius:7px;background:#ef4444;color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+                                    <i class="fas fa-fire" style="margin-right:6px"></i>Create Incident
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -3264,86 +3405,104 @@ class AdminTemplateGenerator {
     private String buildSectionConfigEditorA() {
         return """
                 <div class="section" id="section-configeditor">
-                    <div class="page-header">
-                        <h1 class="page-title-h">Config Editor</h1>
-                        <p class="page-sub">View service configuration and apply in-memory environment overrides</p>
-                    </div>
-                    <div class="two-col" style="gap:16px;margin-bottom:16px">
-                        <!-- Left: service selector + env vars -->
+                    <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
                         <div>
-                            <div class="card-box mb-3">
-                                <div class="section-hdr">
-                                    <span class="section-title">Services</span>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadConfigEditor()">
-                                        <i class="fas fa-sync"></i>
+                            <h1 class="page-title-h">Config Editor</h1>
+                            <p class="page-sub">View runtime configuration and apply in-memory environment overrides per service</p>
+                        </div>
+                        <button onclick="loadConfigEditor()" style="padding:6px 14px;border:1px solid #e5e7eb;border-radius:7px;background:#fff;font-size:12px;cursor:pointer">
+                            <i class="fas fa-sync" style="font-size:11px;margin-right:4px"></i> Refresh
+                        </button>
+                    </div>
+                    <div style="display:grid;grid-template-columns:240px 1fr;gap:16px;align-items:start">
+                        <!-- Left: service picker -->
+                        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+                            <div style="padding:10px 14px;border-bottom:1px solid #f1f5f9">
+                                <span style="font-size:12px;font-weight:600;color:#111827">Services</span>
+                            </div>
+                            <div id="cfg-svc-list" style="max-height:480px;overflow-y:auto"></div>
+                        </div>
+                        <!-- Right: detail tabs -->
+                        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+                            <!-- Service header -->
+                            <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between">
+                                <div style="display:flex;align-items:center;gap:8px">
+                                    <i class="fas fa-cog" style="color:#6366f1;font-size:13px"></i>
+                                    <span id="cfg-svc-title" style="font-size:14px;font-weight:600;color:#111827">Select a service</span>
+                                </div>
+                                <div id="cfg-reload-wrap" style="display:none">
+                                    <button onclick="hotReloadService()"
+                                        style="padding:5px 12px;border:1px solid #f59e0b;border-radius:6px;background:#fffbeb;color:#92400e;font-size:12px;cursor:pointer">
+                                        <i class="fas fa-bolt" style="margin-right:4px"></i> Hot Reload
                                     </button>
                                 </div>
-                                <div id="cfg-svc-list" style="max-height:320px;overflow-y:auto"></div>
                             </div>
-                            <div class="card-box">
-                                <div class="section-hdr">
-                                    <span class="section-title" id="cfg-svc-title">Select a service</span>
-                                    <div id="cfg-reload-wrap" style="display:none">
-                                        <button class="btn btn-sm btn-outline-warning" onclick="hotReloadService()">
-                                            <i class="fas fa-bolt"></i> Hot Reload
-                                        </button>
-                                    </div>
-                                </div>
-                                <div id="cfg-detail" style="padding:10px;font-size:13px;color:#6b7280">
-                                    Click a service to view its configuration.
+                            <!-- Tabs -->
+                            <div style="display:flex;border-bottom:1px solid #f1f5f9;padding:0 16px">
+                                <button onclick="showCfgTab('config')" id="cfgtab-config"
+                                    style="padding:10px 14px;border:none;background:none;font-size:12px;font-weight:600;color:#6366f1;border-bottom:2px solid #6366f1;cursor:pointer">Configuration</button>
+                                <button onclick="showCfgTab('override')" id="cfgtab-override"
+                                    style="padding:10px 14px;border:none;background:none;font-size:12px;color:#9ca3af;border-bottom:2px solid transparent;cursor:pointer">Set Override</button>
+                                <button onclick="showCfgTab('diff')" id="cfgtab-diff"
+                                    style="padding:10px 14px;border:none;background:none;font-size:12px;color:#9ca3af;border-bottom:2px solid transparent;cursor:pointer">Active Overrides &amp; Diff</button>
+                            </div>
+                            <!-- Config tab -->
+                            <div id="cfgtab-panel-config" style="padding:16px;min-height:200px">
+                                <div style="color:#9ca3af;font-size:12px;text-align:center;padding:32px">
+                                    <i class="fas fa-mouse-pointer" style="font-size:24px;margin-bottom:8px;display:block;color:#d1d5db"></i>
+                                    Select a service on the left to view its runtime configuration
                                 </div>
                             </div>
-                        </div>
                 """;
     }
 
     private String buildSectionConfigEditorB() {
         return """
-                        <!-- Right: override editor + diff -->
-                        <div>
-                            <div class="card-box mb-3">
-                                <div class="section-hdr"><span class="section-title">Set Override</span></div>
-                                <div style="padding:10px;display:flex;flex-direction:column;gap:8px">
+                            <!-- Override tab -->
+                            <div id="cfgtab-panel-override" style="padding:20px;display:none">
+                                <p style="font-size:12px;color:#6b7280;margin-bottom:16px">
+                                    Overrides are applied in-memory immediately without restarting the service. They reset on service restart.
+                                </p>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
                                     <div>
-                                        <label style="font-size:11px;color:#6b7280">Service</label>
-                                        <input id="ov-svc" class="form-control form-control-sm" placeholder="payment-service">
+                                        <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Service</label>
+                                        <input id="ov-svc" class="form-control form-control-sm" placeholder="payment-service" style="font-family:monospace">
                                     </div>
                                     <div>
-                                        <label style="font-size:11px;color:#6b7280">Key</label>
-                                        <input id="ov-key" class="form-control form-control-sm" placeholder="SPRING_DATASOURCE_URL">
+                                        <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Environment Key</label>
+                                        <input id="ov-key" class="form-control form-control-sm" placeholder="SPRING_DATASOURCE_URL" style="font-family:monospace">
                                     </div>
-                                    <div>
-                                        <label style="font-size:11px;color:#6b7280">Value</label>
-                                        <input id="ov-val" class="form-control form-control-sm" placeholder="jdbc:mysql://...">
-                                    </div>
-                                    <button class="btn btn-sm btn-primary" onclick="saveOverride()">
-                                        <i class="fas fa-save"></i> Save Override
-                                    </button>
-                                    <div id="ov-save-msg" style="font-size:12px"></div>
                                 </div>
+                                <div style="margin-bottom:12px">
+                                    <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Value</label>
+                                    <input id="ov-val" class="form-control form-control-sm" placeholder="jdbc:mysql://host:3306/db" style="font-family:monospace">
+                                </div>
+                                <button onclick="saveOverride()"
+                                    style="padding:8px 20px;border:none;border-radius:7px;background:#6366f1;color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+                                    <i class="fas fa-save" style="margin-right:6px"></i> Apply Override
+                                </button>
+                                <div id="ov-save-msg" style="margin-top:10px;font-size:12px"></div>
                             </div>
-                            <div class="card-box mb-3">
-                                <div class="section-hdr">
-                                    <span class="section-title">Active Overrides</span>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadOverrides()">
-                                        <i class="fas fa-sync"></i>
-                                    </button>
+                            <!-- Diff tab -->
+                            <div id="cfgtab-panel-diff" style="padding:16px;display:none">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                                    <span style="font-size:13px;font-weight:600;color:#111827">Active Overrides</span>
+                                    <div style="display:flex;gap:8px">
+                                        <button onclick="loadOverrides()"
+                                            style="font-size:11px;padding:4px 10px;border:1px solid #e5e7eb;border-radius:5px;background:#fff;cursor:pointer">Refresh</button>
+                                        <button onclick="loadConfigDiff()"
+                                            style="font-size:11px;padding:4px 10px;border:1px solid #6366f1;border-radius:5px;background:#eef2ff;color:#4338ca;cursor:pointer">
+                                            <i class="fas fa-code-branch" style="margin-right:3px"></i> Show Diff
+                                        </button>
+                                    </div>
                                 </div>
-                                <div id="cfg-overrides-body" style="font-size:13px;padding:8px;max-height:200px;overflow-y:auto">
-                                    <p class="text-muted" style="font-size:12px">No overrides yet.</p>
+                                <div id="cfg-overrides-body" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12px;max-height:180px;overflow-y:auto">
+                                    <span style="color:#9ca3af">No active overrides</span>
                                 </div>
-                            </div>
-                            <div class="card-box">
-                                <div class="section-hdr">
-                                    <span class="section-title">Config Diff</span>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadConfigDiff()">
-                                        <i class="fas fa-code-branch"></i> Show Diff
-                                    </button>
-                                </div>
-                                <div id="cfg-diff-body" style="font-size:12px;font-family:monospace;
-                                    padding:10px;max-height:200px;overflow-y:auto;white-space:pre-wrap">
-                                    Click "Show Diff" to compare overrides vs base config.
-                                </div>
+                                <div style="font-size:12px;font-weight:600;color:#111827;margin:14px 0 6px">Config Diff</div>
+                                <pre id="cfg-diff-body" style="font-size:11px;font-family:monospace;background:#0f172a;color:#e2e8f0;
+                                    border-radius:8px;padding:14px;max-height:200px;overflow:auto;white-space:pre-wrap;margin:0">
+Click "Show Diff" above to compare active overrides against the base configuration.</pre>
                             </div>
                         </div>
                     </div>
@@ -3368,9 +3527,14 @@ class AdminTemplateGenerator {
                         fetch('/api/health/summary').then(r => r.json()).catch(() => ({}))
                     ]).then(([topo, health]) => {
                         const canvas = document.getElementById('netmap-canvas');
-                        const W = canvas.offsetWidth || 900, H = canvas.offsetHeight || 520;
+                        // Sync internal canvas size to its CSS display size before computing positions
+                        const W = canvas.parentElement.clientWidth || canvas.offsetWidth || 900;
+                        const H = 520;
+                        canvas.width  = W;
+                        canvas.height = H;
                         nmHealth = {};
-                        (health.services || []).forEach(s => nmHealth[s.name] = s.health);
+                        // /api/health/summary returns Map<String,String>: {name: "UP"|"DOWN"|...}
+                        Object.entries(health || {}).forEach(([name, h]) => nmHealth[name] = h);
                         const nodeMap = {};
                         nmNodes = (topo.nodes || []).map((n, i) => {
                             const angle = (2 * Math.PI * i) / Math.max((topo.nodes || []).length, 1);
@@ -3568,50 +3732,64 @@ class AdminTemplateGenerator {
                     fetch('/api/grpc/services')
                         .then(r => r.json()).then(svcs => {
                             const el = document.getElementById('grpc-svc-list');
+                            document.getElementById('grpc-svc-count').textContent = svcs.length + ' service(s)';
                             if (!svcs.length) {
-                                el.innerHTML = '<p class="text-muted p-3" style="font-size:12px">No gRPC services found.</p>';
+                                el.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;width:100%"><i class="fas fa-project-diagram" style="font-size:24px;margin-bottom:8px;display:block;color:#d1d5db"></i><span style="font-size:12px">No gRPC services found</span></div>';
                                 return;
                             }
                             el.innerHTML = svcs.map(s => `
-                                <div onclick="loadGrpcDeps('${s.name}')" class="ep-item" style="cursor:pointer;padding:10px 12px;border-bottom:1px solid #f1f5f9">
-                                    <div style="font-weight:600;font-size:13px">${s.name}</div>
-                                    <div style="font-size:11px;color:#6b7280;margin-top:3px">
-                                        HTTP :${s.httpPort}&nbsp;&nbsp;
-                                        <span style="color:#6366f1;font-weight:500">gRPC :${s.grpcPort}</span>
-                                        &nbsp;&nbsp;<span class="badge bg-light text-dark">${s.type || 'service'}</span>
+                                <div onclick="loadGrpcDeps('${s.name}')"
+                                    style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;cursor:pointer;
+                                           min-width:180px;transition:all .15s;position:relative"
+                                    onmouseover="this.style.borderColor='#6366f1';this.style.background='#eef2ff'"
+                                    onmouseout="this.style.borderColor='#e5e7eb';this.style.background='#f8fafc'">
+                                    <div style="font-weight:600;font-size:13px;color:#111827;margin-bottom:6px">${s.name}</div>
+                                    <div style="display:flex;gap:10px;flex-wrap:wrap">
+                                        <span style="font-size:11px;color:#6b7280"><i class="fas fa-globe" style="margin-right:3px;color:#9ca3af"></i>HTTP :${s.httpPort||'-'}</span>
+                                        <span style="font-size:11px;color:#6366f1;font-weight:600"><i class="fas fa-plug" style="margin-right:3px"></i>gRPC :${s.grpcPort||'-'}</span>
                                     </div>
+                                    <span style="position:absolute;top:8px;right:8px;font-size:9px;font-weight:700;background:#e0e7ff;color:#4338ca;padding:2px 6px;border-radius:4px;text-transform:uppercase">${s.type||'service'}</span>
                                 </div>`).join('');
                         }).catch(() => {
                             document.getElementById('grpc-svc-list').innerHTML =
-                                '<p class="text-danger p-3" style="font-size:12px">Failed to load gRPC services.</p>';
+                                '<div style="padding:16px;color:#ef4444;font-size:12px">Failed to load gRPC services</div>';
                         });
                     loadGrpcConnections();
                 }
 
                 function loadGrpcDeps(name) {
-                    document.getElementById('grpc-detail-title').textContent = name + ' — Dependencies';
+                    document.getElementById('grpc-detail-title').textContent = name;
                     document.getElementById('grpc-detail-body').innerHTML =
-                        '<p style="font-size:12px;color:#94a3b8">Loading…</p>';
+                        '<div style="padding:16px;color:#9ca3af;font-size:12px">Loading dependencies…</div>';
                     fetch('/api/grpc/' + encodeURIComponent(name) + '/deps')
                         .then(r => r.json()).then(d => {
                             if (d.error) {
                                 document.getElementById('grpc-detail-body').innerHTML =
-                                    `<p class="text-danger" style="font-size:12px">${d.error}</p>`;
+                                    `<div style="padding:16px;color:#ef4444;font-size:12px">${d.error}</div>`;
                                 return;
                             }
-                            const rows = arr => arr.length
-                                ? arr.map(x => `<div style="padding:4px 0;font-size:12px">
-                                    <span style="font-weight:500">${x.name}</span>&nbsp;
-                                    <span style="color:#6366f1">gRPC :${x.grpcPort||'-'}</span>&nbsp;
-                                    <span class="badge ${x.direction==='UPSTREAM'?'bg-success':'bg-primary'} bg-opacity-25 text-dark" style="font-size:10px">${x.direction}</span>
-                                  </div>`).join('') : '<span style="color:#9ca3af;font-size:12px">None</span>';
-                            document.getElementById('grpc-detail-body').innerHTML = `
-                                <div style="margin-bottom:10px"><b style="font-size:12px">Upstream (callers)</b>${rows(d.upstream||[])}</div>
-                                <div><b style="font-size:12px">Downstream (dependencies)</b>${rows(d.downstream||[])}</div>`;
-                            document.getElementById('ping-port').value = d.grpcPort || '';
+                            const depCard = (arr, label, icon, color) => {
+                                if (!arr.length) return `<div style="padding:8px 0;color:#9ca3af;font-size:12px">${label}: none</div>`;
+                                return `<div style="margin-bottom:12px">
+                                    <div style="font-size:11px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
+                                        <i class="${icon}" style="margin-right:4px"></i>${label}</div>
+                                    ${arr.map(x => `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:7px;margin-bottom:4px">
+                                        <span style="font-size:12px;font-weight:600;color:#111827">${x.name}</span>
+                                        <span style="font-size:11px;color:#6366f1;font-weight:600">gRPC :${x.grpcPort||'-'}</span>
+                                        <button onclick="document.getElementById('ping-host').value='localhost';document.getElementById('ping-port').value=${x.grpcPort||0};doGrpcPing()"
+                                            style="margin-left:auto;font-size:10px;padding:2px 8px;border:1px solid #6366f1;border-radius:5px;background:#fff;color:#6366f1;cursor:pointer">Ping</button>
+                                    </div>`).join('')}
+                                </div>`;
+                            };
+                            document.getElementById('grpc-detail-body').innerHTML =
+                                `<div style="padding:4px">
+                                    ${depCard(d.upstream||[], 'Upstream Callers', 'fas fa-arrow-down', '#059669')}
+                                    ${depCard(d.downstream||[], 'Downstream Dependencies', 'fas fa-arrow-up', '#2563eb')}
+                                </div>`;
+                            if (d.grpcPort) document.getElementById('ping-port').value = d.grpcPort;
                         }).catch(() => {
                             document.getElementById('grpc-detail-body').innerHTML =
-                                '<p class="text-danger" style="font-size:12px">Failed to load deps.</p>';
+                                '<div style="padding:16px;color:#ef4444;font-size:12px">Failed to load dependency info</div>';
                         });
                 }
 
@@ -3620,45 +3798,54 @@ class AdminTemplateGenerator {
                         .then(r => r.json()).then(conns => {
                             const tbody = document.getElementById('grpc-connections-tbody');
                             if (!conns.length) {
-                                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3" style="font-size:12px">No NetScope connections found.</td></tr>';
+                                tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;font-size:12px">No NetScope connections found</td></tr>';
                                 return;
                             }
                             const rows = [];
                             conns.forEach(c => {
                                 (c.dependencies || []).forEach(d => {
-                                    rows.push(`<tr>
-                                        <td><strong>${c.service}</strong></td>
-                                        <td>${c.httpPort}</td>
-                                        <td>${d.name}</td>
-                                        <td><span style="color:#6366f1;font-weight:600">:${d.grpcPort}</span></td>
-                                        <td><span class="badge bg-light text-dark" style="font-size:10px">${d.protocol||'NetScope/gRPC'}</span></td>
-                                        <td><button class="btn btn-xs btn-outline-secondary"
-                                            onclick="document.getElementById('ping-host').value='localhost';document.getElementById('ping-port').value=${d.grpcPort};doGrpcPing()"
-                                            style="font-size:10px;padding:1px 6px">Ping</button></td>
+                                    rows.push(`<tr style="border-bottom:1px solid #f1f5f9">
+                                        <td style="padding:10px 14px"><strong style="color:#111827">${c.service}</strong></td>
+                                        <td style="padding:10px 14px;color:#6b7280;font-family:monospace">:${c.httpPort}</td>
+                                        <td style="padding:10px 14px"><span style="font-weight:600">${d.name}</span></td>
+                                        <td style="padding:10px 14px"><span style="color:#6366f1;font-weight:700;font-family:monospace">:${d.grpcPort}</span></td>
+                                        <td style="padding:10px 14px"><span style="font-size:10px;font-weight:700;background:#e0e7ff;color:#4338ca;padding:2px 7px;border-radius:4px">${d.protocol||'NetScope/gRPC'}</span></td>
+                                        <td style="padding:10px 14px">
+                                            <button onclick="document.getElementById('ping-host').value='localhost';document.getElementById('ping-port').value=${d.grpcPort};doGrpcPing()"
+                                                style="font-size:11px;padding:3px 10px;border:1px solid #6366f1;border-radius:5px;background:#fff;color:#6366f1;cursor:pointer">
+                                                <i class="fas fa-satellite-dish" style="margin-right:3px"></i>Ping</button>
+                                        </td>
                                     </tr>`);
                                 });
                             });
                             tbody.innerHTML = rows.join('');
                         }).catch(() => {
                             document.getElementById('grpc-connections-tbody').innerHTML =
-                                '<tr><td colspan="6" class="text-danger text-center p-3">Failed to load</td></tr>';
+                                '<tr><td colspan="6" style="padding:16px;text-align:center;color:#ef4444;font-size:12px">Failed to load connections</td></tr>';
                         });
                 }
 
                 function doGrpcPing() {
                     const host = document.getElementById('ping-host').value || 'localhost';
                     const port = parseInt(document.getElementById('ping-port').value);
-                    if (!port) { document.getElementById('ping-result').textContent = 'Enter a port'; return; }
-                    const el = document.getElementById('ping-result');
-                    el.textContent = 'Pinging…';
+                    const el   = document.getElementById('ping-result');
+                    if (!port) { el.style.background='#fef3c7'; el.style.color='#92400e'; el.textContent = 'Enter a port number'; return; }
+                    el.style.background='#f8fafc'; el.style.color='#6b7280'; el.textContent = '⏳ Pinging…';
                     fetch('/api/grpc/ping', { method: 'POST',
                         headers: {'Content-Type':'application/json'},
                         body: JSON.stringify({host, port})
                     }).then(r => r.json()).then(d => {
-                        el.innerHTML = d.reachable
-                            ? `<span style="color:#22c55e"><i class="fas fa-check-circle"></i> Reachable — ${d.latencyMs}ms</span>`
-                            : `<span style="color:#ef4444"><i class="fas fa-times-circle"></i> Unreachable — ${d.latencyMs}ms</span>`;
-                    }).catch(() => { el.textContent = 'Ping failed'; });
+                        if (d.reachable) {
+                            el.style.background='#f0fdf4'; el.style.color='#15803d';
+                            el.innerHTML = `<i class="fas fa-check-circle"></i> Reachable in ${d.latencyMs}ms`;
+                        } else {
+                            el.style.background='#fef2f2'; el.style.color='#b91c1c';
+                            el.innerHTML = `<i class="fas fa-times-circle"></i> Unreachable (${d.latencyMs}ms)`;
+                        }
+                    }).catch(() => {
+                        el.style.background='#fef2f2'; el.style.color='#b91c1c';
+                        el.textContent = 'Ping request failed';
+                    });
                 }
                 """;
     }
@@ -3668,6 +3855,7 @@ class AdminTemplateGenerator {
     private String buildScriptsIncidents() {
         return """
                 // ── Incidents ──────────────────────────────────────────────────────────────
+                let allIncidents = [];
                 function loadIncidents() {
                     fetch('/api/incidents/stats').then(r => r.json()).then(s => {
                         document.getElementById('inc-total').textContent = s.total ?? '-';
@@ -3682,37 +3870,89 @@ class AdminTemplateGenerator {
                         else badge.style.display = 'none';
                     }).catch(() => {});
                     fetch('/api/incidents').then(r => r.json()).then(incs => {
-                        const tbody = document.getElementById('inc-tbody');
-                        if (!incs.length) {
-                            tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center p-3" style="font-size:12px">No incidents yet.</td></tr>';
-                            return;
-                        }
-                        tbody.innerHTML = incs.map(i => {
-                            const sevColor = {P1:'#dc2626',P2:'#ea580c',P3:'#d97706',P4:'#65a30d'}[i.severity]||'#6b7280';
-                            const stColor = {OPEN:'#ef4444',INVESTIGATING:'#f59e0b',RESOLVED:'#22c55e'}[i.status]||'#94a3b8';
-                            const age = incAge(i.createdAt);
-                            return `<tr>
-                                <td><span style="font-weight:700;color:${sevColor}">${i.severity}</span></td>
-                                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                                    title="${escHtml(i.title)}">${escHtml(i.title)}</td>
-                                <td>${i.affectedService||'-'}</td>
-                                <td><span style="font-weight:600;color:${stColor}">${i.status}</span></td>
-                                <td>${i.assignee||'-'}</td>
-                                <td>${age}</td>
-                                <td>
-                                    ${i.status!=='RESOLVED'?`<button class="btn btn-xs btn-outline-success"
-                                        onclick="resolveIncident('${i.id}')"
-                                        style="font-size:10px;padding:1px 6px">Resolve</button>`:''}
-                                    <button class="btn btn-xs btn-outline-danger"
-                                        onclick="deleteIncident('${i.id}')"
-                                        style="font-size:10px;padding:1px 6px">Delete</button>
-                                </td>
-                            </tr>`;
-                        }).join('');
+                        allIncidents = incs;
+                        renderIncidentCards(incs);
                     }).catch(() => {
-                        document.getElementById('inc-tbody').innerHTML =
-                            '<tr><td colspan="7" class="text-danger text-center p-3">Failed to load</td></tr>';
+                        document.getElementById('inc-cards').innerHTML =
+                            '<div style="text-align:center;padding:24px;color:#ef4444;font-size:12px">Failed to load incidents</div>';
                     });
+                }
+
+                function filterIncidents() {
+                    const st  = document.getElementById('inc-filter-status').value;
+                    const sev = document.getElementById('inc-filter-sev').value;
+                    renderIncidentCards(allIncidents.filter(i =>
+                        (!st  || i.status   === st) &&
+                        (!sev || i.severity === sev)));
+                }
+
+                function renderIncidentCards(incs) {
+                    const el = document.getElementById('inc-cards');
+                    if (!incs.length) {
+                        el.innerHTML = `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:48px;text-align:center;color:#9ca3af">
+                            <i class="fas fa-shield-alt" style="font-size:36px;margin-bottom:12px;display:block;color:#d1d5db"></i>
+                            <div style="font-size:14px;font-weight:600;margin-bottom:4px">No incidents</div>
+                            <div style="font-size:12px">Your services are running smoothly</div>
+                        </div>`;
+                        return;
+                    }
+                    const sevCfg = {
+                        P1:{bg:'#fef2f2',bd:'#ef4444',tx:'#b91c1c',label:'Critical'},
+                        P2:{bg:'#fff7ed',bd:'#f97316',tx:'#c2410c',label:'High'},
+                        P3:{bg:'#fffbeb',bd:'#f59e0b',tx:'#92400e',label:'Medium'},
+                        P4:{bg:'#f0fdf4',bd:'#22c55e',tx:'#166534',label:'Low'}};
+                    const stCfg = {
+                        OPEN:         {bg:'#fef2f2',tx:'#b91c1c',icon:'fas fa-circle'},
+                        INVESTIGATING:{bg:'#fffbeb',tx:'#92400e',icon:'fas fa-search'},
+                        RESOLVED:     {bg:'#f0fdf4',tx:'#166534',icon:'fas fa-check-circle'}};
+                    el.innerHTML = incs.map(i => {
+                        const sc = sevCfg[i.severity]||sevCfg.P3;
+                        const ss = stCfg[i.status]||{bg:'#f8fafc',tx:'#6b7280',icon:'fas fa-question-circle'};
+                        const age = incAge(i.createdAt);
+                        return `<div style="background:#fff;border:1px solid #e5e7eb;border-left:4px solid ${sc.bd};border-radius:0 12px 12px 0;padding:16px 20px;
+                                   display:flex;align-items:flex-start;gap:16px;position:relative">
+                            <!-- Severity badge -->
+                            <div style="flex-shrink:0;min-width:52px;text-align:center;padding:8px 6px;border-radius:8px;background:${sc.bg}">
+                                <div style="font-size:11px;font-weight:800;color:${sc.tx}">${i.severity}</div>
+                                <div style="font-size:9px;color:${sc.tx};opacity:.7">${sc.label}</div>
+                            </div>
+                            <!-- Main content -->
+                            <div style="flex:1;min-width:0">
+                                <div style="font-size:14px;font-weight:600;color:#111827;margin-bottom:4px">${escHtml(i.title)}</div>
+                                <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#6b7280">
+                                    ${i.affectedService?`<span><i class="fas fa-server" style="margin-right:3px"></i>${i.affectedService}</span>`:''}
+                                    ${i.assignee?`<span><i class="fas fa-user" style="margin-right:3px"></i>${i.assignee}</span>`:''}
+                                    <span><i class="fas fa-clock" style="margin-right:3px"></i>${age}</span>
+                                </div>
+                                ${i.description?`<div style="font-size:12px;color:#6b7280;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:600px">${escHtml(i.description)}</div>`:''}
+                            </div>
+                            <!-- Status + actions -->
+                            <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+                                <span style="font-size:10px;font-weight:700;background:${ss.bg};color:${ss.tx};padding:3px 10px;border-radius:20px">
+                                    <i class="${ss.icon}" style="margin-right:3px"></i>${i.status}
+                                </span>
+                                <div style="display:flex;gap:6px">
+                                    ${i.status==='OPEN'?`<button onclick="updateIncidentStatus('${i.id}','INVESTIGATING')"
+                                        style="font-size:11px;padding:4px 10px;border:1px solid #f59e0b;border-radius:5px;background:#fffbeb;color:#92400e;cursor:pointer">
+                                        <i class="fas fa-search" style="margin-right:3px"></i>Investigate</button>`:''}
+                                    ${i.status!=='RESOLVED'?`<button onclick="resolveIncident('${i.id}')"
+                                        style="font-size:11px;padding:4px 10px;border:1px solid #22c55e;border-radius:5px;background:#f0fdf4;color:#166534;cursor:pointer">
+                                        <i class="fas fa-check" style="margin-right:3px"></i>Resolve</button>`:''}
+                                    <button onclick="deleteIncident('${i.id}')"
+                                        style="font-size:11px;padding:4px 10px;border:1px solid #e5e7eb;border-radius:5px;background:#fff;color:#9ca3af;cursor:pointer">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>`;
+                    }).join('');
+                }
+
+                function updateIncidentStatus(id, status) {
+                    fetch('/api/incidents/' + id + '/status', { method:'PUT',
+                        headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({status, notes: status + ' via admin dashboard'})
+                    }).then(() => loadIncidents()).catch(() => alert('Failed to update incident'));
                 }
 
                 function createIncident() {
@@ -3771,26 +4011,50 @@ class AdminTemplateGenerator {
                 // ── Config Editor ──────────────────────────────────────────────────────────
                 let cfgCurrentService = null;
 
+                function showCfgTab(tab) {
+                    ['config','override','diff'].forEach(t => {
+                        const btn = document.getElementById('cfgtab-' + t);
+                        const panel = document.getElementById('cfgtab-panel-' + t);
+                        if (!btn || !panel) return;
+                        const active = t === tab;
+                        btn.style.color = active ? '#6366f1' : '#9ca3af';
+                        btn.style.borderBottomColor = active ? '#6366f1' : 'transparent';
+                        btn.style.fontWeight = active ? '600' : '400';
+                        panel.style.display = active ? '' : 'none';
+                    });
+                }
+
                 function loadConfigEditor() {
                     fetch('/api/config/editor/all')
                         .then(r => r.json()).then(cfgs => {
                             const el = document.getElementById('cfg-svc-list');
                             if (!cfgs.length) {
-                                el.innerHTML = '<p class="text-muted p-3" style="font-size:12px">No service configs found.</p>';
+                                el.innerHTML = '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:12px">' +
+                                    '<i class="fas fa-inbox" style="font-size:22px;margin-bottom:6px;display:block"></i>' +
+                                    'No service configs found.</div>';
                                 return;
                             }
-                            el.innerHTML = cfgs.map(c => `
-                                <div onclick="showCfgDetail('${c.name}')" class="ep-item"
-                                    style="cursor:pointer;padding:10px 12px;border-bottom:1px solid #f1f5f9">
-                                    <div style="font-weight:600;font-size:13px">${c.name}</div>
-                                    <div style="font-size:11px;color:#6b7280;margin-top:2px">
-                                        HTTP :${c.httpPort||'-'} &nbsp;gRPC :${c.grpcPort||'-'}
-                                        ${Object.keys(c.overrides||{}).length ? '<span style="color:#f59e0b;margin-left:6px"><i class="fas fa-exclamation-triangle"></i> '+Object.keys(c.overrides).length+' override(s)</span>' : ''}
+                            el.innerHTML = cfgs.map(c => {
+                                const ovCount = Object.keys(c.overrides||{}).length;
+                                const ovBadge = ovCount
+                                    ? `<span style="display:inline-block;margin-top:4px;padding:1px 7px;background:#fef3c7;color:#92400e;border-radius:10px;font-size:10px;font-weight:600">
+                                        <i class="fas fa-exclamation-triangle" style="font-size:9px;margin-right:2px"></i>${ovCount} override${ovCount>1?'s':''}</span>`
+                                    : '';
+                                return `<div onclick="showCfgDetail('${c.name}')" id="cfgsvc-${c.name}"
+                                    style="cursor:pointer;padding:10px 14px;border-bottom:1px solid #f1f5f9;transition:background .15s"
+                                    onmouseenter="this.style.background='#f8fafc'" onmouseleave="if(cfgCurrentService!=='${c.name}')this.style.background=''">
+                                    <div style="font-weight:600;font-size:13px;color:#111827">${c.name}</div>
+                                    <div style="font-size:11px;color:#9ca3af;margin-top:2px">
+                                        HTTP :${c.httpPort||'—'} &nbsp;&nbsp; gRPC :${c.grpcPort||'—'}
                                     </div>
-                                </div>`).join('');
+                                    ${ovBadge}
+                                </div>`;
+                            }).join('');
+                            // auto-select first service
+                            if (cfgs.length) showCfgDetail(cfgs[0].name);
                         }).catch(() => {
                             document.getElementById('cfg-svc-list').innerHTML =
-                                '<p class="text-danger p-3" style="font-size:12px">Failed to load configs.</p>';
+                                '<div style="padding:16px;color:#ef4444;font-size:12px">Failed to load service configs.</div>';
                         });
                     loadOverrides();
                 }
@@ -3800,22 +4064,40 @@ class AdminTemplateGenerator {
                     document.getElementById('cfg-svc-title').textContent = name;
                     document.getElementById('cfg-reload-wrap').style.display = '';
                     document.getElementById('ov-svc').value = name;
+                    // Highlight selected item in left list
+                    document.querySelectorAll('[id^="cfgsvc-"]').forEach(el => {
+                        el.style.background = el.id === 'cfgsvc-' + name ? '#eef2ff' : '';
+                    });
+                    const panel = document.getElementById('cfgtab-panel-config');
+                    panel.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:12px">' +
+                        '<i class="fas fa-spinner fa-spin" style="font-size:18px;margin-bottom:6px;display:block"></i>Loading…</div>';
+                    showCfgTab('config');
                     fetch('/api/config/editor/' + encodeURIComponent(name))
                         .then(r => r.json()).then(c => {
-                            const envRows = Object.entries(c.effective || {}).map(([k,v]) => {
+                            const entries = Object.entries(c.effective || {});
+                            if (!entries.length) {
+                                panel.innerHTML = '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:12px">' +
+                                    '<i class="fas fa-folder-open" style="font-size:22px;margin-bottom:6px;display:block"></i>' +
+                                    'No environment variables configured.</div>';
+                                return;
+                            }
+                            const rows = entries.map(([k,v]) => {
                                 const isOv = k in (c.overrides || {});
-                                return `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid #f1f5f9;font-size:12px">
-                                    <span style="flex:1;font-family:monospace;color:${isOv?'#f59e0b':'#374151'};overflow-wrap:anywhere">${escHtml(k)}</span>
-                                    <span style="flex:2;font-family:monospace;color:#64748b;overflow-wrap:anywhere">${escHtml(v)}</span>
+                                return `<div style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;align-items:center;
+                                    padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px">
+                                    <span style="font-family:monospace;font-size:11px;color:${isOv?'#d97706':'#374151'};
+                                        overflow-wrap:anywhere;font-weight:${isOv?'600':'400'}">${escHtml(k)}
+                                        ${isOv?'<span style="font-size:9px;padding:1px 5px;background:#fef3c7;color:#92400e;border-radius:4px;margin-left:4px">overridden</span>':''}</span>
+                                    <span style="font-family:monospace;font-size:11px;color:#64748b;overflow-wrap:anywhere">${escHtml(v)}</span>
                                     ${isOv?`<button onclick="removeOverride('${name}','${escHtml(k)}')"
-                                        style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:11px;padding:0">✕</button>`:''}
+                                        style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;padding:0;line-height:1"
+                                        title="Remove override">✕</button>`:'<span></span>'}
                                 </div>`;
                             }).join('');
-                            document.getElementById('cfg-detail').innerHTML = envRows ||
-                                '<p class="text-muted" style="font-size:12px">No environment variables.</p>';
+                            panel.innerHTML = `<div style="padding:4px 0">${rows}</div>`;
                         }).catch(() => {
-                            document.getElementById('cfg-detail').innerHTML =
-                                '<p class="text-danger" style="font-size:12px">Failed to load config.</p>';
+                            panel.innerHTML = '<div style="padding:16px;color:#ef4444;font-size:12px">' +
+                                '<i class="fas fa-exclamation-circle" style="margin-right:4px"></i>Failed to load config for ' + name + '</div>';
                         });
                 }
 
@@ -3928,27 +4210,110 @@ class AdminTemplateGenerator {
                         .then(a => {
                             document.getElementById('ov-alerts').textContent = a.length;
                             const el = document.getElementById('ov-alerts-list');
+                            const badge = document.getElementById('ov-alert-badge');
+                            const ts = document.getElementById('ov-alerts-ts');
+                            if (ts) ts.textContent = new Date().toLocaleTimeString();
                             if (!el) return;
-                            el.innerHTML = a.slice(0,5).map(al =>
-                                `<div style="padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px">
-                                    <span style="font-weight:600;color:#ef4444">${al.severity||'WARN'}</span>
-                                    &nbsp;${escHtml(al.message||al.name||'Alert')}
-                                </div>`).join('') || '<p style="font-size:12px;color:#9ca3af">No active alerts.</p>';
-                        }).catch(() => {});
+                            if (badge) {
+                                if (a.length) { badge.textContent = a.length + ' firing'; badge.style.display = ''; }
+                                else badge.style.display = 'none';
+                            }
+                            if (!a.length) {
+                                el.innerHTML = `<div style="padding:24px 12px;text-align:center">
+                                    <div style="width:40px;height:40px;border-radius:50%;background:#f0fdf4;display:flex;align-items:center;justify-content:center;margin:0 auto 8px">
+                                        <i class="fas fa-check" style="color:#10b981;font-size:16px"></i>
+                                    </div>
+                                    <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:3px">All clear</div>
+                                    <div style="font-size:11px;color:#9ca3af">No active alerts at this time</div>
+                                </div>`;
+                                return;
+                            }
+                            const sevCfg = {
+                                CRITICAL:{dot:'#ef4444',bg:'#fef2f2',pill:'background:#fef2f2;color:#b91c1c;border:1px solid #fecaca'},
+                                HIGH:    {dot:'#f97316',bg:'#fff7ed',pill:'background:#fff7ed;color:#c2410c;border:1px solid #fed7aa'},
+                                WARN:    {dot:'#f59e0b',bg:'#fffbeb',pill:'background:#fffbeb;color:#92400e;border:1px solid #fde68a'},
+                                INFO:    {dot:'#3b82f6',bg:'#eff6ff',pill:'background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe'}
+                            };
+                            el.innerHTML = a.slice(0,5).map(al => {
+                                const sev = (al.severity||'WARN').toUpperCase();
+                                const c = sevCfg[sev] || sevCfg.WARN;
+                                return `<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 10px;
+                                    background:${c.bg};border-radius:9px;margin-bottom:7px;border:1px solid rgba(0,0,0,.05)">
+                                    <div style="width:8px;height:8px;border-radius:50%;background:${c.dot};margin-top:4px;flex-shrink:0"></div>
+                                    <div style="flex:1;min-width:0">
+                                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+                                            <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;${c.pill}">${sev}</span>
+                                            ${al.service ? `<span style="font-size:10px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                                                <i class="fas fa-server" style="font-size:9px;margin-right:2px;color:#9ca3af"></i>${escHtml(al.service)}</span>` : ''}
+                                        </div>
+                                        <div style="font-size:12px;font-weight:500;color:#1f2937;line-height:1.4;overflow-wrap:break-word">
+                                            ${escHtml(al.message||al.name||'Alert triggered')}</div>
+                                    </div>
+                                </div>`;
+                            }).join('') + (a.length > 5 ? `<div style="text-align:center;padding:6px 0">
+                                <a href="#" onclick="showSection('alerts')" style="font-size:11px;color:#6366f1;text-decoration:none">
+                                    +${a.length-5} more alerts →</a></div>` : '');
+                        }).catch(() => {
+                            const el = document.getElementById('ov-alerts-list');
+                            if (el) el.innerHTML = '<div style="padding:14px;text-align:center;color:#9ca3af;font-size:12px">Could not load alerts</div>';
+                        });
                     fetch('/api/incidents/open')
                         .then(r => r.json())
                         .then(incs => {
                             const el = document.getElementById('ov-incidents-list');
+                            const badge = document.getElementById('ov-inc-badge');
+                            const ts = document.getElementById('ov-incidents-ts');
+                            if (ts) ts.textContent = new Date().toLocaleTimeString();
                             if (!el) return;
-                            el.innerHTML = incs.slice(0,5).map(i => {
-                                const sevColor={P1:'#dc2626',P2:'#ea580c',P3:'#d97706',P4:'#65a30d'}[i.severity]||'#6b7280';
-                                return `<div style="padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px">
-                                    <span style="font-weight:700;color:${sevColor}">${i.severity}</span>
-                                    &nbsp;<span>${escHtml(i.title)}</span>
-                                    <span style="float:right;color:#9ca3af;font-size:11px">${incAge(i.createdAt)}</span>
+                            if (badge) {
+                                if (incs.length) { badge.textContent = incs.length + ' open'; badge.style.display = ''; }
+                                else badge.style.display = 'none';
+                            }
+                            if (!incs.length) {
+                                el.innerHTML = `<div style="padding:24px 12px;text-align:center">
+                                    <div style="width:40px;height:40px;border-radius:50%;background:#f0fdf4;display:flex;align-items:center;justify-content:center;margin:0 auto 8px">
+                                        <i class="fas fa-shield-alt" style="color:#10b981;font-size:16px"></i>
+                                    </div>
+                                    <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:3px">No open incidents</div>
+                                    <div style="font-size:11px;color:#9ca3af">System is operating normally</div>
                                 </div>`;
-                            }).join('') || '<p style="font-size:12px;color:#9ca3af">No open incidents.</p>';
-                        }).catch(() => {});
+                                return;
+                            }
+                            const sev = {
+                                P1:{label:'P1',bg:'#fef2f2',tx:'#b91c1c',border:'#fecaca',dot:'#ef4444'},
+                                P2:{label:'P2',bg:'#fff7ed',tx:'#c2410c',border:'#fed7aa',dot:'#f97316'},
+                                P3:{label:'P3',bg:'#fffbeb',tx:'#92400e',border:'#fde68a',dot:'#f59e0b'},
+                                P4:{label:'P4',bg:'#f0fdf4',tx:'#166534',border:'#bbf7d0',dot:'#22c55e'}
+                            };
+                            const stColors = {OPEN:'#ef4444',INVESTIGATING:'#f59e0b',RESOLVED:'#10b981'};
+                            el.innerHTML = incs.slice(0,5).map(i => {
+                                const sc = sev[i.severity] || sev.P3;
+                                const stColor = stColors[i.status] || '#9ca3af';
+                                return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;margin-bottom:7px;
+                                    border-left:3px solid ${sc.dot};box-shadow:0 1px 3px rgba(0,0,0,.04)">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+                                        <div style="display:flex;align-items:center;gap:6px">
+                                            <span style="font-size:10px;font-weight:800;padding:1px 8px;border-radius:10px;
+                                                background:${sc.bg};color:${sc.tx};border:1px solid ${sc.border}">${sc.label}</span>
+                                            <span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;color:${stColor}">
+                                                <span style="width:5px;height:5px;border-radius:50%;background:${stColor};display:inline-block"></span>
+                                                ${i.status||'OPEN'}
+                                            </span>
+                                        </div>
+                                        <span style="font-size:10px;color:#9ca3af">${incAge(i.createdAt)}</span>
+                                    </div>
+                                    <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:3px;overflow-wrap:break-word">
+                                        ${escHtml(i.title)}</div>
+                                    ${i.affectedService ? `<div style="font-size:10px;color:#6b7280;display:flex;align-items:center;gap:3px">
+                                        <i class="fas fa-server" style="font-size:9px;color:#9ca3af"></i>${escHtml(i.affectedService)}</div>` : ''}
+                                </div>`;
+                            }).join('') + (incs.length > 5 ? `<div style="text-align:center;padding:6px 0">
+                                <a href="#" onclick="showSection('incidents')" style="font-size:11px;color:#6366f1;text-decoration:none">
+                                    +${incs.length-5} more incidents →</a></div>` : '');
+                        }).catch(() => {
+                            const el = document.getElementById('ov-incidents-list');
+                            if (el) el.innerHTML = '<div style="padding:14px;text-align:center;color:#9ca3af;font-size:12px">Could not load incidents</div>';
+                        });
                     fetch('/api/analytics/overview')
                         .then(r => r.json())
                         .then(d => {
