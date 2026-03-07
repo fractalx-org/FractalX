@@ -73,7 +73,7 @@ public class MenuMojo extends FractalxBaseMojo {
     public void execute() throws MojoExecutionException {
         initCli();
 
-        if (!ansi) {
+        if (!ansi || isWindows()) {
             runNumberedMenuLoop();
             return;
         }
@@ -412,6 +412,10 @@ public class MenuMojo extends FractalxBaseMojo {
     }
 
     // ── Raw-mode helpers ──────────────────────────────────────────────────────
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
 
     private static boolean enableRawMode() {
         try {
