@@ -7,7 +7,7 @@
 
     <groupId>org.fractalx</groupId>
     <artifactId>fractalx-parent</artifactId>
-    <version>0.2.0-SNAPSHOT</version>
+    <version>${revision}</version>
     <packaging>pom</packaging>
 
     <name>FractalX Framework</name>
@@ -51,6 +51,10 @@
     </modules>
 
     <properties>
+        <!-- ── Single source of truth for all module versions ─────────────── -->
+        <!-- To bump: change only this property. All child modules inherit it. -->
+        <revision>0.2.0-SNAPSHOT</revision>
+
         <java.version>17</java.version>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
@@ -124,6 +128,29 @@
         </pluginManagement>
 
         <plugins>
+            <!-- Flatten ${revision} to a literal version in published/installed POMs -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.6.0</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals><goal>flatten</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals><goal>clean</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- JaCoCo: instrument tests + produce XML report for SonarCloud -->
             <plugin>
                 <groupId>org.jacoco</groupId>

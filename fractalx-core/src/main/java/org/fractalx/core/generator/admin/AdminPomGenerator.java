@@ -70,7 +70,7 @@ class AdminPomGenerator {
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>fractalx-runtime</artifactId>
-                            <version>0.2.0-SNAPSHOT</version>
+                            <version>%s</version>
                         </dependency>
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
