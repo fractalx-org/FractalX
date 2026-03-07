@@ -18,6 +18,16 @@ import java.util.*;
 
 /**
  * Analyzes source code to identify FractalX decomposable modules.
+ *
+ * <p>Uses a two-phase approach:
+ * <ol>
+ *   <li>Parse every {@code .java} file in the source tree once.</li>
+ *   <li>For each {@code @DecomposableModule} class found, collect all import
+ *       statements from every file whose package matches that module's package
+ *       prefix. These are stored in {@link FractalModule#getDetectedImports()}
+ *       so downstream generators (e.g. {@code PomGenerator}) can emit only the
+ *       Maven dependencies the module actually needs.</li>
+ * </ol>
  */
 public class ModuleAnalyzer {
 
@@ -32,40 +42,64 @@ public class ModuleAnalyzer {
      * Analyzes a source directory and returns all decomposable modules found.
      */
     public List<FractalModule> analyzeProject(Path sourceRoot) throws IOException {
-        List<FractalModule> modules = new ArrayList<>();
 
+        // ── Phase 1: parse every .java file once ─────────────────────────────
+        Map<Path, CompilationUnit> parsedFiles = new LinkedHashMap<>();
         Files.walk(sourceRoot)
-                .filter(path -> path.toString().endsWith(".java"))
-                .forEach(path -> {
+                .filter(p -> p.toString().endsWith(".java"))
+                .forEach(p -> {
                     try {
-                        analyzeFile(path, modules);
+                        javaParser.parse(p).getResult()
+                                .ifPresent(cu -> parsedFiles.put(p, cu));
                     } catch (IOException e) {
-                        log.error("Failed to analyze file: {}", path, e);
+                        log.error("Failed to parse file: {}", p, e);
                     }
                 });
+
+        // ── Phase 2: find @DecomposableModule classes ─────────────────────────
+        List<FractalModule> modules = new ArrayList<>();
+        for (CompilationUnit cu : parsedFiles.values()) {
+            cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
+                classDecl.getAnnotationByName("DecomposableModule").ifPresent(annotation -> {
+                    String pkgName = cu.getPackageDeclaration()
+                            .map(pd -> pd.getNameAsString()).orElse("");
+                    Set<String> imports = collectImportsForPackage(pkgName, parsedFiles);
+                    FractalModule module = extractModuleDescriptor(classDecl, annotation, cu, imports);
+                    modules.add(module);
+                    log.info("Found decomposable module: {}  ({} imports detected)",
+                            module.getServiceName(), module.getDetectedImports().size());
+                });
+            });
+        }
 
         return modules;
     }
 
-    private void analyzeFile(Path filePath, List<FractalModule> modules) throws IOException {
-        CompilationUnit cu = javaParser.parse(filePath).getResult()
-                .orElseThrow(() -> new IOException("Failed to parse: " + filePath));
+    // ── Import collection ────────────────────────────────────────────────────
 
-        cu.findAll(ClassOrInterfaceDeclaration.class).forEach(classDecl -> {
-            Optional<AnnotationExpr> annotation = classDecl.getAnnotationByName("DecomposableModule");
-            if (annotation.isPresent()) {
-                FractalModule module = extractModuleDescriptor(classDecl, annotation.get(), cu);
-                modules.add(module);
-                log.info("Found decomposable module: {}", module.getServiceName());
+    /**
+     * Collects all import strings from every parsed file whose package equals
+     * {@code basePackage} or starts with {@code basePackage + "."}.
+     */
+    private Set<String> collectImportsForPackage(String basePackage,
+                                                  Map<Path, CompilationUnit> parsedFiles) {
+        Set<String> imports = new LinkedHashSet<>();
+        for (CompilationUnit cu : parsedFiles.values()) {
+            String pkg = cu.getPackageDeclaration()
+                    .map(pd -> pd.getNameAsString()).orElse("");
+            if (pkg.equals(basePackage) || pkg.startsWith(basePackage + ".")) {
+                cu.getImports().forEach(imp -> imports.add(imp.getNameAsString()));
             }
-        });
+        }
+        return imports;
     }
 
-    private FractalModule extractModuleDescriptor(
-            ClassOrInterfaceDeclaration classDecl,
-            AnnotationExpr annotation,
-            CompilationUnit cu) {
+    // ── Module extraction ────────────────────────────────────────────────────
 
+    private FractalModule extractModuleDescriptor(ClassOrInterfaceDeclaration classDecl,
+                                                   AnnotationExpr annotation,
+                                                   CompilationUnit cu,
+                                                   Set<String> detectedImports) {
         FractalModule.Builder builder = FractalModule.builder();
         builder.className(classDecl.getFullyQualifiedName().orElse(classDecl.getNameAsString()));
 
@@ -74,7 +108,7 @@ public class ModuleAnalyzer {
         if (annotation.isNormalAnnotationExpr()) {
             NormalAnnotationExpr normalAnnotation = annotation.asNormalAnnotationExpr();
             for (MemberValuePair pair : normalAnnotation.getPairs()) {
-                String name = pair.getNameAsString();
+                String name  = pair.getNameAsString();
                 String value = pair.getValue().toString().replace("\"", "");
 
                 switch (name) {
@@ -93,11 +127,15 @@ public class ModuleAnalyzer {
 
         List<String> dependencies = findDependencies(classDecl);
         builder.dependencies(dependencies);
+        builder.detectedImports(detectedImports);
 
         FractalModule module = builder.build();
 
         if (!dependencies.isEmpty()) {
-            log.info("Detected dependencies for {}: {}", module.getServiceName(), dependencies);
+            log.info("Cross-module dependencies for {}: {}", module.getServiceName(), dependencies);
+        }
+        if (!detectedImports.isEmpty()) {
+            log.debug("Detected imports for {}: {}", module.getServiceName(), detectedImports);
         }
 
         return module;
