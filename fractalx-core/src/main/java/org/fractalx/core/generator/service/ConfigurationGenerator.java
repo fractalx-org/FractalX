@@ -44,6 +44,12 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
 
     /** Base application.yml — references env vars, activates dev profile by default. */
     private String buildBaseYml(FractalModule module, org.fractalx.core.config.FractalxConfig cfg) {
+        boolean tracingEnabled = cfg.isTracingEnabled(module.getServiceName());
+        String otelBlock = tracingEnabled
+                ? "    otel:\n      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:%s}\n".formatted(cfg.otelEndpoint())
+                : "    otel:\n      enabled: false\n";
+        String samplingProbability = tracingEnabled ? "1.0" : "0.0";
+
         return """
                 spring:
                   application:
@@ -64,12 +70,10 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     orchestrator:
                       url: ${FRACTALX_SAGA_ORCHESTRATOR_URL:http://localhost:8099}
                   observability:
-                    tracing: true
+                    tracing: %s
                     metrics: true
                     logger-url: ${FRACTALX_LOGGER_URL:%s/api/logs}
-                    otel:
-                      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:%s}
-
+                %s
                 netscope:
                   server:
                     grpc:
@@ -88,18 +92,15 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                       show-components: always
                   tracing:
                     sampling:
-                      probability: 1.0
-                  otlp:
-                    tracing:
-                      endpoint: ${OTEL_EXPORTER_OTLP_HTTP_ENDPOINT:http://localhost:4318/v1/traces}
+                      probability: %s
 
                 logging:
                   level:
                     org.fractalx: DEBUG
                     org.fractalx.netscope: DEBUG
                 """.formatted(module.getServiceName(), module.getPort(),
-                cfg.registryUrl(), cfg.loggerUrl(), cfg.otelEndpoint(),
-                module.getPort() + GRPC_PORT_OFFSET);
+                cfg.registryUrl(), tracingEnabled, cfg.loggerUrl(),
+                otelBlock, module.getPort() + GRPC_PORT_OFFSET, samplingProbability);
     }
 
     /** application-dev.yml — localhost hardcoded, H2 in-memory, suitable for local dev. */

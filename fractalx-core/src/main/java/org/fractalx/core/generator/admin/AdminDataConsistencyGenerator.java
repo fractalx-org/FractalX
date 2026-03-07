@@ -61,8 +61,10 @@ class AdminDataConsistencyGenerator {
                     if (s.hasCompensation()) {
                         compensations.append("\"").append(s.getTargetServiceName())
                                      .append(":").append(s.getCompensationMethodName()).append("\"");
-                        if (i < stepList.size() - 1) compensations.append(", ");
+                    } else {
+                        compensations.append("\"\"");
                     }
+                    if (i < stepList.size() - 1) compensations.append(", ");
                 }
                 compensations.append(")");
 
@@ -142,6 +144,16 @@ class AdminDataConsistencyGenerator {
                         m.getServiceName(), m.getPort()));
             }
         }
+
+        // Append saga-orchestrator DB (H2 in-memory, port 8099)
+        dbChecks.append(
+            "        {Map<String,Object> db = new LinkedHashMap<>();" +
+            " db.put(\"service\",\"saga-orchestrator\");" +
+            " db.put(\"schemas\",\"saga_instance\");" +
+            " db.put(\"health\", fetchDbHealth(SAGA_ORCHESTRATOR_PORT));" +
+            " db.put(\"instanceCount\", fetchSagaInstanceCount());" +
+            " dbList.add(db);}\n"
+        );
 
         // Outbox check for services with dependencies (they generated outbox support)
         StringBuilder outboxChecks = new StringBuilder();
@@ -344,6 +356,17 @@ class AdminDataConsistencyGenerator {
                             return (resp != null && resp.contains("UP")) ? "UP" : "DOWN";
                         } catch (Exception e) {
                             return "DOWN";
+                        }
+                    }
+
+                    @SuppressWarnings("unchecked")
+                    private int fetchSagaInstanceCount() {
+                        try {
+                            List<?> resp = (List<?>) restTemplate.getForObject(
+                                    "http://localhost:" + SAGA_ORCHESTRATOR_PORT + "/saga", List.class);
+                            return resp != null ? resp.size() : 0;
+                        } catch (Exception e) {
+                            return -1;
                         }
                     }
                 }

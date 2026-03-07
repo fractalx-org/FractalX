@@ -121,6 +121,25 @@ public class GatewayPomGenerator {
                         <artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
                         <version>2.3.0</version>
                     </dependency>
+
+                    <!-- Distributed tracing: Micrometer OTel bridge creates spans + auto-propagates
+                         traceparent to downstream services via Reactor Netty HTTP client -->
+                    <dependency>
+                        <groupId>io.micrometer</groupId>
+                        <artifactId>micrometer-tracing-bridge-otel</artifactId>
+                    </dependency>
+                    <!-- OTLP gRPC exporter ships spans to Jaeger on port 4317 -->
+                    <dependency>
+                        <groupId>io.opentelemetry</groupId>
+                        <artifactId>opentelemetry-exporter-otlp</artifactId>
+                        <version>1.32.0</version>
+                    </dependency>
+                    <!-- OTel semantic conventions (ResourceAttributes.SERVICE_NAME etc.) -->
+                    <dependency>
+                        <groupId>io.opentelemetry.semconv</groupId>
+                        <artifactId>opentelemetry-semconv</artifactId>
+                        <version>1.21.0-alpha</version>
+                    </dependency>
                 </dependencies>
             
                 <build>

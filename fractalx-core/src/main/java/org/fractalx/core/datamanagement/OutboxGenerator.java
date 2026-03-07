@@ -92,6 +92,15 @@ public class OutboxGenerator {
                     @Column
                     private String correlationId;
 
+                    /**
+                     * W3C traceparent header value captured from the active OTel span
+                     * at publish time. Forwarded as the {@code traceparent} HTTP header
+                     * so the saga-orchestrator's span appears as a child of the original
+                     * request trace in Jaeger. Format: {@code 00-{traceId}-{spanId}-01}.
+                     */
+                    @Column(length = 55)
+                    private String traceparent;
+
                     /** Whether this event has been successfully forwarded. */
                     @Column(nullable = false)
                     private boolean published = false;
@@ -117,6 +126,8 @@ public class OutboxGenerator {
                     public void setPayload(String v)     { payload = v; }
                     public String getCorrelationId()     { return correlationId; }
                     public void setCorrelationId(String v) { correlationId = v; }
+                    public String getTraceparent()       { return traceparent; }
+                    public void setTraceparent(String v) { traceparent = v; }
                     public boolean isPublished()         { return published; }
                     public void setPublished(boolean v)  { published = v; }
                     public int getRetryCount()           { return retryCount; }
@@ -164,6 +175,7 @@ public class OutboxGenerator {
 
                 import com.fasterxml.jackson.core.JsonProcessingException;
                 import com.fasterxml.jackson.databind.ObjectMapper;
+                import io.micrometer.tracing.Tracer;
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
                 import org.slf4j.MDC;
@@ -183,10 +195,14 @@ public class OutboxGenerator {
 
                     private final OutboxRepository outboxRepository;
                     private final ObjectMapper     objectMapper;
+                    private final Tracer           tracer;
 
-                    public OutboxPublisher(OutboxRepository outboxRepository, ObjectMapper objectMapper) {
+                    public OutboxPublisher(OutboxRepository outboxRepository,
+                                           ObjectMapper objectMapper,
+                                           Tracer tracer) {
                         this.outboxRepository = outboxRepository;
                         this.objectMapper     = objectMapper;
+                        this.tracer           = tracer;
                     }
 
                     /**
@@ -200,12 +216,27 @@ public class OutboxGenerator {
                         OutboxEvent event = new OutboxEvent();
                         event.setEventType(eventType);
                         event.setAggregateId(aggregateId);
+
                         // Capture correlationId while still in the HTTP thread — MDC is populated here.
                         // The OutboxPoller runs on a @Scheduled thread with an empty MDC, so we must
                         // persist the ID now and read it from the entity later.
                         String correlationId = MDC.get("correlationId");
                         if (correlationId == null) correlationId = MDC.get("traceId");
                         event.setCorrelationId(correlationId);
+
+                        // Capture W3C traceparent from the active OTel span so the outbox poller
+                        // can forward it as an HTTP header. This links the saga-orchestrator's
+                        // span to the original request trace in Jaeger.
+                        try {
+                            io.micrometer.tracing.Span curSpan = tracer.currentSpan();
+                            if (curSpan != null) {
+                                io.micrometer.tracing.TraceContext tc = curSpan.context();
+                                if (tc != null && tc.traceId() != null && tc.spanId() != null) {
+                                    event.setTraceparent("00-" + tc.traceId() + "-" + tc.spanId() + "-01");
+                                }
+                            }
+                        } catch (Exception ignored) {}
+
                         try {
                             event.setPayload(objectMapper.writeValueAsString(payload));
                         } catch (JsonProcessingException e) {
@@ -213,8 +244,8 @@ public class OutboxGenerator {
                             event.setPayload(String.valueOf(payload));
                         }
                         outboxRepository.save(event);
-                        log.debug("Outbox event queued: type={} aggregateId={} correlationId={}",
-                                eventType, aggregateId, correlationId);
+                        log.debug("Outbox event queued: type={} aggregateId={} correlationId={} traceparent={}",
+                                eventType, aggregateId, correlationId, event.getTraceparent());
                     }
                 }
                 """.formatted(pkg);
@@ -310,10 +341,16 @@ public class OutboxGenerator {
                         if (event.getCorrelationId() != null && !event.getCorrelationId().isBlank()) {
                             headers.set("X-Correlation-Id", event.getCorrelationId());
                         }
+                        // Forward W3C traceparent so the saga-orchestrator creates a child span
+                        // under the original request trace, connecting it in Jaeger.
+                        if (event.getTraceparent() != null && !event.getTraceparent().isBlank()) {
+                            headers.set("traceparent", event.getTraceparent());
+                        }
                         HttpEntity<String> request = new HttpEntity<>(event.getPayload(), headers);
                         restTemplate.postForObject(url, request, String.class);
-                        log.debug("Dispatched saga event id={} type={} correlationId={} to {}",
-                                event.getId(), event.getEventType(), event.getCorrelationId(), url);
+                        log.debug("Dispatched saga event id={} type={} correlationId={} traceparent={} to {}",
+                                event.getId(), event.getEventType(), event.getCorrelationId(),
+                                event.getTraceparent(), url);
                     }
                 }
                 """.formatted(pkg, module.getServiceName());
