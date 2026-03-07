@@ -184,7 +184,7 @@ public class SagaOrchestratorGenerator {
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>fractalx-runtime</artifactId>
-                            <version>0.2.0-SNAPSHOT</version>
+                            <version>__FX_VERSION__</version>
                         </dependency>
                         <dependency>
                             <groupId>com.h2database</groupId>
@@ -236,7 +236,8 @@ public class SagaOrchestratorGenerator {
                     </build>
                 </project>
                 """);
-        writeFile(serviceRoot, "pom.xml", sb.toString());
+        writeFile(serviceRoot, "pom.xml",
+                sb.toString().replace("__FX_VERSION__", FractalxVersion.get()));
     }
 
     private void writeApplicationClass(Path srcMainJava) throws IOException {

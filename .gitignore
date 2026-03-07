@@ -23,3 +23,8 @@ generated-services/
 
 .idea
 /lib
+/fractalx-maven-plugin/.flattened-pom.xml
+/fractalx-core/.flattened-pom.xml
+/fractalx-annotations/.flattened-pom.xml
+/fractalx-runtime/.flattened-pom.xml
+/fractalx-parent/.flattened-pom.xml
