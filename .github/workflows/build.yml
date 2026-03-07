@@ -1,12 +1,6 @@
 name: SonarQube
 on:
-  push:
-    branches:
-      - main
-      - development
-      - sit
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_dispatch:   # temporarily disabled — trigger manually only
 jobs:
   build:
     name: Build and analyze
