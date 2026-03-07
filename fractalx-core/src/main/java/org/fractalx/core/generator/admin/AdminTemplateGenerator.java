@@ -3170,14 +3170,16 @@ class AdminTemplateGenerator {
                             </button>
                         </div>
                     </div>
-                    <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:#6b7280">
-                        <span><span style="display:inline-block;width:13px;height:13px;border-radius:50%;
-                            background:#22c55e;margin-right:5px;vertical-align:middle"></span>UP</span>
-                        <span><span style="display:inline-block;width:13px;height:13px;border-radius:50%;
-                            background:#ef4444;margin-right:5px;vertical-align:middle"></span>DOWN</span>
-                        <span><span style="display:inline-block;width:13px;height:13px;border-radius:50%;
-                            background:#94a3b8;margin-right:5px;vertical-align:middle"></span>UNKNOWN</span>
-                        <span style="margin-left:auto;font-size:11px">Drag nodes · Scroll to zoom · Click for details</span>
+                    <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:#374151">
+                        <span style="display:flex;align-items:center;gap:5px">
+                            <span style="width:11px;height:11px;border-radius:50%;background:#22c55e;border:2px solid #22c55e;display:inline-block"></span>
+                            <b style="color:#15803d">Running</b>
+                        </span>
+                        <span style="display:flex;align-items:center;gap:5px">
+                            <span style="width:11px;height:11px;border-radius:50%;background:#ef4444;border:2px solid #ef4444;display:inline-block"></span>
+                            <b style="color:#dc2626">Stopped</b>
+                        </span>
+                        <span style="margin-left:auto;font-size:11px;color:#9ca3af">Drag nodes · Scroll to zoom · Click for details</span>
                     </div>
                     <div id="netmap-info"
                         style="display:none;padding:14px;background:#fff;border:1px solid #e5e7eb;border-radius:10px">
@@ -3514,59 +3516,124 @@ Click "Show Diff" above to compare active overrides against the base configurati
 
     private String buildScriptsNetworkMap() {
         return """
-                // ── Network Map ────────────────────────────────────────────────────────────
+                // ── Network Map — module-level state ──────────────────────────────────────
                 let nmNodes = [], nmEdges = [], nmHealth = {};
                 let nmScale = 1, nmOffX = 0, nmOffY = 0;
                 let nmDrag = null, nmMouse = {x:0,y:0};
                 let nmAnimId = null;
 
+                // ── Shared helpers — module scope so nmDraw, tooltip AND showNetmapInfo can use them ──
+
+                // nmHealth stores one of: 'UP' | 'DEGRADED' | 'DOWN'
+                // 'UP'      = process RUNNING + actuator UP          → green  (Running)
+                // 'DEGRADED'= process RUNNING + actuator DEGRADED   → amber  (Warning)
+                // 'DOWN'    = process UNREACHABLE (TCP refused)      → red    (Stopped)
+                // Uses the exact same processStatus+status fields as the Services section.
+                function nmResolveStatus(h) {
+                    if (!h) return 'UP';
+                    const proc = h.processStatus;
+                    const st   = typeof h === 'object' ? (h.status || '') : String(h);
+                    // Stopped ONLY when the process itself is unreachable (TCP refused)
+                    if (proc === 'UNREACHABLE') return 'DOWN';
+                    // Process is RUNNING — any bad actuator health = Warning (orange)
+                    if (st === 'DOWN' || st === 'DEGRADED' || h.degraded) return 'DEGRADED';
+                    // Process RUNNING + health UP or UNKNOWN = Running (green)
+                    return 'UP';
+                }
+
+                const nmPalette = {
+                    UP:       { ring:'#22c55e', fill:'rgba(34,197,94,0.15)',   dot:'#22c55e', label:'Running'  },
+                    DEGRADED: { ring:'#f59e0b', fill:'rgba(245,158,11,0.15)', dot:'#f59e0b', label:'Warning'  },
+                    DOWN:     { ring:'#ef4444', fill:'rgba(239,68,68,0.15)',   dot:'#ef4444', label:'Stopped'  }
+                };
+
+                // Small badge shown bottom-left of infra nodes so type is visible even on colour nodes
+                const nmTypeLabel = { gateway:'GW', registry:'REG', admin:'ADM' };
+
+                // ── Load ────────────────────────────────────────────────────────────────────
+
                 function loadNetworkMap() {
-                    document.getElementById('netmap-loading').style.display = '';
+                    const loading = document.getElementById('netmap-loading');
+                    loading.style.display = '';
+                    loading.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading…';
+
                     Promise.all([
                         fetch('/api/communication/topology').then(r => r.json()),
+                        fetch('/api/services/all').then(r => r.json()).catch(() => []),
                         fetch('/api/health/summary').then(r => r.json()).catch(() => ({}))
-                    ]).then(([topo, health]) => {
+                    ]).then(([topo, services, infraHealth]) => {
                         const canvas = document.getElementById('netmap-canvas');
-                        // Sync internal canvas size to its CSS display size before computing positions
-                        const W = canvas.parentElement.clientWidth || canvas.offsetWidth || 900;
-                        const H = 520;
-                        canvas.width  = W;
-                        canvas.height = H;
-                        nmHealth = {};
-                        // /api/health/summary returns Map<String,String>: {name: "UP"|"DOWN"|...}
-                        Object.entries(health || {}).forEach(([name, h]) => nmHealth[name] = h);
-                        const nodeMap = {};
-                        nmNodes = (topo.nodes || []).map((n, i) => {
-                            const angle = (2 * Math.PI * i) / Math.max((topo.nodes || []).length, 1);
-                            const r = Math.min(W, H) * 0.32;
-                            const node = {
-                                id: n.id || n.name, name: n.name, port: n.port,
-                                grpcPort: n.grpcPort, type: n.type,
-                                x: W/2 + r * Math.cos(angle),
-                                y: H/2 + r * Math.sin(angle),
-                                vx: 0, vy: 0, radius: 28
-                            };
-                            nodeMap[node.id] = node;
-                            return node;
+                        requestAnimationFrame(() => {
+                            const W = canvas.parentElement.clientWidth || 900;
+                            const H = 520;
+                            canvas.width  = W;
+                            canvas.height = H;
+
+                            // Build health map from /api/services/all (microservices)
+                            nmHealth = {};
+                            (services || []).forEach(s => {
+                                const name = s.meta && s.meta.name;
+                                if (name && s.health) nmHealth[name] = s.health;
+                            });
+
+                            // Supplement infra nodes from /api/health/summary
+                            Object.entries(infraHealth || {}).forEach(([id, raw]) => {
+                                if (!nmHealth[id]) {
+                                    const proc = (raw === 'DOWN') ? 'UNREACHABLE' : 'RUNNING';
+                                    const st   = (raw === 'RUNNING') ? 'UNKNOWN' : (raw || 'UNKNOWN');
+                                    nmHealth[id] = { processStatus: proc, status: st };
+                                }
+                            });
+
+                            // Build nodes from topology
+                            const nodeMap = {};
+                            const count = (topo.nodes || []).length;
+                            nmNodes = (topo.nodes || []).map((n, i) => {
+                                const angle = (2 * Math.PI * i) / Math.max(count, 1) - Math.PI / 2;
+                                const r = Math.min(W, H) * 0.33;
+                                const node = {
+                                    id:       n.id,
+                                    label:    n.label || n.id,
+                                    port:     n.port,
+                                    grpcPort: n.port > 0 ? n.port + 10000 : 0,
+                                    type:     n.type || 'service',
+                                    x: W / 2 + r * Math.cos(angle),
+                                    y: H / 2 + r * Math.sin(angle),
+                                    vx: 0, vy: 0, radius: 30
+                                };
+                                nodeMap[node.id] = node;
+                                return node;
+                            });
+
+                            nmEdges = (topo.edges || []).map(e => ({
+                                source:   nodeMap[e.source],
+                                target:   nodeMap[e.target],
+                                protocol: e.protocol || 'grpc'
+                            })).filter(e => e.source && e.target);
+
+                            loading.style.display = 'none';
+
+                            if (!nmNodes.length) {
+                                loading.style.display = '';
+                                loading.innerHTML = '<i class="fas fa-info-circle" style="color:#9ca3af"></i> No topology data — run decompose first';
+                                return;
+                            }
+
+                            if (nmAnimId) cancelAnimationFrame(nmAnimId);
+                            nmSetupCanvas();
+                            nmTickLoop();
                         });
-                        nmEdges = (topo.edges || []).map(e => ({
-                            source: nodeMap[e.source] || nodeMap[e.from],
-                            target: nodeMap[e.target] || nodeMap[e.to]
-                        })).filter(e => e.source && e.target);
-                        document.getElementById('netmap-loading').style.display = 'none';
-                        if (nmAnimId) cancelAnimationFrame(nmAnimId);
-                        nmTickLoop();
-                        nmSetupCanvas();
                     }).catch(() => {
-                        document.getElementById('netmap-loading').textContent = 'Failed to load topology';
+                        loading.style.display = '';
+                        loading.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#ef4444"></i> Failed to load topology';
                     });
                 }
 
                 function nmTickLoop() {
-                    const REPEL = 3200, SPRING_LEN = 120, SPRING_K = 0.04, DAMP = 0.82, GRAV = 0.025;
+                    const REPEL = 4000, SPRING_LEN = 140, SPRING_K = 0.035, DAMP = 0.80, GRAV = 0.02;
                     const canvas = document.getElementById('netmap-canvas');
-                    const W = canvas.offsetWidth || 900, H = canvas.offsetHeight || 520;
-                    for (let iter = 0; iter < 120; iter++) {
+                    const W = canvas.width || 900, H = canvas.height || 520;
+                    for (let iter = 0; iter < 80; iter++) {
                         for (let i = 0; i < nmNodes.length; i++) {
                             const a = nmNodes[i];
                             for (let j = i + 1; j < nmNodes.length; j++) {
@@ -3587,16 +3654,15 @@ Click "Show Diff" above to compare active overrides against the base configurati
                             e.target.vx -= f*dx/dist; e.target.vy -= f*dy/dist;
                         });
                         nmNodes.forEach(n => {
-                            n.vx += (W/2 - n.x) * GRAV;
-                            n.vy += (H/2 - n.y) * GRAV;
+                            n.vx += (W / 2 - n.x) * GRAV;
+                            n.vy += (H / 2 - n.y) * GRAV;
                             n.vx *= DAMP; n.vy *= DAMP;
-                            n.x += n.vx; n.y += n.vy;
+                            n.x  += n.vx;  n.y  += n.vy;
                         });
                     }
                     nmDraw();
-                    nmAnimId = requestAnimationFrame(() => {
-                        if (nmNodes.some(n => Math.abs(n.vx) > 0.1 || Math.abs(n.vy) > 0.1)) nmTickLoop();
-                    });
+                    const still = nmNodes.every(n => Math.abs(n.vx) < 0.15 && Math.abs(n.vy) < 0.15);
+                    if (!still) nmAnimId = requestAnimationFrame(nmTickLoop);
                 }
                 """;
     }
@@ -3612,41 +3678,82 @@ Click "Show Diff" above to compare active overrides against the base configurati
                     ctx.save();
                     ctx.translate(nmOffX, nmOffY);
                     ctx.scale(nmScale, nmScale);
-                    // edges
+
+                    // edges — drawn below nodes
                     nmEdges.forEach(e => {
                         if (!e.source || !e.target) return;
                         ctx.beginPath();
                         ctx.moveTo(e.source.x, e.source.y);
                         ctx.lineTo(e.target.x, e.target.y);
                         ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.5;
-                        ctx.stroke();
-                        // arrow head
+                        ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+                        // arrowhead at target perimeter
                         const dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
-                        const len = Math.sqrt(dx*dx+dy*dy) || 1;
+                        const len = Math.sqrt(dx*dx + dy*dy) || 1;
                         const ux = dx/len, uy = dy/len;
-                        const tx = e.target.x - ux * e.target.radius;
-                        const ty = e.target.y - uy * e.target.radius;
+                        const tx = e.target.x - ux * (e.target.radius + 2);
+                        const ty = e.target.y - uy * (e.target.radius + 2);
                         ctx.beginPath();
                         ctx.moveTo(tx, ty);
-                        ctx.lineTo(tx - ux*10 + uy*5, ty - uy*10 - ux*5);
-                        ctx.lineTo(tx - ux*10 - uy*5, ty - uy*10 + ux*5);
+                        ctx.lineTo(tx - ux*9 + uy*5, ty - uy*9 - ux*5);
+                        ctx.lineTo(tx - ux*9 - uy*5, ty - uy*9 + ux*5);
                         ctx.fillStyle = '#94a3b8'; ctx.fill();
                     });
-                    // nodes
+
+                    // nodes — use module-level nmResolveStatus() + nmPalette
                     nmNodes.forEach(n => {
-                        const h = nmHealth[n.name] || 'UNKNOWN';
-                        const fill = h === 'UP' ? '#22c55e' : h === 'DOWN' ? '#ef4444' : '#94a3b8';
+                        const rawHealth = nmHealth[n.id];   // health object or null/undefined
+                        const status    = nmResolveStatus(rawHealth);
+                        const palette   = nmPalette[status];
+
+                        // circle body
+                        ctx.globalAlpha = status === 'DOWN' ? 0.55 : 1.0;
                         ctx.beginPath();
                         ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
-                        ctx.fillStyle = fill + '22'; ctx.fill();
-                        ctx.strokeStyle = fill; ctx.lineWidth = 2.5; ctx.stroke();
-                        ctx.fillStyle = '#1e293b'; ctx.font = 'bold 10px Inter,sans-serif';
+                        ctx.fillStyle   = palette.fill;
+                        ctx.fill();
+                        ctx.strokeStyle = palette.ring;   // status colour — no type override
+                        ctx.lineWidth   = 3;
+                        ctx.stroke();
+                        ctx.globalAlpha = 1.0;
+
+                        // pulsing status dot (top-right corner of circle)
+                        const dotX = n.x + n.radius * 0.68;
+                        const dotY = n.y - n.radius * 0.68;
+                        ctx.beginPath();
+                        ctx.arc(dotX, dotY, 5.5, 0, Math.PI * 2);
+                        ctx.fillStyle   = palette.dot;
+                        ctx.fill();
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth   = 1.5;
+                        ctx.stroke();
+
+                        // service name label
+                        const short = n.id.replace('-service','').replace('fractalx-','fx-');
+                        ctx.fillStyle = status === 'DOWN' ? '#94a3b8' : '#1e293b';
+                        ctx.font      = 'bold 10px Inter,system-ui,sans-serif';
                         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                        const label = n.name.replace('-service','').replace('-svc','');
-                        ctx.fillText(label.length > 10 ? label.slice(0,10)+'…' : label, n.x, n.y);
+                        ctx.fillText(short.length > 11 ? short.slice(0,11)+'…' : short, n.x, n.y - 3);
+
+                        // port number below name
                         if (n.port) {
-                            ctx.fillStyle = '#64748b'; ctx.font = '9px Inter,sans-serif';
-                            ctx.fillText(':' + n.port, n.x, n.y + 15);
+                            ctx.fillStyle = '#94a3b8';
+                            ctx.font      = '9px Inter,system-ui,sans-serif';
+                            ctx.fillText(':' + n.port, n.x, n.y + 11);
+                        }
+
+                        // type badge (bottom-left corner) for infra nodes
+                        const badge = nmTypeLabel[n.type];
+                        if (badge) {
+                            const bw = 26, bh = 12, bx = n.x - n.radius + 1, by = n.y + n.radius - 13;
+                            ctx.fillStyle   = 'rgba(15,23,42,0.65)';
+                            ctx.beginPath();
+                            ctx.roundRect(bx, by, bw, bh, 3);
+                            ctx.fill();
+                            ctx.fillStyle = '#e2e8f0';
+                            ctx.font      = 'bold 8px Inter,system-ui,sans-serif';
+                            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                            ctx.fillText(badge, bx + bw / 2, by + bh / 2);
                         }
                     });
                     ctx.restore();
@@ -3672,8 +3779,9 @@ Click "Show Diff" above to compare active overrides against the base configurati
                             const {nx, ny} = nmCanvasCoords(e);
                             const hit = nmNodes.find(n => Math.hypot(n.x-nx, n.y-ny) < n.radius);
                             if (hit) {
-                                const h = nmHealth[hit.name] || 'UNKNOWN';
-                                tip.innerHTML = `<b>${hit.name}</b>\\nHTTP :${hit.port||'-'}  gRPC :${hit.grpcPort||'-'}\\nHealth: ${h}`;
+                                const rawH = nmHealth[hit.id];
+                                const statusLabel = nmPalette[nmResolveStatus(rawH)].label;
+                                tip.innerHTML = `<b>${hit.label}</b>\\nHTTP :${hit.port||'—'}  gRPC :${hit.grpcPort||'—'}\\nStatus: ${statusLabel}`;
                                 tip.style.display = '';
                                 tip.style.left = (e.offsetX + 14) + 'px';
                                 tip.style.top  = (e.offsetY - 10) + 'px';
@@ -3710,14 +3818,27 @@ Click "Show Diff" above to compare active overrides against the base configurati
 
                 function showNetmapInfo(node) {
                     const info = document.getElementById('netmap-info');
-                    document.getElementById('netmap-info-name').textContent = node.name;
-                    const h = nmHealth[node.name] || 'UNKNOWN';
-                    const color = h === 'UP' ? '#22c55e' : h === 'DOWN' ? '#ef4444' : '#94a3b8';
+                    document.getElementById('netmap-info-name').textContent = node.label || node.id;
+                    const rawH   = nmHealth[node.id];
+                    const normH  = nmResolveStatus(rawH);
+                    const pal    = nmPalette[normH];
+                    const bgMap  = { UP:'#f0fdf4', DEGRADED:'#fffbeb', DOWN:'#fef2f2' };
+                    const st     = { label: pal.label, color: pal.ring, bg: bgMap[normH] || '#f8fafc' };
+                    const connections = nmEdges.filter(e => e.source === node || e.target === node).length;
+                    const upstream   = nmEdges.filter(e => e.source === node).length;
+                    const downstream = nmEdges.filter(e => e.target === node).length;
                     document.getElementById('netmap-info-body').innerHTML =
-                        `<div><small style="color:#9ca3af">Health</small><br><b style="color:${color}">${h}</b></div>
-                        <div><small style="color:#9ca3af">HTTP Port</small><br><b>${node.port || '-'}</b></div>
-                        <div><small style="color:#9ca3af">gRPC Port</small><br><b>${node.grpcPort || '-'}</b></div>
-                        <div><small style="color:#9ca3af">Type</small><br><b>${node.type || '-'}</b></div>`;
+                        `<div><small style="color:#9ca3af;display:block;margin-bottom:3px">Status</small>
+                            <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;
+                                background:${st.bg};color:${st.color};font-weight:700;font-size:12px">
+                                <span style="width:7px;height:7px;border-radius:50%;background:${st.color};display:inline-block"></span>
+                                ${st.label}</span></div>
+                        <div><small style="color:#9ca3af">HTTP Port</small><br><b>:${node.port || '—'}</b></div>
+                        <div><small style="color:#9ca3af">gRPC Port</small><br><b>:${node.grpcPort || '—'}</b></div>
+                        <div><small style="color:#9ca3af">Type</small><br><b>${node.type || '—'}</b></div>
+                        <div><small style="color:#9ca3af">Connections</small><br>
+                            <b>${connections}</b>
+                            <span style="font-size:10px;color:#9ca3af;margin-left:4px">(↑${upstream} out · ↓${downstream} in)</span></div>`;
                     info.style.display = '';
                 }
                 """;

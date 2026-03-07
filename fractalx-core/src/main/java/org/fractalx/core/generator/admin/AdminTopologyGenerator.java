@@ -108,6 +108,8 @@ class AdminTopologyGenerator {
         }
         healthChecks.append("        summary.put(\"fractalx-registry\", checkHealth(\"fractalx-registry\", 8761, \"/services/health\"));\n");
         healthChecks.append("        summary.put(\"fractalx-gateway\",  checkHealth(\"fractalx-gateway\",  9999, \"/actuator/health\"));\n");
+        healthChecks.append("        summary.put(\"admin-service\",     \"UP\"); // self — always reachable if this endpoint is responding\n");
+        healthChecks.append("        summary.put(\"logger-service\",    checkHealth(\"logger-service\", 9099, \"/actuator/health\"));\n");
 
         String content = """
                 package org.fractalx.admin.topology;
