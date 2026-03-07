@@ -27,7 +27,7 @@ import java.util.List;
 public class DecomposeMojo extends FractalxBaseMojo {
 
     private static final int GATEWAY_PORT  = 9999;
-    private static final int ADMIN_PORT    = 8080;
+    private static final int ADMIN_PORT    = 9090;
     private static final int REGISTRY_PORT = 8761;
 
     // ── Parameters ───────────────────────────────────────────────────────────
@@ -71,6 +71,8 @@ public class DecomposeMojo extends FractalxBaseMojo {
                 return;
             }
 
+            out.println("  " + a(DIM) + "Found " + modules.size() + " module(s)" + a(RST));
+            out.println();
             for (FractalModule m : modules) {
                 String deps = m.getDependencies().isEmpty() ? ""
                         : a(DIM) + "  \u2192  " + a(RST) + String.join(", ", m.getDependencies());
@@ -164,8 +166,11 @@ public class DecomposeMojo extends FractalxBaseMojo {
 
         section("Get started");
         cmd("cd " + outDir.toAbsolutePath());
-        cmd("./start-all.sh");
-        cmd("docker-compose up -d");
+        cmd("./start-all.sh                  # start all services locally");
+        cmd("docker-compose up -d            # start via Docker");
+        out.println();
+        cmd("mvn fractalx:ps                 # check service status");
+        cmd("mvn fractalx:verify             # run post-decomposition checks");
         out.println();
         out.println("  " + a(DIM) + "Docs  \u2192  " + a(RST)
                 + outDir.toAbsolutePath() + "/README.md");

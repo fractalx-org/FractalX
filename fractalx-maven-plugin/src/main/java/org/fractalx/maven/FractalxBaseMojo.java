@@ -125,6 +125,14 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
         out.println("  " + a(YLW) + "\u26A0" + a(RST) + "  " + a(DIM) + msg + a(RST));
     }
 
+    protected void error(String msg) {
+        out.println("  " + a(RED) + "\u2718" + a(RST) + "  " + msg);
+    }
+
+    protected void info(String msg) {
+        out.println("  " + a(CYN) + "\u2139" + a(RST) + "  " + a(DIM) + msg + a(RST));
+    }
+
     // ── Low-level helpers ─────────────────────────────────────────────────────
 
     protected String a(String c) { return ansi ? c : ""; }
@@ -277,11 +285,15 @@ public abstract class FractalxBaseMojo extends AbstractMojo {
             }
 
             // ── Subtitle line ─────────────────────────────────────────────────
+            long doneCount = steps.stream().filter(s ->
+                    s.status == Status.DONE || s.status == Status.WARNING
+                    || s.status == Status.ERROR || s.status == Status.SKIPPED).count();
             sb.append("\r\033[2K\r\n");
             sb.append("\r\033[2K  ")
               .append(cc(DIM)).append(subtitle)
-              .append("  ").append(FractalxVersion.get()).append(cc(RST))
-              .append("\r\n");
+              .append("  ").append(FractalxVersion.get())
+              .append("  (").append(doneCount).append("/").append(steps.size()).append(")")
+              .append(cc(RST)).append("\r\n");
             sb.append("\r\033[2K\r\n");
 
             // ── Step rows ─────────────────────────────────────────────────────
