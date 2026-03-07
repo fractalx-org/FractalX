@@ -83,6 +83,9 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("fractalx:\n");
         ymlBuilder.append("  registry:\n");
         ymlBuilder.append("    url: ${FRACTALX_REGISTRY_URL:").append(cfg.registryUrl()).append("}\n");
+        ymlBuilder.append("  observability:\n");
+        ymlBuilder.append("    otel:\n");
+        ymlBuilder.append("      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}\n");
         ymlBuilder.append("  gateway:\n");
         ymlBuilder.append("    security:\n");
         ymlBuilder.append("      # Set enabled: true and configure one or more auth mechanisms below\n");
@@ -120,6 +123,9 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("      enabled: true\n");
         ymlBuilder.append("    health:\n");
         ymlBuilder.append("      show-details: always\n");
+        ymlBuilder.append("  tracing:\n");
+        ymlBuilder.append("    sampling:\n");
+        ymlBuilder.append("      probability: 1.0\n");
         ymlBuilder.append("\n");
 
         ymlBuilder.append("logging:\n");

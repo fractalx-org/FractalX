@@ -27,8 +27,10 @@ public class GatewayObservabilityGenerator {
         generateLoggingFilter(pkg);
         generateTracingFilter(pkg);
         generateMetricsFilter(pkg, modules);
+        generateOtelConfig(pkg);
+        generateTracingExclusion(pkg);
 
-        log.info("Generated gateway observability filters");
+        log.info("Generated gateway observability filters + OtelConfig");
     }
 
     /** Overload for callers that don't pass modules (backward compat). */
@@ -42,6 +44,8 @@ public class GatewayObservabilityGenerator {
         String content = """
                 package org.fractalx.gateway.observability;
 
+                import io.opentelemetry.api.common.AttributeKey;
+                import io.opentelemetry.api.trace.Span;
                 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
                 import org.springframework.cloud.gateway.filter.GlobalFilter;
                 import org.springframework.core.Ordered;
@@ -52,12 +56,15 @@ public class GatewayObservabilityGenerator {
                 import java.util.UUID;
 
                 /**
-                 * Propagates correlation and W3C trace-context headers through the gateway.
+                 * Propagates correlation and W3C trace-context headers through the gateway,
+                 * and tags the active OTel span with the correlation ID for Jaeger search.
                  * <ul>
                  *   <li>X-Request-Id     — fresh UUID per request</li>
                  *   <li>X-Correlation-Id — propagated from upstream if present, else equals X-Request-Id</li>
-                 *   <li>traceparent      — W3C Trace-Context header forwarded downstream for OTEL</li>
+                 *   <li>correlation.id   — added as OTel span attribute for Jaeger tag search</li>
                  * </ul>
+                 * With micrometer-tracing-bridge-otel on the classpath, Spring Boot auto-configures
+                 * traceparent propagation to downstream services via Reactor Netty HTTP client.
                  */
                 @Component
                 public class TracingFilter implements GlobalFilter, Ordered {
@@ -74,15 +81,10 @@ public class GatewayObservabilityGenerator {
                         }
                         final String finalCorrelationId = correlationId;
 
-                        // Forward W3C traceparent if already set by an upstream OTEL agent;
-                        // otherwise leave it unset so Micrometer/OTEL generates a root span.
-                        String traceparent = exchange.getRequest().getHeaders().getFirst("traceparent");
-
                         ServerWebExchange mutated = exchange.mutate()
                                 .request(r -> r.headers(h -> {
                                     h.set("X-Request-Id",     requestId);
                                     h.set("X-Correlation-Id", finalCorrelationId);
-                                    if (traceparent != null) h.set("traceparent", traceparent);
                                 }))
                                 .build();
 
@@ -92,6 +94,15 @@ public class GatewayObservabilityGenerator {
                             mutated.getResponse().getHeaders().set("X-Correlation-Id", finalCorrelationId);
                             return Mono.empty();
                         });
+
+                        // Tag the active OTel span with the correlation ID synchronously.
+                        // ServerHttpObservationFilter (WebFilter, ordered at MIN_VALUE+1) runs before
+                        // all GlobalFilters, so the span is already started when we reach this point.
+                        // Span.current() is reliable here on the calling thread.
+                        Span span = Span.current();
+                        if (span.getSpanContext().isValid()) {
+                            span.setAttribute(AttributeKey.stringKey("correlation.id"), finalCorrelationId);
+                        }
 
                         return chain.filter(mutated);
                     }
@@ -221,6 +232,119 @@ public class GatewayObservabilityGenerator {
                 }
                 """;
         Files.writeString(pkg.resolve("GatewayMetricsFilter.java"), content);
+    }
+
+    private void generateOtelConfig(Path pkg) throws IOException {
+        String content = """
+                package org.fractalx.gateway.observability;
+
+                import io.opentelemetry.api.OpenTelemetry;
+                import io.opentelemetry.api.baggage.propagation.W3CBaggagePropagator;
+                import io.opentelemetry.api.common.Attributes;
+                import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
+                import io.opentelemetry.context.propagation.ContextPropagators;
+                import io.opentelemetry.context.propagation.TextMapPropagator;
+                import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
+                import io.opentelemetry.sdk.OpenTelemetrySdk;
+                import io.opentelemetry.sdk.resources.Resource;
+                import io.opentelemetry.sdk.trace.SdkTracerProvider;
+                import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+                import io.opentelemetry.semconv.ResourceAttributes;
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.Configuration;
+
+                /**
+                 * OpenTelemetry SDK configuration for the API Gateway.
+                 *
+                 * <p>Uses OTLP/gRPC exporter on port 4317 — consistent with all generated microservices.
+                 * This means the same Jaeger Docker command works for both gateway and services:
+                 * {@code docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/all-in-one:latest}
+                 *
+                 * <p>The {@code @ConditionalOnMissingBean} guard means Spring Boot's own OTLP
+                 * auto-configuration (if present) takes precedence.
+                 */
+                @Configuration
+                public class GatewayOtelConfig {
+
+                    @Bean
+                    @ConditionalOnMissingBean(OpenTelemetry.class)
+                    public OpenTelemetry openTelemetry(
+                            @Value("${fractalx.observability.otel.endpoint:http://localhost:4317}") String endpoint) {
+
+                        Resource resource = Resource.getDefault()
+                                .merge(Resource.create(Attributes.of(
+                                        ResourceAttributes.SERVICE_NAME, "fractalx-gateway")));
+
+                        OtlpGrpcSpanExporter exporter = OtlpGrpcSpanExporter.builder()
+                                .setEndpoint(endpoint)
+                                .build();
+
+                        SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+                                .addSpanProcessor(BatchSpanProcessor.builder(exporter).build())
+                                .setResource(resource)
+                                .build();
+
+                        return OpenTelemetrySdk.builder()
+                                .setTracerProvider(tracerProvider)
+                                .setPropagators(ContextPropagators.create(
+                                        TextMapPropagator.composite(
+                                                W3CTraceContextPropagator.getInstance(),
+                                                W3CBaggagePropagator.getInstance())))
+                                .buildAndRegisterGlobal();
+                    }
+                }
+                """;
+        Files.writeString(pkg.resolve("GatewayOtelConfig.java"), content);
+    }
+
+    private void generateTracingExclusion(Path pkg) throws IOException {
+        String content = """
+                package org.fractalx.gateway.observability;
+
+                import io.micrometer.observation.ObservationPredicate;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.Configuration;
+
+                /**
+                 * Excludes noisy observations from gateway tracing so Jaeger stays clean:
+                 * <ul>
+                 *   <li>Actuator health/metrics endpoints</li>
+                 *   <li>Scheduled tasks (defensive — gateway has none, but guard anyway)</li>
+                 * </ul>
+                 * Uses reflection to read the request path from the WebFlux
+                 * {@code ServerWebExchange} carrier, avoiding a direct import of
+                 * {@code ServerRequestObservationContext} whose package differs across
+                 * Spring Framework versions.
+                 */
+                @Configuration
+                public class GatewayTracingExclusionConfig {
+
+                    @Bean
+                    public ObservationPredicate noActuatorTracing() {
+                        return (name, context) -> {
+                            try {
+                                // carrier = ServerWebExchange
+                                Object exchange = context.getClass().getMethod("getCarrier").invoke(context);
+                                // request = ServerHttpRequest
+                                Object request  = exchange.getClass().getMethod("getRequest").invoke(exchange);
+                                // path   = RequestPath → toString() = "/actuator/health"
+                                String  path    = request.getClass().getMethod("getPath").invoke(request).toString();
+                                return !path.startsWith("/actuator");
+                            } catch (Exception ignored) {
+                                return true;
+                            }
+                        };
+                    }
+
+                    @Bean
+                    public ObservationPredicate noScheduledTaskTracing() {
+                        return (name, context) -> !name.startsWith("tasks.scheduled");
+                    }
+                }
+                """;
+        Files.writeString(pkg.resolve("GatewayTracingExclusionConfig.java"), content);
     }
 
     private Path createPkg(Path base, String pkg) throws IOException {

@@ -77,30 +77,49 @@ public class SagaOrchestratorGenerator {
         writeFile(packagePath(basePkg, "model"), "SagaInstance.java",  buildSagaInstance());
         writeFile(packagePath(basePkg, "repository"), "SagaInstanceRepository.java", buildRepository());
 
-        // ── Per-saga service and NetScope clients ────────────────────────────
+        // ── Per-saga service ─────────────────────────────────────────────────
         for (SagaDefinition saga : sagas) {
             String serviceClass = saga.toClassName() + "SagaService";
             writeFile(packagePath(basePkg, "service"), serviceClass + ".java",
                     buildSagaService(saga));
+        }
 
-            // Generate one NetScope client interface per unique bean type,
-            // aggregating all forward + compensation methods for that bean
-            java.util.Map<String, List<SagaStep>> stepsByBean = new java.util.LinkedHashMap<>();
-            for (SagaStep step : saga.getSteps()) {
-                stepsByBean.computeIfAbsent(step.getBeanType(), k -> new ArrayList<>()).add(step);
-            }
-            // Merge method params + extra local vars so buildNetScopeClient can type all call args
+        // ── NetScope client interfaces — aggregated across ALL sagas ─────────
+        // Collect every step and its params globally so that when multiple sagas
+        // call the same service (e.g. PayrollService is used by both
+        // onboard-employee-saga AND approve-leave-saga), all methods end up in
+        // one interface file instead of the last saga overwriting the first.
+        java.util.Map<String, List<SagaStep>> globalStepsByBean = new java.util.LinkedHashMap<>();
+        java.util.Map<String, java.util.Map<String, MethodParam>> globalParamsByBean =
+                new java.util.LinkedHashMap<>();
+        for (SagaDefinition saga : sagas) {
             List<MethodParam> allSagaParams = new ArrayList<>(saga.getSagaMethodParams());
             allSagaParams.addAll(saga.getExtraLocalVars());
-            for (java.util.Map.Entry<String, List<SagaStep>> entry : stepsByBean.entrySet()) {
-                writeFile(packagePath(basePkg, "client"), entry.getKey() + "Client.java",
-                        buildNetScopeClient(entry.getKey(), entry.getValue(), modules, allSagaParams));
+            for (SagaStep step : saga.getSteps()) {
+                globalStepsByBean.computeIfAbsent(step.getBeanType(), k -> new ArrayList<>()).add(step);
+                java.util.Map<String, MethodParam> paramMap = globalParamsByBean
+                        .computeIfAbsent(step.getBeanType(), k -> new java.util.LinkedHashMap<>());
+                // Deduplicate params by name across sagas (same name → same type in well-formed sagas)
+                for (MethodParam p : allSagaParams) {
+                    paramMap.put(p.getName(), p);
+                }
             }
+        }
+        for (java.util.Map.Entry<String, List<SagaStep>> entry : globalStepsByBean.entrySet()) {
+            List<MethodParam> mergedParams = new ArrayList<>(
+                    globalParamsByBean.get(entry.getKey()).values());
+            writeFile(packagePath(basePkg, "client"), entry.getKey() + "Client.java",
+                    buildNetScopeClient(entry.getKey(), entry.getValue(), modules, mergedParams));
         }
 
         // ── Controller ───────────────────────────────────────────────────────
         writeFile(packagePath(basePkg, "controller"), "SagaController.java",
                 buildSagaController(sagas));
+
+        // ── Observability (OTel + correlation tracing) ───────────────────────
+        writeFile(basePkg, "OtelConfig.java",               buildOtelConfig());
+        writeFile(basePkg, "CorrelationTracingConfig.java", buildCorrelationTracingConfig());
+        writeFile(basePkg, "TracingExclusionConfig.java",   buildTracingExclusionConfig());
 
         // ── README ────────────────────────────────────────────────────────────
         new DataReadmeGenerator().generateSagaOrchestratorReadme(sagas, modules, serviceRoot);
@@ -179,6 +198,22 @@ public class SagaOrchestratorGenerator {
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-starter-actuator</artifactId>
+                        </dependency>
+
+                        <!-- Distributed tracing: Micrometer OTel bridge + OTLP gRPC exporter -->
+                        <dependency>
+                            <groupId>io.micrometer</groupId>
+                            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+                        </dependency>
+                        <dependency>
+                            <groupId>io.opentelemetry</groupId>
+                            <artifactId>opentelemetry-exporter-otlp</artifactId>
+                            <version>1.32.0</version>
+                        </dependency>
+                        <dependency>
+                            <groupId>io.opentelemetry.semconv</groupId>
+                            <artifactId>opentelemetry-semconv</artifactId>
+                            <version>1.21.0-alpha</version>
                         </dependency>
                     </dependencies>
 
@@ -313,6 +348,8 @@ public class SagaOrchestratorGenerator {
                 + "    tracing: true\n"
                 + "    metrics: true\n"
                 + "    logger-url: ${FRACTALX_LOGGER_URL:http://localhost:9099/api/logs}\n"
+                + "    otel:\n"
+                + "      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}\n"
                 + "  saga:\n"
                 + "    owner-urls:\n"
                 + ownerUrlsBlock
@@ -333,9 +370,6 @@ public class SagaOrchestratorGenerator {
                 + "  tracing:\n"
                 + "    sampling:\n"
                 + "      probability: 1.0\n"
-                + "  otlp:\n"
-                + "    tracing:\n"
-                + "      endpoint: ${OTEL_EXPORTER_OTLP_HTTP_ENDPOINT:http://localhost:4318/v1/traces}\n"
                 + "\n"
                 + "logging:\n"
                 + "  level:\n"
@@ -350,21 +384,25 @@ public class SagaOrchestratorGenerator {
                 """
                 -- FractalX Saga Orchestrator — Initial Schema
                 CREATE TABLE IF NOT EXISTS saga_instance (
-                    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-                    saga_id         VARCHAR(255) NOT NULL,
-                    correlation_id  VARCHAR(36)  NOT NULL UNIQUE,
-                    owner_service   VARCHAR(255),
-                    status          VARCHAR(50)  NOT NULL,
-                    current_step    VARCHAR(255),
-                    payload         TEXT,
-                    error_message   TEXT,
-                    started_at      TIMESTAMP    NOT NULL,
-                    updated_at      TIMESTAMP
+                    id                           BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    saga_id                      VARCHAR(255) NOT NULL,
+                    correlation_id               VARCHAR(36)  NOT NULL UNIQUE,
+                    owner_service                VARCHAR(255),
+                    status                       VARCHAR(50)  NOT NULL,
+                    current_step                 VARCHAR(255),
+                    payload                      TEXT,
+                    error_message                TEXT,
+                    started_at                   TIMESTAMP    NOT NULL,
+                    updated_at                   TIMESTAMP,
+                    owner_notified               BOOLEAN      NOT NULL DEFAULT FALSE,
+                    notification_retry_count     INT          NOT NULL DEFAULT 0,
+                    last_notification_attempt    TIMESTAMP
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_saga_status     ON saga_instance (status);
-                CREATE INDEX IF NOT EXISTS idx_saga_id         ON saga_instance (saga_id);
-                CREATE INDEX IF NOT EXISTS idx_saga_corr       ON saga_instance (correlation_id);
+                CREATE INDEX IF NOT EXISTS idx_saga_status          ON saga_instance (status);
+                CREATE INDEX IF NOT EXISTS idx_saga_id              ON saga_instance (saga_id);
+                CREATE INDEX IF NOT EXISTS idx_saga_corr            ON saga_instance (correlation_id);
+                CREATE INDEX IF NOT EXISTS idx_saga_notify_pending  ON saga_instance (owner_notified, status);
                 """);
     }
 
@@ -445,6 +483,17 @@ public class SagaOrchestratorGenerator {
 
                     private LocalDateTime updatedAt;
 
+                    /** Whether the owner service has been successfully notified of the final outcome. */
+                    @Column(nullable = false)
+                    private boolean ownerNotified = false;
+
+                    /** How many times notification has been attempted (capped at MAX_NOTIFICATION_RETRIES). */
+                    @Column(nullable = false)
+                    private int notificationRetryCount = 0;
+
+                    /** Timestamp of the most recent notification attempt (null = never attempted). */
+                    private LocalDateTime lastNotificationAttempt;
+
                     @PrePersist
                     protected void onCreate() { startedAt = LocalDateTime.now(); updatedAt = startedAt; }
 
@@ -469,6 +518,12 @@ public class SagaOrchestratorGenerator {
                     public void   setErrorMessage(String v)  { errorMessage = v; }
                     public LocalDateTime getStartedAt()  { return startedAt; }
                     public LocalDateTime getUpdatedAt()  { return updatedAt; }
+                    public boolean isOwnerNotified()          { return ownerNotified; }
+                    public void    setOwnerNotified(boolean v){ ownerNotified = v; }
+                    public int  getNotificationRetryCount()   { return notificationRetryCount; }
+                    public void setNotificationRetryCount(int v) { notificationRetryCount = v; }
+                    public LocalDateTime getLastNotificationAttempt() { return lastNotificationAttempt; }
+                    public void setLastNotificationAttempt(LocalDateTime v) { lastNotificationAttempt = v; }
                 }
                 """.formatted(BASE_PACKAGE);
     }
@@ -491,6 +546,8 @@ public class SagaOrchestratorGenerator {
                     Optional<SagaInstance> findByCorrelationId(String correlationId);
                     List<SagaInstance> findBySagaId(String sagaId);
                     List<SagaInstance> findByStatus(SagaStatus status);
+                    /** Used by the notification retry poller to find sagas whose owner wasn't notified yet. */
+                    List<SagaInstance> findByOwnerNotifiedFalseAndStatusIn(List<SagaStatus> statuses);
                 }
                 """.formatted(BASE_PACKAGE, BASE_PACKAGE, BASE_PACKAGE);
     }
@@ -758,7 +815,7 @@ public class SagaOrchestratorGenerator {
         sb.append("     * Calls {@code POST {ownerServiceBaseUrl}/internal/saga-failed/{correlationId}}\n");
         sb.append("     * so the owner can revert its own state (e.g. cancel / delete the Order).\n");
         sb.append("     */\n");
-        sb.append("    private void notifyOwnerFailed(SagaInstance instance) {\n");
+        sb.append("    void notifyOwnerFailed(SagaInstance instance) {\n");
         sb.append("        String url = ownerServiceBaseUrl + \"/internal/saga-failed/\"\n");
         sb.append("                + instance.getCorrelationId();\n");
         sb.append("        try {\n");
@@ -778,15 +835,20 @@ public class SagaOrchestratorGenerator {
         sb.append("                    : \"{\\\"errorMessage\\\":\\\"\" + escapedError + \"\\\"}\";\n");
         sb.append("            HttpEntity<String> request = new HttpEntity<>(failureBody, headers);\n");
         sb.append("            restTemplate.postForObject(url, request, String.class);\n");
+        sb.append("            instance.setOwnerNotified(true);\n");
+        sb.append("            sagaRepository.save(instance);\n");
         sb.append("            log.info(\"Notified owner service of saga FAILURE: url={} correlationId={}\",\n");
         sb.append("                    url, instance.getCorrelationId());\n");
         sb.append("        } catch (Exception e) {\n");
-        sb.append("            log.warn(\"Failed to notify owner service of saga failure: url={} error={}\",\n");
-        sb.append("                    url, e.getMessage());\n");
+        sb.append("            instance.setNotificationRetryCount(instance.getNotificationRetryCount() + 1);\n");
+        sb.append("            instance.setLastNotificationAttempt(java.time.LocalDateTime.now());\n");
+        sb.append("            sagaRepository.save(instance);\n");
+        sb.append("            log.warn(\"Failed to notify owner service of saga failure: url={} attempt={} error={}\",\n");
+        sb.append("                    url, instance.getNotificationRetryCount(), e.getMessage());\n");
         sb.append("        }\n");
         sb.append("    }\n\n");
 
-        sb.append("    private void notifyOwnerComplete(SagaInstance instance) {\n");
+        sb.append("    void notifyOwnerComplete(SagaInstance instance) {\n");
         sb.append("        String url = ownerServiceBaseUrl + \"/internal/saga-complete/\"\n");
         sb.append("                + instance.getCorrelationId();\n");
         sb.append("        try {\n");
@@ -797,11 +859,16 @@ public class SagaOrchestratorGenerator {
         sb.append("            }\n");
         sb.append("            HttpEntity<String> request = new HttpEntity<>(instance.getPayload(), headers);\n");
         sb.append("            restTemplate.postForObject(url, request, String.class);\n");
+        sb.append("            instance.setOwnerNotified(true);\n");
+        sb.append("            sagaRepository.save(instance);\n");
         sb.append("            log.info(\"Notified owner service of saga completion: url={} correlationId={}\",\n");
         sb.append("                    url, instance.getCorrelationId());\n");
         sb.append("        } catch (Exception e) {\n");
-        sb.append("            log.warn(\"Failed to notify owner service of saga completion: url={} error={}\",\n");
-        sb.append("                    url, e.getMessage());\n");
+        sb.append("            instance.setNotificationRetryCount(instance.getNotificationRetryCount() + 1);\n");
+        sb.append("            instance.setLastNotificationAttempt(java.time.LocalDateTime.now());\n");
+        sb.append("            sagaRepository.save(instance);\n");
+        sb.append("            log.warn(\"Failed to notify owner service of saga completion: url={} attempt={} error={}\",\n");
+        sb.append("                    url, instance.getNotificationRetryCount(), e.getMessage());\n");
         sb.append("        }\n");
         sb.append("    }\n\n");
 
@@ -826,6 +893,41 @@ public class SagaOrchestratorGenerator {
             sb.append(String.join(",\n", recordComponents));
             sb.append("\n    ) {}\n");
         }
+
+        // retryPendingNotifications — @Scheduled poller that retries owner notifications
+        // that failed during the initial attempt (e.g. owner service was down).
+        sb.append("    private static final int MAX_NOTIFICATION_RETRIES = 10;\n\n");
+        sb.append("    /**\n");
+        sb.append("     * Retries owner-service notifications that failed during the initial attempt.\n");
+        sb.append("     *\n");
+        sb.append("     * <p>Runs every 2 seconds. Finds saga instances in DONE or FAILED state whose\n");
+        sb.append("     * {@code ownerNotified} flag is still {@code false} (meaning the HTTP callback\n");
+        sb.append("     * to the owner service has not succeeded yet). Retries up to\n");
+        sb.append("     * {@code MAX_NOTIFICATION_RETRIES} times, after which the failure is logged\n");
+        sb.append("     * as a dead-letter requiring manual intervention.\n");
+        sb.append("     */\n");
+        sb.append("    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 2000)\n");
+        sb.append("    @Transactional\n");
+        sb.append("    public void retryPendingNotifications() {\n");
+        sb.append("        java.util.List<SagaInstance> pending = sagaRepository\n");
+        sb.append("                .findByOwnerNotifiedFalseAndStatusIn(\n");
+        sb.append("                        java.util.List.of(SagaStatus.DONE, SagaStatus.FAILED));\n");
+        sb.append("        if (pending.isEmpty()) return;\n\n");
+        sb.append("        for (SagaInstance instance : pending) {\n");
+        sb.append("            if (instance.getNotificationRetryCount() >= MAX_NOTIFICATION_RETRIES) {\n");
+        sb.append("                log.error(\"Saga notification dead-letter: correlationId={} sagaId={} status={} \"\n");
+        sb.append("                        + \"— exceeded {} retries. Manual intervention required.\",\n");
+        sb.append("                        instance.getCorrelationId(), instance.getSagaId(),\n");
+        sb.append("                        instance.getStatus(), MAX_NOTIFICATION_RETRIES);\n");
+        sb.append("                continue;\n");
+        sb.append("            }\n");
+        sb.append("            if (instance.getStatus() == SagaStatus.DONE) {\n");
+        sb.append("                notifyOwnerComplete(instance);\n");
+        sb.append("            } else {\n");
+        sb.append("                notifyOwnerFailed(instance);\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
 
         sb.append("}\n");
         return sb.toString();
@@ -1069,6 +1171,139 @@ public class SagaOrchestratorGenerator {
         sb.append("}\n");
 
         return sb.toString();
+    }
+
+    // =========================================================================
+    // Observability helpers
+    // =========================================================================
+
+    private String buildOtelConfig() {
+        return """
+                package org.fractalx.generated.sagaorchestrator;
+
+                import io.opentelemetry.api.OpenTelemetry;
+                import io.opentelemetry.api.baggage.propagation.W3CBaggagePropagator;
+                import io.opentelemetry.api.common.Attributes;
+                import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
+                import io.opentelemetry.context.propagation.ContextPropagators;
+                import io.opentelemetry.context.propagation.TextMapPropagator;
+                import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
+                import io.opentelemetry.sdk.OpenTelemetrySdk;
+                import io.opentelemetry.sdk.resources.Resource;
+                import io.opentelemetry.sdk.trace.SdkTracerProvider;
+                import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+                import io.opentelemetry.semconv.ResourceAttributes;
+                import org.springframework.beans.factory.annotation.Value;
+                import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.Configuration;
+
+                @Configuration
+                public class OtelConfig {
+
+                    @Bean
+                    @ConditionalOnMissingBean(OpenTelemetry.class)
+                    public OpenTelemetry openTelemetry(
+                            @Value("${fractalx.observability.otel.endpoint:http://localhost:4317}") String endpoint) {
+
+                        Resource resource = Resource.getDefault()
+                                .merge(Resource.create(Attributes.of(
+                                        ResourceAttributes.SERVICE_NAME, "fractalx-saga-orchestrator")));
+
+                        OtlpGrpcSpanExporter exporter = OtlpGrpcSpanExporter.builder()
+                                .setEndpoint(endpoint)
+                                .build();
+
+                        SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+                                .addSpanProcessor(BatchSpanProcessor.builder(exporter).build())
+                                .setResource(resource)
+                                .build();
+
+                        return OpenTelemetrySdk.builder()
+                                .setTracerProvider(tracerProvider)
+                                .setPropagators(ContextPropagators.create(
+                                        TextMapPropagator.composite(
+                                                W3CTraceContextPropagator.getInstance(),
+                                                W3CBaggagePropagator.getInstance())))
+                                .buildAndRegisterGlobal();
+                    }
+                }
+                """;
+    }
+
+    private String buildCorrelationTracingConfig() {
+        return """
+                package org.fractalx.generated.sagaorchestrator;
+
+                import io.micrometer.tracing.Tracer;
+                import jakarta.servlet.http.HttpServletRequest;
+                import jakarta.servlet.http.HttpServletResponse;
+                import org.slf4j.MDC;
+                import org.springframework.context.annotation.Configuration;
+                import org.springframework.lang.NonNull;
+                import org.springframework.web.servlet.HandlerInterceptor;
+                import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+                import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+                @Configuration
+                public class CorrelationTracingConfig implements WebMvcConfigurer {
+
+                    private final Tracer tracer;
+
+                    public CorrelationTracingConfig(Tracer tracer) {
+                        this.tracer = tracer;
+                    }
+
+                    @Override
+                    public void addInterceptors(@NonNull InterceptorRegistry registry) {
+                        registry.addInterceptor(new HandlerInterceptor() {
+                            @Override
+                            public boolean preHandle(@NonNull HttpServletRequest request,
+                                                     @NonNull HttpServletResponse response,
+                                                     @NonNull Object handler) {
+                                String correlationId = MDC.get("correlationId");
+                                if (correlationId != null && !correlationId.isBlank()) {
+                                    io.micrometer.tracing.Span span = tracer.currentSpan();
+                                    if (span != null) {
+                                        span.tag("correlation.id", correlationId);
+                                    }
+                                }
+                                return true;
+                            }
+                        });
+                    }
+                }
+                """;
+    }
+
+    private String buildTracingExclusionConfig() {
+        return """
+                package org.fractalx.generated.sagaorchestrator;
+
+                import io.micrometer.observation.ObservationPredicate;
+                import org.springframework.context.annotation.Bean;
+                import org.springframework.context.annotation.Configuration;
+                import org.springframework.http.server.observation.ServerRequestObservationContext;
+
+                @Configuration
+                public class TracingExclusionConfig {
+
+                    @Bean
+                    public ObservationPredicate noActuatorTracing() {
+                        return (name, context) -> {
+                            if (context instanceof ServerRequestObservationContext sroc) {
+                                return !sroc.getCarrier().getRequestURI().startsWith("/actuator");
+                            }
+                            return true;
+                        };
+                    }
+
+                    @Bean
+                    public ObservationPredicate noScheduledTaskTracing() {
+                        return (name, context) -> !name.startsWith("tasks.scheduled");
+                    }
+                }
+                """;
     }
 
     // =========================================================================

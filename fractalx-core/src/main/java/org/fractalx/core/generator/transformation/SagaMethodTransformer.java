@@ -109,10 +109,13 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
 
         // Derive the aggregate repository from the first saga's owner class name.
         // Heuristic: "OrderService" → aggregate "Order" → repository "OrderRepository"
-        String ownerClass = sagas.get(0).getOwnerClassName(); // e.g. "OrderService"
+        //            "OrderModule"  → aggregate "Order" → repository "OrderRepository"
+        String ownerClass = sagas.get(0).getOwnerClassName(); // e.g. "OrderService" or "OrderModule"
         String aggregateName = ownerClass.endsWith("Service")
                 ? ownerClass.substring(0, ownerClass.length() - "Service".length())
-                : ownerClass;
+                : ownerClass.endsWith("Module")
+                    ? ownerClass.substring(0, ownerClass.length() - "Module".length())
+                    : ownerClass;
         String repositoryType = aggregateName + "Repository"; // e.g. "OrderRepository"
         String repositoryFqn  = modulePackage + "." + repositoryType;
         String repoField      = Character.toLowerCase(repositoryType.charAt(0)) + repositoryType.substring(1);
@@ -158,8 +161,18 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
             cancelBlock  = "            // TODO: revert business state (e.g., mark " + aggregateName + " as CANCELLED)\n";
         }
 
+        // Only inject the repository when we have an ID field to look up.
+        // When hasIdField == false the body is TODO stubs — importing a repository that
+        // may not even exist would cause a compile error.
+        String repoImport    = hasIdField ? "import " + repositoryFqn + ";\n" : "";
+        String repoFieldDecl = hasIdField
+                ? "    private final " + repositoryType + " " + repoField + ";\n\n"
+                : "";
+        String repoCtorParam  = hasIdField ? ", " + repositoryType + " " + repoField : "";
+        String repoCtorAssign = hasIdField ? "        this." + repoField + " = " + repoField + ";\n" : "";
+
         String content = "package " + pkg + ";\n\n"
-                + "import " + repositoryFqn + ";\n"
+                + repoImport
                 + "import com.fasterxml.jackson.core.type.TypeReference;\n"
                 + "import com.fasterxml.jackson.databind.ObjectMapper;\n"
                 + "import org.slf4j.Logger;\n"
@@ -185,11 +198,11 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
                 + "public class SagaCompletionController {\n\n"
                 + "    private static final Logger log = LoggerFactory.getLogger(SagaCompletionController.class);\n\n"
                 + "    private final ObjectMapper objectMapper;\n"
-                + "    private final " + repositoryType + " " + repoField + ";\n\n"
-                + "    public SagaCompletionController(ObjectMapper objectMapper, "
-                + repositoryType + " " + repoField + ") {\n"
+                + repoFieldDecl
+                + "    public SagaCompletionController(ObjectMapper objectMapper"
+                + repoCtorParam + ") {\n"
                 + "        this.objectMapper = objectMapper;\n"
-                + "        this." + repoField + " = " + repoField + ";\n"
+                + repoCtorAssign
                 + "    }\n\n"
                 + "    @PostMapping(\"/saga-complete/{correlationId}\")\n"
                 + "    @Transactional\n"

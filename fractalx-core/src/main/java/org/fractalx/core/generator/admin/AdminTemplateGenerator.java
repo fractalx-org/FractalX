@@ -914,10 +914,10 @@ class AdminTemplateGenerator {
                                 <div class="card-bd table-wrap">
                                     <table class="table table-sm mb-0">
                                         <thead><tr>
-                                            <th>Service</th><th>Schemas</th><th>Health</th>
+                                            <th>Service</th><th>Schemas</th><th>Health</th><th></th>
                                         </tr></thead>
                                         <tbody id="databases-tbody">
-                                            <tr><td colspan="3" class="text-muted p-3">Loading…</td></tr>
+                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -1128,16 +1128,17 @@ class AdminTemplateGenerator {
                                 <div class="table-wrap">
                                     <table class="table table-sm mb-0">
                                         <thead><tr>
-                                            <th>Trace ID</th><th>Service</th><th>Duration</th>
-                                            <th>Spans</th><th>Jaeger</th>
+                                            <th>Trace ID</th><th>Correlation ID</th><th>Service</th>
+                                            <th>Duration</th><th>Spans</th><th>Jaeger</th><th>Logs</th>
                                         </tr></thead>
                                         <tbody id="traces-tbody">
-                                            <tr><td colspan="5" class="text-center text-muted p-4">
+                                            <tr><td colspan="7" class="text-center text-muted p-4">
                                                 Enter a Correlation ID or service to search
                                             </td></tr>
                                         </tbody>
                                     </table>
                                 </div>
+                                <div id="trace-pagination" class="d-flex gap-2 flex-wrap mt-2"></div>
                                 <div class="mt-2">
                                     <a href="http://localhost:16686" target="_blank"
                                        style="font-size:12px;color:#3b82f6;text-decoration:none">
@@ -1867,7 +1868,21 @@ class AdminTemplateGenerator {
                                 const stepsList = (s.steps||[]).map((st, i) => {
                                     const parts = st.split(':');
                                     const svc = parts[0], method = parts[1] || st;
-                                    return `<div style="font-size:11px;padding:1px 0"><span style="color:#9ca3af">${i+1}.</span> <span style="color:#6366f1">${svc}</span> → <strong>${method}</strong></div>`;
+                                    const compEntry = (s.compensationSteps||[])[i] || '';
+                                    const compMethod = compEntry ? (compEntry.split(':')[1] || compEntry) : '';
+                                    const detailId = `sd-${s.sagaId.replace(/[^a-z0-9]/gi,'')}-${i}`;
+                                    return `<div style="font-size:11px;padding:2px 0;cursor:pointer;user-select:none" onclick="toggleStepDetail('${detailId}')">
+                                        <span style="color:#9ca3af">${i+1}.</span>
+                                        <span style="color:#6366f1">${svc}</span> → <strong>${method}</strong>
+                                        ${compMethod ? `<span style="color:#f59e0b;font-size:10px;margin-left:4px" title="Compensation: ${compMethod}">↩</span>` : ''}
+                                    </div>
+                                    <div id="${detailId}" style="display:none;background:#f8faff;border-left:3px solid #6366f1;padding:5px 10px;margin:1px 0 3px 14px;border-radius:0 4px 4px 0;font-size:10.5px">
+                                        <div><span class="text-muted">Service:</span> <strong>${svc}</strong></div>
+                                        <div><span class="text-muted">Method:</span> <code style="font-size:10px">${method}</code></div>
+                                        ${compMethod
+                                            ? `<div><span class="text-muted">Compensation:</span> <code style="font-size:10px;color:#f59e0b">↩ ${compMethod}</code></div>`
+                                            : `<div class="text-muted" style="font-style:italic">No compensation defined</div>`}
+                                    </div>`;
                                 }).join('');
                                 tbody.innerHTML += `<tr>
                                     <td><code style="font-size:12px">${s.sagaId}</code></td>
@@ -1890,15 +1905,19 @@ class AdminTemplateGenerator {
                             tbody.innerHTML = '';
                             dbs.forEach(db => {
                                 const h = db.health || 'UNKNOWN';
+                                const extra = db.instanceCount !== undefined
+                                    ? `<td class="text-muted small">${db.instanceCount >= 0 ? db.instanceCount + ' rows' : '—'}</td>`
+                                    : '<td></td>';
                                 tbody.innerHTML += `<tr>
                                     <td>${db.service}</td>
                                     <td><small>${db.schemas || '-'}</small></td>
                                     <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'} small">${h}</span></td>
+                                    ${extra}
                                 </tr>`;
                             });
                         }).catch(() => {
                             document.getElementById('databases-tbody').innerHTML =
-                                '<tr><td colspan="3" class="text-muted">DB health unavailable</td></tr>';
+                                '<tr><td colspan="4" class="text-muted">DB health unavailable</td></tr>';
                         });
 
                     fetch('/api/data/outbox')
@@ -2006,6 +2025,42 @@ class AdminTemplateGenerator {
                     let payload = '—';
                     try { payload = JSON.stringify(JSON.parse(inst.payload||'{}'), null, 2); } catch(e) { payload = inst.payload||'—'; }
 
+                    // Derive compensation actions taken (only for FAILED/COMPENSATING sagas)
+                    let compensationHtml = '';
+                    if (inst.status === 'FAILED' || inst.status === 'COMPENSATING') {
+                        const compSteps = inst.compensationSteps || [];
+                        const completedIdxs = (inst.stepProgress || [])
+                            .map((sp, i) => ({...sp, idx: i}))
+                            .filter(sp => sp.status === 'COMPLETED')
+                            .reverse(); // compensations run in reverse order
+                        if (completedIdxs.length > 0) {
+                            const rows = completedIdxs.map(sp => {
+                                const compEntry = compSteps[sp.idx] || '';
+                                const compParts = compEntry.split(':');
+                                const compSvc    = compParts[0] || sp.step.split(':')[0];
+                                const compMethod = compParts[1] || compEntry;
+                                const fwdMethod  = sp.step.split(':')[1] || sp.step;
+                                return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #fef3c7">
+                                    <span style="width:22px;height:22px;border-radius:50%;background:#f59e0b20;display:flex;align-items:center;justify-content:center;color:#f59e0b;font-size:13px;flex-shrink:0">↩</span>
+                                    <div style="flex:1">
+                                        <div style="font-size:12px;font-weight:500">${compMethod || '—'}</div>
+                                        <div style="font-size:10px;color:#6b7280">${compSvc} — compensates <code style="font-size:10px">${fwdMethod}</code></div>
+                                    </div>
+                                </div>`;
+                            }).join('');
+                            compensationHtml = `<div style="margin-bottom:16px">
+                                <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:#d97706">
+                                    <i class="fas fa-undo-alt me-1"></i>Compensation Actions Taken (${completedIdxs.length})
+                                </div>
+                                <div style="border:1px solid #fde68a;border-radius:8px;padding:0 12px;background:#fffbeb">${rows}</div>
+                            </div>`;
+                        } else {
+                            compensationHtml = `<div style="margin-bottom:16px;padding:10px 12px;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;font-size:12px;color:#92400e">
+                                <i class="fas fa-info-circle me-1"></i>No compensation actions taken — saga failed at first step.
+                            </div>`;
+                        }
+                    }
+
                     document.getElementById('instance-detail-body').innerHTML = `
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #f3f4f6">
                             <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">SAGA ID</div><code style="font-size:13px">${inst.sagaId||'—'}</code></div>
@@ -2016,6 +2071,7 @@ class AdminTemplateGenerator {
                             <div><div class="text-muted" style="font-size:11px;margin-bottom:2px">LAST UPDATED</div><span style="font-size:12px">${fmtTs(inst.updatedAt)}</span></div>
                         </div>
                         ${inst.errorMessage ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;margin-bottom:16px;font-size:12px;color:#dc2626"><strong>Error:</strong> ${inst.errorMessage}</div>` : ''}
+                        ${compensationHtml}
                         <div style="margin-bottom:16px">
                             <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:#374151">Step Execution (${(inst.stepProgress||[]).length} steps)</div>
                             <div style="border:1px solid #e5e7eb;border-radius:8px;padding:0 12px">${stepsHtml||'<div class="text-muted small p-3 text-center">No step data</div>'}</div>
@@ -2029,6 +2085,11 @@ class AdminTemplateGenerator {
 
                 function closeInstancesPanel() {
                     document.getElementById('instances-panel').style.display = 'none';
+                }
+
+                function toggleStepDetail(id) {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
                 }
                 """;
     }
@@ -2179,50 +2240,129 @@ class AdminTemplateGenerator {
     private String buildScriptsTracesLogs2() {
         return """
                 function loadTraceServices() {
-                    fetch('/api/services/all')
-                        .then(r => r.json()).then(services => {
+                    // Load from Jaeger's own service list (services that have actually reported spans)
+                    fetch('/api/traces/services')
+                        .then(r => r.json()).then(resp => {
                             const sel = document.getElementById('trace-service-select');
+                            sel.innerHTML = '<option value="">— All Services —</option>';
+                            const services = resp.data || resp || [];
                             services.forEach(s => {
                                 const o = document.createElement('option');
-                                o.value = o.textContent = s.meta.name;
+                                o.value = o.textContent = typeof s === 'string' ? s : (s.meta?.name || s.name || s);
                                 sel.appendChild(o);
                             });
-                        }).catch(() => {});
+                        }).catch(() => {
+                            // Fallback: load from FractalX internal service registry
+                            fetch('/api/services/all')
+                                .then(r => r.json()).then(services => {
+                                    const sel = document.getElementById('trace-service-select');
+                                    sel.innerHTML = '<option value="">— All Services —</option>';
+                                    services.forEach(s => {
+                                        const o = document.createElement('option');
+                                        o.value = o.textContent = s.meta?.name || s;
+                                        sel.appendChild(o);
+                                    });
+                                }).catch(() => {});
+                        });
                 }
 
-                function searchTraces() {
-                    const cid    = document.getElementById('trace-correlation-id').value.trim();
-                    const svc    = document.getElementById('trace-service-select').value;
-                    const params = new URLSearchParams();
-                    if (cid) params.set('correlationId', cid);
-                    if (svc) params.set('service', svc);
-                    params.set('limit', '20');
-                    fetch('/api/traces?' + params)
-                        .then(r => r.json()).then(data => {
-                            const tbody = document.getElementById('traces-tbody');
-                            tbody.innerHTML = '';
-                            const traces = data.data || data || [];
-                            if (!traces.length) {
-                                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No traces found</td></tr>';
-                                return;
-                            }
-                            traces.forEach(t => {
-                                const traceId = t.traceID || t.traceId || '';
-                                const svcName = t.processes ? Object.values(t.processes)[0]?.serviceName || '-' : '-';
-                                const dur     = t.duration ? (t.duration / 1000).toFixed(2) + 'ms' : '-';
-                                const spans   = t.spans ? t.spans.length : '-';
-                                tbody.innerHTML += `<tr>
-                                    <td><code style="font-size:.75rem">${traceId.substring(0,16)}...</code></td>
-                                    <td>${svcName}</td><td>${dur}</td><td>${spans}</td>
-                                    <td><a href="http://localhost:16686/trace/${traceId}" target="_blank"
-                                           class="btn btn-xs btn-sm btn-outline-info py-0">
-                                        <i class="fas fa-external-link-alt"></i></a></td>
-                                </tr>`;
+                let allTraces = [];
+                let currentTracePage = 0;
+
+                function searchTraces(page) {
+                    if (page === undefined || page === 0) {
+                        currentTracePage = 0;
+                        const cid    = document.getElementById('trace-correlation-id').value.trim();
+                        const svc    = document.getElementById('trace-service-select').value;
+                        const params = new URLSearchParams();
+                        if (cid) params.set('correlationId', cid);
+                        if (svc) params.set('service', svc);
+                        params.set('limit', '100');
+                        fetch('/api/traces?' + params)
+                            .then(r => r.json()).then(data => {
+                                allTraces = (data.data || data || []).slice().reverse();
+                                renderTracesPage(0);
+                            }).catch(() => {
+                                document.getElementById('traces-tbody').innerHTML =
+                                    '<tr><td colspan="7" class="text-warning">Jaeger unavailable or no traces found</td></tr>';
+                                document.getElementById('trace-pagination').innerHTML = '';
                             });
-                        }).catch(() => {
-                            document.getElementById('traces-tbody').innerHTML =
-                                '<tr><td colspan="5" class="text-warning">Jaeger unavailable or no traces found</td></tr>';
-                        });
+                    } else {
+                        currentTracePage = page;
+                        renderTracesPage(page);
+                    }
+                }
+
+                function renderTracesPage(page) {
+                    const pageSize = 20;
+                    const start = page * pageSize;
+                    const pageTraces = allTraces.slice(start, start + pageSize);
+                    const tbody = document.getElementById('traces-tbody');
+                    tbody.innerHTML = '';
+                    if (!pageTraces.length) {
+                        tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">No traces found</td></tr>';
+                        renderTracePagination(page, 0);
+                        return;
+                    }
+                    const searchCid = document.getElementById('trace-correlation-id').value.trim();
+                    pageTraces.forEach(t => {
+                        const traceId = t.traceID || t.traceId || '';
+                        const svcName = t.processes ? Object.values(t.processes)[0]?.serviceName || '-' : '-';
+                        const dur     = t.duration ? (t.duration / 1000).toFixed(2) + 'ms' : '-';
+                        const spans   = t.spans ? t.spans.length : '-';
+                        let cid = '';
+                        if (t.spans && t.spans.length > 0) {
+                            for (const sp of t.spans) {
+                                const tag = (sp.tags || []).find(tg =>
+                                    tg.key === 'correlation.id' || tg.key === 'correlationId' || tg.key === 'x-correlation-id');
+                                if (tag) { cid = tag.value; break; }
+                            }
+                        }
+                        if (!cid) cid = searchCid;
+                        const cidShort = cid ? cid.substring(0, 12) + (cid.length > 12 ? '…' : '') : '-';
+                        const cidEsc = cid.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
+                        tbody.innerHTML += `<tr>
+                            <td><code style="font-size:.75rem" title="${traceId}">${traceId.substring(0,16)}…</code></td>
+                            <td><code style="font-size:.72rem" title="${cid}">${cidShort}</code></td>
+                            <td>${svcName}</td><td>${dur}</td><td>${spans}</td>
+                            <td><a href="http://localhost:16686/trace/${traceId}" target="_blank"
+                                   class="btn btn-xs btn-sm btn-outline-info py-0">
+                                <i class="fas fa-external-link-alt"></i></a></td>
+                            <td>${cid ? `<button class="btn btn-xs btn-sm btn-outline-success py-0" title="View logs for this correlation ID" onclick="goToLogsWithCorrelation('${cidEsc}')"><i class="fas fa-file-alt"></i></button>` : ''}</td>
+                        </tr>`;
+                    });
+                    renderTracePagination(page, pageTraces.length);
+                }
+
+                function renderTracePagination(page, count) {
+                    const div = document.getElementById('trace-pagination');
+                    div.innerHTML = '';
+                    if (page > 0) {
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-sm btn-outline-secondary';
+                        btn.textContent = '\\u2190 Previous';
+                        btn.onclick = () => searchTraces(page - 1);
+                        div.appendChild(btn);
+                    }
+                    if (count >= 20) {
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-sm btn-outline-primary';
+                        btn.textContent = 'Next \\u2192';
+                        btn.onclick = () => searchTraces(page + 1);
+                        div.appendChild(btn);
+                    }
+                    if (allTraces.length > 0) {
+                        const info = document.createElement('span');
+                        info.className = 'text-muted small align-self-center';
+                        info.textContent = 'Page ' + (page + 1) + ' \\u00b7 ' + allTraces.length + ' total';
+                        div.appendChild(info);
+                    }
+                }
+
+                function goToLogsWithCorrelation(cid) {
+                    document.getElementById('log-correlation-id').value = cid;
+                    showSection('logs');
+                    searchLogs(0);
                 }
 
                 let currentLogPage = 0;
@@ -2251,6 +2391,7 @@ class AdminTemplateGenerator {
                     if (level) params.set('level', level);
                     fetch('/api/logs?' + params)
                         .then(r => r.json()).then(logs => {
+                            if (Array.isArray(logs)) logs.reverse();
                             const tbody = document.getElementById('logs-tbody');
                             tbody.innerHTML = '';
                             if (!logs.length) {

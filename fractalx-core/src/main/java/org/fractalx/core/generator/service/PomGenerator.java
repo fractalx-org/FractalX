@@ -129,6 +129,12 @@ public class PomGenerator implements ServiceFileGenerator {
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-starter-actuator</artifactId>
                         </dependency>
+
+                        <!-- Bean Validation (jakarta.validation.*) — required for @Valid, @NotNull, etc. -->
+                        <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-validation</artifactId>
+                        </dependency>
                         %s
                     </dependencies>
 

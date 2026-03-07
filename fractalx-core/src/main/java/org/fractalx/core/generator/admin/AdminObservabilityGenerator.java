@@ -741,14 +741,67 @@ class AdminObservabilityGenerator {
                     public ResponseEntity<Object> getTraces(
                             @RequestParam(required = false) String correlationId,
                             @RequestParam(required = false) String service,
-                            @RequestParam(defaultValue = "20") int limit) {
+                            @RequestParam(defaultValue = "100") int limit) {
                         try {
+                            // If correlationId given but no service, search across ALL Jaeger services.
+                            // Jaeger's /api/traces requires a service parameter, so we fetch the service
+                            // list first, query each one, then merge and return deduped results.
+                            if (correlationId != null && !correlationId.isBlank()
+                                    && (service == null || service.isBlank())) {
+                                return searchByCorrelationAcrossAllServices(correlationId, limit);
+                            }
                             StringBuilder url = new StringBuilder(jaegerQueryUrl + "/api/traces?limit=" + limit);
-                            if (service != null) url.append("&service=").append(service);
-                            if (correlationId != null) url.append("&tags=").append("correlation.id%%3D").append(correlationId);
+                            if (service != null && !service.isBlank()) url.append("&service=").append(service);
+                            if (correlationId != null && !correlationId.isBlank()) {
+                                String tagsJson = "{\\"correlation.id\\":\\"" + correlationId.replace("\\"", "") + "\\"}";
+                                url.append("&tags=").append(java.net.URLEncoder.encode(tagsJson, java.nio.charset.StandardCharsets.UTF_8));
+                            }
                             return ResponseEntity.ok(rest.getForObject(url.toString(), Object.class));
                         } catch (Exception e) {
                             return ResponseEntity.ok(Map.of("error", "Jaeger unavailable: " + e.getMessage()));
+                        }
+                    }
+
+                    @SuppressWarnings("unchecked")
+                    private ResponseEntity<Object> searchByCorrelationAcrossAllServices(String correlationId, int limit) {
+                        try {
+                            // 1. Fetch list of services that have reported spans to Jaeger
+                            Map<String, Object> svcResp = rest.getForObject(jaegerQueryUrl + "/api/services", Map.class);
+                            List<String> services = svcResp != null && svcResp.get("data") instanceof List<?>
+                                    ? (List<String>) svcResp.get("data") : List.of();
+
+                            // 2. Query each service for traces with this correlation ID
+                            List<Object> merged = new java.util.ArrayList<>();
+                            java.util.Set<String> seen = new java.util.HashSet<>();
+                            for (String svc : services) {
+                                try {
+                                    String tagsJson = "{\\"correlation.id\\":\\"" + correlationId.replace("\\"", "") + "\\"}";
+                                    String url = jaegerQueryUrl + "/api/traces?service=" + svc
+                                            + "&tags=" + java.net.URLEncoder.encode(tagsJson, java.nio.charset.StandardCharsets.UTF_8)
+                                            + "&limit=" + limit;
+                                    Map<String, Object> result = rest.getForObject(url, Map.class);
+                                    if (result != null && result.get("data") instanceof List<?> data) {
+                                        for (Object trace : data) {
+                                            if (trace instanceof Map<?, ?> t) {
+                                                String tid = String.valueOf(t.get("traceID"));
+                                                if (seen.add(tid)) merged.add(trace);
+                                            }
+                                        }
+                                    }
+                                } catch (Exception ignored) {}
+                            }
+                            return ResponseEntity.ok(Map.of("data", merged));
+                        } catch (Exception e) {
+                            return ResponseEntity.ok(Map.of("error", "Jaeger service list unavailable: " + e.getMessage()));
+                        }
+                    }
+
+                    @GetMapping("/traces/services")
+                    public ResponseEntity<Object> getJaegerServices() {
+                        try {
+                            return ResponseEntity.ok(rest.getForObject(jaegerQueryUrl + "/api/services", Object.class));
+                        } catch (Exception e) {
+                            return ResponseEntity.ok(Map.of("data", List.of()));
                         }
                     }
 
@@ -815,6 +868,24 @@ class AdminObservabilityGenerator {
                             return ResponseEntity.ok(rest.getForObject(url.toString(), Object.class));
                         } catch (Exception e) {
                             return ResponseEntity.ok(Map.of("error", "Logger service unavailable: " + e.getMessage()));
+                        }
+                    }
+
+                    @GetMapping("/logs/services")
+                    public ResponseEntity<Object> getLogServices() {
+                        try {
+                            return ResponseEntity.ok(rest.getForObject(loggerUrl + "/api/logs/services", Object.class));
+                        } catch (Exception e) {
+                            return ResponseEntity.ok(List.of());
+                        }
+                    }
+
+                    @GetMapping("/logs/stats")
+                    public ResponseEntity<Object> getLogStats() {
+                        try {
+                            return ResponseEntity.ok(rest.getForObject(loggerUrl + "/api/logs/stats", Object.class));
+                        } catch (Exception e) {
+                            return ResponseEntity.ok(Map.of());
                         }
                     }
 
