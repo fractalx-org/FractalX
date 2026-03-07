@@ -74,7 +74,7 @@ class AdminTemplateGenerator {
                     <div class="wrap">
                         <div class="card">
                             <div class="logo">
-                                <div class="logo-icon"><i class="fas fa-cubes"></i></div>
+                                <div class="logo-icon"><svg width="16" height="17" viewBox="0 0 18 19" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2.1054" y="4.60606" width="7.69016" height="4.57289" transform="rotate(27.4135 2.1054 4.60606)" fill="white"/><rect x="2.1054" width="14.9697" height="4.60606" fill="white"/><rect x="6.82661" y="7.6" width="10.2485" height="4.60606" fill="white"/><rect x="6.82661" y="12.2061" width="6.79394" height="4.72121" transform="rotate(90 6.82661 12.2061)" fill="white"/></svg></div>
                                 <span class="logo-name">FractalX</span>
                             </div>
                             <h2>Sign in</h2>
@@ -544,7 +544,7 @@ class AdminTemplateGenerator {
         return """
                 <aside class="sidebar" id="sidebar">
                     <a class="sb-brand" href="#">
-                        <div class="sb-icon"><i class="fas fa-cubes"></i></div>
+                        <div class="sb-icon"><svg width="16" height="17" viewBox="0 0 18 19" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2.1054" y="4.60606" width="7.69016" height="4.57289" transform="rotate(27.4135 2.1054 4.60606)" fill="white"/><rect x="2.1054" width="14.9697" height="4.60606" fill="white"/><rect x="6.82661" y="7.6" width="10.2485" height="4.60606" fill="white"/><rect x="6.82661" y="12.2061" width="6.79394" height="4.72121" transform="rotate(90 6.82661 12.2061)" fill="white"/></svg></div>
                         <span class="sb-name">FractalX</span>
                     </a>
                     <nav class="sidebar-nav">
