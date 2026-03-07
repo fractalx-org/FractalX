@@ -1,7 +1,9 @@
 package org.fractalx.core.model;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Represents a decomposable module identified during analysis.
@@ -16,6 +18,8 @@ public class FractalModule {
     private final boolean independentDeployment;
     private final List<String> dependencies;
     private final List<String> ownedSchemas;
+    /** Full import strings collected from every source file in this module's package tree. */
+    private final Set<String> detectedImports;
 
     private FractalModule(Builder builder) {
         this.className = builder.className;
@@ -25,15 +29,18 @@ public class FractalModule {
         this.independentDeployment = builder.independentDeployment;
         this.dependencies = List.copyOf(builder.dependencies);
         this.ownedSchemas = List.copyOf(builder.ownedSchemas);
+        this.detectedImports = Set.copyOf(builder.detectedImports);
     }
 
-    public String getClassName()           { return className; }
-    public String getPackageName()         { return packageName; }
-    public String getServiceName()         { return serviceName; }
-    public int    getPort()                { return port; }
+    public String getClassName()             { return className; }
+    public String getPackageName()           { return packageName; }
+    public String getServiceName()           { return serviceName; }
+    public int    getPort()                  { return port; }
     public boolean isIndependentDeployment() { return independentDeployment; }
-    public List<String> getDependencies()  { return dependencies; }
-    public List<String> getOwnedSchemas()  { return ownedSchemas; }
+    public List<String> getDependencies()    { return dependencies; }
+    public List<String> getOwnedSchemas()    { return ownedSchemas; }
+    /** All Java import strings found across the module's source files. */
+    public Set<String> getDetectedImports()  { return detectedImports; }
 
     @Override
     public String toString() {
@@ -58,6 +65,7 @@ public class FractalModule {
         private boolean independentDeployment = true;
         private final List<String> dependencies = new ArrayList<>();
         private final List<String> ownedSchemas = new ArrayList<>();
+        private final Set<String> detectedImports = new LinkedHashSet<>();
 
         private Builder() {}
 
@@ -96,6 +104,11 @@ public class FractalModule {
 
         public Builder ownedSchemas(List<String> ownedSchemas) {
             this.ownedSchemas.addAll(ownedSchemas);
+            return this;
+        }
+
+        public Builder detectedImports(Set<String> imports) {
+            this.detectedImports.addAll(imports);
             return this;
         }
 
