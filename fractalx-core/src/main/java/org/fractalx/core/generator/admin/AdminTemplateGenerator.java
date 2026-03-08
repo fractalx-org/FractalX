@@ -285,6 +285,7 @@ class AdminTemplateGenerator {
                         .badge-down{background:#fee2e2!important;color:#b91c1c!important}
                         .badge-degraded{background:#fef3c7!important;color:#92400e!important}
                         .badge-unknown{background:#f3f4f6!important;color:#6b7280!important}
+                        .badge-info{background:#dbeafe!important;color:#1d4ed8!important}
                         /* Process status pills */
                         .proc-pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;
                                    padding:2px 8px;border-radius:20px;letter-spacing:.02em}
@@ -948,10 +949,10 @@ class AdminTemplateGenerator {
                                 <div class="card-bd table-wrap">
                                     <table class="table table-sm mb-0">
                                         <thead><tr>
-                                            <th>Service</th><th>Schemas</th><th>Health</th><th></th>
+                                            <th>Service</th><th>Schemas</th><th>Health</th><th>Row Count</th><th>Actions</th>
                                         </tr></thead>
                                         <tbody id="databases-tbody">
-                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
+                                            <tr><td colspan="5" class="text-muted p-3">Loading…</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -1489,6 +1490,20 @@ class AdminTemplateGenerator {
                         </div>
                     </div>
                 </div>
+                <div class="modal fade" id="dbDetailsModal" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">
+                                    <i class="fas fa-database me-2" style="color:#f59e0b"></i>
+                                    <span id="db-details-title">Database Details</span>
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body" id="db-details-body">Loading…</div>
+                        </div>
+                    </div>
+                </div>
                 """;
     }
 
@@ -1933,19 +1948,24 @@ class AdminTemplateGenerator {
                             tbody.innerHTML = '';
                             dbs.forEach(db => {
                                 const h = db.health || 'UNKNOWN';
-                                const extra = db.instanceCount !== undefined
-                                    ? `<td class="text-muted small">${db.instanceCount >= 0 ? db.instanceCount + ' rows' : '—'}</td>`
-                                    : '<td></td>';
+                                const summary = db.dbSummary;
+                                let rowCount = '—';
+                                if (summary && !summary.unavailable && summary.totalRows !== undefined) {
+                                    rowCount = summary.totalRows + ' rows';
+                                } else if (db.instanceCount !== undefined && db.instanceCount >= 0) {
+                                    rowCount = db.instanceCount + ' rows';
+                                }
                                 tbody.innerHTML += `<tr>
                                     <td>${db.service}</td>
                                     <td><small>${db.schemas || '-'}</small></td>
                                     <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'} small">${h}</span></td>
-                                    ${extra}
+                                    <td class="text-muted small">${rowCount}</td>
+                                    <td><button class="btn btn-xs btn-outline-info" onclick="showDbDetails('${db.service}')">Details</button></td>
                                 </tr>`;
                             });
                         }).catch(() => {
                             document.getElementById('databases-tbody').innerHTML =
-                                '<tr><td colspan="4" class="text-muted">DB health unavailable</td></tr>';
+                                '<tr><td colspan="5" class="text-muted">DB health unavailable</td></tr>';
                         });
 
                     fetch('/api/data/outbox')
@@ -2118,6 +2138,34 @@ class AdminTemplateGenerator {
                 function toggleStepDetail(id) {
                     const el = document.getElementById(id);
                     if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+                }
+
+                function showDbDetails(service) {
+                    fetch('/api/data/databases/config/' + service)
+                        .then(r => r.json()).then(cfg => {
+                            const isH2 = cfg.isH2;
+                            let html = `
+                                <table class="table table-sm">
+                                    <tr><th>Service</th><td>${cfg.service}</td></tr>
+                                    <tr><th>URL</th><td><code>${cfg.url || '-'}</code></td></tr>
+                                    <tr><th>Username</th><td><code>${cfg.username || '-'}</code></td></tr>
+                                    <tr><th>Password</th><td><code>${cfg.password || (isH2 ? '(empty)' : '***')}</code></td></tr>
+                                    <tr><th>Driver</th><td><code>${cfg.driverClassName || '-'}</code></td></tr>
+                                    <tr><th>Type</th><td>${isH2 ? '<span class="badge badge-info">H2 (in-memory)</span>' : '<span class="badge badge-unknown">External</span>'}</td></tr>
+                                </table>`;
+                            if (isH2 && cfg.h2ConsoleUrl) {
+                                html += `<div class="mt-2">
+                                    <a href="${cfg.h2ConsoleUrl}" target="_blank" class="btn btn-sm btn-warning">
+                                        <i class="fas fa-external-link-alt"></i> Open H2 Console
+                                    </a>
+                                    <small class="text-muted ms-2">JDBC URL: <code>${cfg.url}</code> &nbsp; User: <code>${cfg.username}</code> &nbsp; Password: <em>leave empty</em></small>
+                                </div>`;
+                            }
+                            document.getElementById('db-details-body').innerHTML = html;
+                            document.getElementById('db-details-title').textContent = cfg.service + ' — Database Details';
+                            const modal = new bootstrap.Modal(document.getElementById('dbDetailsModal'));
+                            modal.show();
+                        }).catch(e => alert('Could not load DB config: ' + e));
                 }
                 """;
     }

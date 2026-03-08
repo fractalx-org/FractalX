@@ -145,7 +145,7 @@ public class AdminServiceGenerator {
         // New enhanced sub-systems
         servicesDetailGenerator.generate(srcMainJava, BASE_PACKAGE, modules, sagaDefinitions);
         communicationGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
-        dataConsistencyGenerator.generate(srcMainJava, BASE_PACKAGE, modules, sagaDefinitions);
+        dataConsistencyGenerator.generate(srcMainJava, BASE_PACKAGE, modules, sagaDefinitions, fractalxConfig, outputRoot);
         userManagementGenerator.generate(srcMainJava, BASE_PACKAGE);
         databaseGenerator.generate(srcMainJava, BASE_PACKAGE);
         configManagementGenerator.generate(srcMainJava, BASE_PACKAGE, modules, fractalxConfig);

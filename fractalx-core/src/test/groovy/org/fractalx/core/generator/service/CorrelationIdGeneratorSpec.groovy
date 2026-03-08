@@ -45,12 +45,53 @@ class CorrelationIdGeneratorSpec extends Specification {
         Files.exists(serviceRoot.resolve("src/main/resources/logback-spring.xml"))
     }
 
-    def "logback-spring.xml includes correlationId MDC key in log pattern"() {
+    def "logback-spring.xml includes correlationId MDC key with NO_CORR fallback"() {
         when:
         generator.generate(ctx())
 
         then:
-        logback().contains("%X{correlationId")
+        logback().contains("%X{correlationId:-NO_CORR}")
+    }
+
+    def "logback-spring.xml uses merged Spring Boot + correlationId pattern"() {
+        when:
+        generator.generate(ctx())
+
+        then:
+        def content = logback()
+        // ISO-8601 timestamp with timezone offset
+        content.contains("%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}")
+        // process ID — uses ${PID} system property (ProcessIdConverter removed in Spring Boot 3.x)
+        content.contains("\${PID:-????}")
+        // Spring Boot --- separator and app-name column
+        content.contains("---")
+        content.contains("\${APP_NAME}")
+        // padded thread column
+        content.contains("%15.15t")
+        // abbreviated logger padded to 40 chars
+        content.contains("%-40.40logger{39}")
+    }
+
+    def "logback-spring.xml does not use %pid converter (removed in Spring Boot 3.x)"() {
+        when:
+        generator.generate(ctx())
+
+        then:
+        def content = logback()
+        // ProcessIdConverter no longer exists in Spring Boot 3 — must use ${PID} property instead
+        !content.contains("ProcessIdConverter")
+        !content.contains("%pid")
+    }
+
+    def "logback-spring.xml binds spring.application.name via springProperty"() {
+        when:
+        generator.generate(ctx())
+
+        then:
+        def content = logback()
+        content.contains("<springProperty")
+        content.contains("spring.application.name")
+        content.contains("APP_NAME")
     }
 
     def "logback-spring.xml includes CONSOLE and FILE appenders"() {

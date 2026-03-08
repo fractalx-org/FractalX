@@ -149,6 +149,53 @@ class FlywayMigrationGeneratorSpec extends Specification {
         "BigDecimal"    | "DECIMAL(19,4)"
     }
 
+    def "local @ManyToMany generates a join table in the migration"() {
+        given: "Student entity has @ManyToMany to a local Course entity"
+        writeEntity("org/fractalx/test/order/Student.java", """
+            package org.fractalx.test.order;
+            import jakarta.persistence.*;
+            import java.util.List;
+            @Entity
+            public class Student {
+                @Id private Long id;
+                @ManyToMany
+                private List<Course> courses;
+            }
+        """)
+
+        when:
+        generator.generateMigration(module, serviceRoot)
+
+        then: "a join table is emitted alongside the entity table"
+        def content = sql()
+        content.contains("CREATE TABLE IF NOT EXISTS student_courses")
+        content.contains("student_id BIGINT")
+        content.contains("course_id BIGINT")
+    }
+
+    def "@ElementCollection List<String> field generates an element collection table"() {
+        given: "Student entity has @ElementCollection List<String> courseIds (post-decoupling)"
+        writeEntity("org/fractalx/test/order/Student.java", """
+            package org.fractalx.test.order;
+            import jakarta.persistence.*;
+            import java.util.List;
+            @Entity
+            public class Student {
+                @Id private Long id;
+                @ElementCollection
+                private List<String> courseIds;
+            }
+        """)
+
+        when:
+        generator.generateMigration(module, serviceRoot)
+
+        then: "an element collection table is emitted"
+        def content = sql()
+        content.contains("CREATE TABLE IF NOT EXISTS student_course_ids")
+        content.contains("course_ids VARCHAR(255)")
+    }
+
     def "entity class name is converted to snake_case table name"() {
         given:
         writeEntity("org/fractalx/test/order/OrderLineItem.java", """
