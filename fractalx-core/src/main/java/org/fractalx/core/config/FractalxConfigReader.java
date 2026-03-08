@@ -124,7 +124,16 @@ public class FractalxConfigReader {
                 if (enabledVal instanceof Boolean b) tracingEnabled = b;
                 else if ("false".equalsIgnoreCase(String.valueOf(enabledVal))) tracingEnabled = false;
             }
-            result.put(name, new FractalxConfig.ServiceOverride(port, tracingEnabled));
+            String dsUrl = null, dsUsername = null, dsPassword = null, dsDriver = null;
+            Object dsObj = svc.get("datasource");
+            if (dsObj instanceof Map<?, ?> dsMap) {
+                Object dsU = dsMap.get("url");      if (dsU != null) dsUrl      = dsU.toString();
+                Object dsN = dsMap.get("username"); if (dsN != null) dsUsername = dsN.toString();
+                Object dsP = dsMap.get("password"); if (dsP != null) dsPassword = dsP.toString();
+                Object dsD = dsMap.get("driver-class-name"); if (dsD != null) dsDriver = dsD.toString();
+            }
+            result.put(name, new FractalxConfig.ServiceOverride(port, tracingEnabled,
+                    dsUrl, dsUsername, dsPassword, dsDriver));
         });
         return result;
     }

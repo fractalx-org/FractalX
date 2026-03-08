@@ -18,6 +18,7 @@ import org.fractalx.core.generator.service.CorrelationIdGenerator;
 import org.fractalx.core.generator.service.NetScopeClientGenerator;
 import org.fractalx.core.generator.service.NetScopeRegistryBridgeStep;
 import org.fractalx.core.generator.service.PomGenerator;
+import org.fractalx.core.generator.service.DbSummaryStep;
 import org.fractalx.core.generator.service.ServiceRegistrationStep;
 import org.fractalx.core.generator.transformation.AnnotationRemover;
 import org.fractalx.core.generator.transformation.CodeCopier;
@@ -119,6 +120,7 @@ public class ServiceGenerator {
                 new CorrelationIdGenerator(),    // generates logback-spring.xml with %X{correlationId}
                 new OtelConfigStep(),
                 new HealthMetricsStep(),
+                new DbSummaryStep(),
                 new ServiceRegistrationStep(),
                 new NetScopeRegistryBridgeStep(),
                 new ResilienceConfigStep()

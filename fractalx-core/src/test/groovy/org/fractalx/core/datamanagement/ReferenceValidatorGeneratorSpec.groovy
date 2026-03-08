@@ -157,6 +157,54 @@ class ReferenceValidatorGeneratorSpec extends Specification {
         Files.exists(validationDir().resolve("CustomerExistsClient.java"))
     }
 
+    def "detects @ElementCollection List<String> courseIds and generates validateAllCourseExist"() {
+        given: "entity with @ElementCollection List<String> courseIds (produced by ManyToMany decoupling)"
+        writeEntity("org/fractalx/test/order/Order.java", """
+            package org.fractalx.test.order;
+            import jakarta.persistence.*;
+            import java.util.List;
+            @Entity
+            public class Order {
+                @Id private Long id;
+                @ElementCollection
+                private List<String> courseIds;
+            }
+        """)
+
+        when:
+        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot)
+
+        then:
+        def content = Files.readString(validationDir().resolve("ReferenceValidator.java"))
+        content.contains("validateAllCourseExist")
+        content.contains("List<String>")
+        content.contains("validateCourseExists") // collection method delegates to singular
+        // The ExistsClient is the same interface — singular exists() handles both
+        Files.exists(validationDir().resolve("CourseExistsClient.java"))
+    }
+
+    def "generated ReferenceValidator includes java.util.List import when collection id fields present"() {
+        given:
+        writeEntity("org/fractalx/test/order/Order.java", """
+            package org.fractalx.test.order;
+            import jakarta.persistence.*;
+            import java.util.List;
+            @Entity
+            public class Order {
+                @Id private Long id;
+                @ElementCollection
+                private List<String> courseIds;
+            }
+        """)
+
+        when:
+        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot)
+
+        then:
+        def content = Files.readString(validationDir().resolve("ReferenceValidator.java"))
+        content.contains("import java.util.List")
+    }
+
     def "detects multiple decoupled Id fields and generates a validator method for each"() {
         given: "entity with both paymentId and productId"
         writeEntity("org/fractalx/test/order/Order.java", """

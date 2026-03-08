@@ -3,8 +3,11 @@ package org.fractalx.core.datamanagement;
 import org.fractalx.core.model.FractalModule;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
+import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.github.javaparser.ast.type.Type;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
@@ -101,9 +105,37 @@ public class FlywayMigrationGenerator {
                 // Emit FK column: prefer @JoinColumn(name="..."), fall back to fieldName_id
                 String colName = resolveJoinColumnName(field);
                 info.fields.add(new ColumnInfo(colName, "BIGINT", false));
+            } else if (hasAnnotation(field, "ManyToMany")) {
+                // Local @ManyToMany (same-service) → emit a join table.
+                // Remote @ManyToMany fields are decoupled to @ElementCollection by
+                // RelationshipDecoupler before this generator runs, so any remaining
+                // @ManyToMany here is a local relationship.
+                extractGenericTypeName(field).ifPresent(otherType -> {
+                    String varName   = field.getVariable(0).getNameAsString();
+                    String joinTable = info.tableName + "_" + toSnakeCase(varName);
+                    String otherIdCol = toSnakeCase(otherType) + "_id";
+                    info.extraTableDdl.add(
+                            "-- Join table for " + info.className + "." + varName + " (@ManyToMany)\n"
+                                    + "CREATE TABLE IF NOT EXISTS " + joinTable + " (\n"
+                                    + "    " + info.tableName + "_id BIGINT,\n"
+                                    + "    " + otherIdCol + " BIGINT,\n"
+                                    + "    PRIMARY KEY (" + info.tableName + "_id, " + otherIdCol + ")\n"
+                                    + ");\n");
+                });
+            } else if (hasAnnotation(field, "ElementCollection")) {
+                // @ElementCollection List<String> produced by RelationshipDecoupler for
+                // cross-service @ManyToMany → emit a dedicated element-collection table.
+                String varName  = field.getVariable(0).getNameAsString();
+                String colTable = info.tableName + "_" + toSnakeCase(varName);
+                info.extraTableDdl.add(
+                        "-- Element collection table for " + info.className + "." + varName
+                                + " (@ElementCollection, decoupled cross-service @ManyToMany)\n"
+                                + "CREATE TABLE IF NOT EXISTS " + colTable + " (\n"
+                                + "    " + info.tableName + "_id BIGINT,\n"
+                                + "    " + toSnakeCase(varName) + " VARCHAR(255)\n"
+                                + ");\n");
             } else if (!hasAnnotation(field, "Transient")
-                    && !hasAnnotation(field, "OneToMany")
-                    && !hasAnnotation(field, "ManyToMany")) {
+                    && !hasAnnotation(field, "OneToMany")) {
                 info.fields.add(new ColumnInfo(
                         toSnakeCase(field.getVariable(0).getNameAsString()),
                         toSqlType(field.getElementType().asString()),
@@ -158,6 +190,11 @@ public class FlywayMigrationGenerator {
 
             sb.append(String.join(",\n", columnDefs));
             sb.append("\n);\n\n");
+
+            // Emit join tables / element-collection tables attached to this entity
+            for (String extraDdl : entity.extraTableDdl) {
+                sb.append(extraDdl).append("\n");
+            }
         }
 
         // Outbox table — always generated for saga/event support
@@ -216,6 +253,21 @@ public class FlywayMigrationGenerator {
         return node.getAnnotations().stream().anyMatch(a -> a.getNameAsString().equals(name));
     }
 
+    /**
+     * Extracts the first generic type argument from a field's variable type.
+     * E.g. {@code List<Course>} → {@code Optional.of("Course")}.
+     */
+    private Optional<String> extractGenericTypeName(FieldDeclaration field) {
+        if (field.getVariables().isEmpty()) return Optional.empty();
+        Type type = field.getVariable(0).getType();
+        if (!type.isClassOrInterfaceType()) return Optional.empty();
+        ClassOrInterfaceType ct = type.asClassOrInterfaceType();
+        if (ct.getTypeArguments().isEmpty()) return Optional.empty();
+        NodeList<Type> args = ct.getTypeArguments().get();
+        if (args.isEmpty() || !args.get(0).isClassOrInterfaceType()) return Optional.empty();
+        return Optional.of(args.get(0).asClassOrInterfaceType().getNameAsString());
+    }
+
     private String toSnakeCase(String camelCase) {
         return camelCase.replaceAll("([A-Z])", "_$1").toLowerCase().replaceFirst("^_", "");
     }
@@ -242,7 +294,9 @@ public class FlywayMigrationGenerator {
     private static class EntityInfo {
         String className;
         String tableName;
-        final List<ColumnInfo> fields = new ArrayList<>();
+        final List<ColumnInfo> fields        = new ArrayList<>();
+        /** DDL for join tables (@ManyToMany) and element-collection tables (@ElementCollection). */
+        final List<String>     extraTableDdl = new ArrayList<>();
     }
 
     private static class ColumnInfo {

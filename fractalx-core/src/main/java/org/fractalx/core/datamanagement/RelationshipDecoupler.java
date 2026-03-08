@@ -8,6 +8,7 @@ import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.comments.LineComment;
 import com.github.javaparser.ast.expr.*;
+import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
@@ -26,8 +27,17 @@ import java.util.stream.Stream;
 
 /**
  * Performs AST-based decoupling of cross-service relationships.
- * Converts JPA relationship fields to String ID fields and updates associated service logic.
- * Handles both POJO and Record request DTOs.
+ * Converts JPA relationship fields to String / List&lt;String&gt; ID fields and updates
+ * associated service logic.  Handles POJO, Record, and Lombok-annotated request DTOs.
+ *
+ * <h3>Annotation handling</h3>
+ * <ul>
+ *   <li>{@code @ManyToOne} / {@code @OneToOne} — singular remote entity → {@code String *Id}</li>
+ *   <li>{@code @OneToMany} referencing a remote entity — collection removed entirely</li>
+ *   <li>{@code @ManyToMany} referencing a remote entity — collection converted to
+ *       {@code @ElementCollection List<String> *Ids}</li>
+ *   <li>Local relationships (both sides in the same module) — left untouched</li>
+ * </ul>
  */
 public class RelationshipDecoupler {
 
@@ -35,42 +45,50 @@ public class RelationshipDecoupler {
 
     private final JavaParser javaParser = new JavaParser();
 
-    private static final Set<String> REL_ANNOS = Set.of("ManyToOne", "OneToOne", "JoinColumn");
-    private static final String ONE_TO_MANY = "OneToMany";
+    private static final Set<String> REL_ANNOS  = Set.of("ManyToOne", "OneToOne", "JoinColumn");
+    private static final String ONE_TO_MANY  = "OneToMany";
+    private static final String MANY_TO_MANY = "ManyToMany";
+
+    // =========================================================================
+    // Public entry point
+    // =========================================================================
 
     /**
      * Orchestrates the transformation process: identifies local/remote entities,
-     * indexes request DTOs, and applies AST modifications to source files.
+     * collects per-entity remote field info, indexes request DTOs, and applies AST
+     * modifications to all source files under {@code serviceRoot}.
      */
     public void transform(Path serviceRoot, FractalModule module) {
         try {
             String modulePackage = module.getPackageName() != null ? module.getPackageName() : "";
 
-            // Identify entities defined within this service's OWN package only.
-            // Using the module package as a filter prevents stale copied model classes
-            // (e.g. Payment.java / Product.java copied in a previous generation run) from
-            // being mistakenly classified as local, which would suppress decoupling.
-            Set<String> localEntities = findLocalEntityNames(serviceRoot, modulePackage);
-
-            // Identify entities referenced but not defined locally.
-            // Restrict the scan to the module's own files for the same reason.
+            Set<String> localEntities  = findLocalEntityNames(serviceRoot, modulePackage);
             Set<String> remoteEntities = findRemoteEntities(serviceRoot, localEntities, modulePackage);
 
             if (remoteEntities.isEmpty()) {
-                log.info("✅ [Data] No remote entity references found for {}. Data is fully local.", module.getServiceName());
+                log.info("✅ [Data] No remote entity references found for {}. Data is fully local.",
+                        module.getServiceName());
                 return;
             }
 
-            log.info("🧩 [Data] Remote entity types to decouple for {}: {}", module.getServiceName(), remoteEntities);
+            log.info("🧩 [Data] Remote entity types to decouple for {}: {}",
+                    module.getServiceName(), remoteEntities);
 
-            // Build index of Request objects to determine accessor style (Record vs Class)
+            // Pre-pass: build a map of entityClass → remote field info so that service
+            // validation injection can work without requiring cross-file state in the main walk.
+            Map<String, RemoteFieldInfo> entityRemoteIdFields =
+                    collectEntityRemoteIdFields(serviceRoot, remoteEntities, modulePackage);
+
+            // Build getter rename map for service-side chain detection (step 4)
+            Map<String, String> collectionGetterRenames = buildCollectionGetterRenames(entityRemoteIdFields);
+
             RequestInfoIndex requestIndex = buildRequestIndex(serviceRoot);
 
-            // Process all Java files
             try (Stream<Path> paths = Files.walk(serviceRoot)) {
                 paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                     try {
-                        transformFile(path, localEntities, remoteEntities, requestIndex);
+                        transformFile(path, localEntities, remoteEntities, requestIndex,
+                                module, entityRemoteIdFields, collectionGetterRenames);
                     } catch (Exception e) {
                         log.error("❌ [Data] Failed to transform file: {}", path, e);
                     }
@@ -82,14 +100,141 @@ public class RelationshipDecoupler {
         }
     }
 
+    // =========================================================================
+    // Inner data holders
+    // =========================================================================
+
+    /**
+     * Remote-field information discovered for one entity class during the pre-pass.
+     * Exposed as package-private so tests can inspect it directly if needed.
+     */
+    static class RemoteFieldInfo {
+        /** e.g. {@code "Payment" → "paymentId"} — singular {@code @ManyToOne} / {@code @OneToOne} field */
+        final Map<String, String> singleTypeToIdField      = new LinkedHashMap<>();
+        /** e.g. {@code "Course" → "courseIds"} — {@code @ManyToMany} decoupled to {@code @ElementCollection} */
+        final Map<String, String> collectionTypeToIdsField = new LinkedHashMap<>();
+        /** Old field name → new field name for collection renames (e.g. {@code "courses" → "courseIds"}) */
+        final Map<String, String> collectionOldToNewField  = new LinkedHashMap<>();
+
+        boolean isEmpty() {
+            return singleTypeToIdField.isEmpty() && collectionTypeToIdsField.isEmpty();
+        }
+    }
+
+    private static class RequestInfoIndex {
+        final Map<String, RequestInfo> requestInfo = new HashMap<>();
+    }
+
+    private static class RequestInfo {
+        final boolean isRecord;
+        final Set<String> recordComponents   = new HashSet<>();
+        final Set<String> pojoGetters        = new HashSet<>();
+        /** Getter name → declared return-type simple name (e.g. "getPrimaryTagId" → "Long"). */
+        final Map<String, String> getterTypes = new HashMap<>();
+
+        RequestInfo(boolean isRecord) {
+            this.isRecord = isRecord;
+        }
+    }
+
+    // =========================================================================
+    // Pre-pass: entity remote-field collection
+    // =========================================================================
+
+    /**
+     * Scans entity classes (filtered to {@code modulePackage}) and, for each, records
+     * which remote types map to which decoupled field names — both singular and collection.
+     *
+     * <p>This pre-pass is necessary because service files and entity files are separate;
+     * the main file walk transforms them independently, so cross-file knowledge must be
+     * gathered up front.
+     */
+    private Map<String, RemoteFieldInfo> collectEntityRemoteIdFields(
+            Path root, Set<String> remoteEntities, String modulePackage) {
+
+        Map<String, RemoteFieldInfo> result = new HashMap<>();
+
+        try (Stream<Path> paths = Files.walk(root)) {
+            paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
+                try {
+                    Optional<CompilationUnit> cuOpt = javaParser.parse(path).getResult();
+                    if (cuOpt.isEmpty()) return;
+                    CompilationUnit cu = cuOpt.get();
+
+                    if (!modulePackage.isBlank()) {
+                        String filePkg = cu.getPackageDeclaration()
+                                .map(pd -> pd.getNameAsString()).orElse("");
+                        if (!filePkg.startsWith(modulePackage)) return;
+                    }
+
+                    for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                        if (!hasAnnotation(c, "Entity")) continue;
+
+                        RemoteFieldInfo info = new RemoteFieldInfo();
+
+                        for (FieldDeclaration field : c.getFields()) {
+                            // Singular remote relationship (@ManyToOne / @OneToOne)
+                            if (hasAnyAnnotation(field, REL_ANNOS)) {
+                                for (VariableDeclarator var : field.getVariables()) {
+                                    String typeName = simpleTypeName(var.getType());
+                                    if (typeName != null && remoteEntities.contains(typeName)) {
+                                        String old     = var.getNameAsString();
+                                        String newName = old.endsWith("Id") ? old : old + "Id";
+                                        info.singleTypeToIdField.put(typeName, newName);
+                                    }
+                                }
+                            }
+
+                            // Collection remote relationship (@ManyToMany)
+                            if (hasAnnotation(field, MANY_TO_MANY)) {
+                                for (VariableDeclarator var : field.getVariables()) {
+                                    Optional<String> generic = extractGenericTypeName(var.getType());
+                                    if (generic.isPresent() && remoteEntities.contains(generic.get())) {
+                                        String old     = var.getNameAsString();
+                                        String newName = toIdsFieldName(old);
+                                        info.collectionTypeToIdsField.put(generic.get(), newName);
+                                        info.collectionOldToNewField.put(old, newName);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!info.isEmpty()) {
+                            result.put(c.getNameAsString(), info);
+                        }
+                    }
+                } catch (Exception ignored) {}
+            });
+        } catch (IOException e) {
+            log.warn("Could not collect entity remote id fields: {}", e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * Builds a map of old getter name → new getter name for collection field renames
+     * across all entities.  E.g. {@code "getCourses" → "getCourseIds"}.
+     */
+    private Map<String, String> buildCollectionGetterRenames(Map<String, RemoteFieldInfo> entityRemoteIdFields) {
+        Map<String, String> renames = new HashMap<>();
+        for (RemoteFieldInfo info : entityRemoteIdFields.values()) {
+            for (Map.Entry<String, String> e : info.collectionOldToNewField.entrySet()) {
+                renames.put("get" + upperFirst(e.getKey()), "get" + upperFirst(e.getValue()));
+            }
+        }
+        return renames;
+    }
+
+    // =========================================================================
+    // Entity scanning
+    // =========================================================================
+
     /**
      * Scans source files to identify @Entity classes defined within {@code modulePackage}.
      *
      * <p>The package filter is critical when regenerating without a clean build: copied
-     * model classes from other modules (e.g. {@code Payment.java}, {@code Product.java})
-     * may already be present in the service directory from a previous generation run.
-     * Without filtering they would be counted as local, causing remote relationships
-     * to go un-decoupled.
+     * model classes from other modules may already be present from a previous generation run.
      */
     private Set<String> findLocalEntityNames(Path root, String modulePackage) throws IOException {
         Set<String> local = new HashSet<>();
@@ -101,11 +246,9 @@ public class RelationshipDecoupler {
                     if (cuOpt.isEmpty()) return;
                     CompilationUnit cu = cuOpt.get();
 
-                    // Only count entities that belong to this module's package
                     if (!modulePackage.isBlank()) {
                         String filePkg = cu.getPackageDeclaration()
-                                .map(pd -> pd.getNameAsString())
-                                .orElse("");
+                                .map(pd -> pd.getNameAsString()).orElse("");
                         if (!filePkg.startsWith(modulePackage)) return;
                     }
 
@@ -114,8 +257,7 @@ public class RelationshipDecoupler {
                             local.add(c.getNameAsString());
                         }
                     }
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
             });
         }
         return local;
@@ -123,8 +265,8 @@ public class RelationshipDecoupler {
 
     /**
      * Identifies entity types used in relationships by module-owned entities that are
-     * not themselves defined locally.  Only files within {@code modulePackage} are scanned
-     * to prevent stale copied model classes from introducing false positives.
+     * not themselves defined locally.  Now handles {@code @ManyToMany} in addition to
+     * {@code @ManyToOne}, {@code @OneToOne}, and {@code @OneToMany}.
      */
     private Set<String> findRemoteEntities(Path root,
                                             Set<String> localEntities,
@@ -138,11 +280,9 @@ public class RelationshipDecoupler {
                     if (cuOpt.isEmpty()) return;
                     CompilationUnit cu = cuOpt.get();
 
-                    // Restrict scan to files in the module's own package
                     if (!modulePackage.isBlank()) {
                         String filePkg = cu.getPackageDeclaration()
-                                .map(pd -> pd.getNameAsString())
-                                .orElse("");
+                                .map(pd -> pd.getNameAsString()).orElse("");
                         if (!filePkg.startsWith(modulePackage)) return;
                     }
 
@@ -150,53 +290,48 @@ public class RelationshipDecoupler {
                         if (!hasAnnotation(c, "Entity")) continue;
 
                         for (FieldDeclaration field : c.getFields()) {
-                            if (!hasAnyAnnotation(field, REL_ANNOS) && !hasAnnotation(field, ONE_TO_MANY)) continue;
+                            boolean isRelAnno   = hasAnyAnnotation(field, REL_ANNOS);
+                            boolean isOneToMany = hasAnnotation(field, ONE_TO_MANY);
+                            boolean isManyToMany = hasAnnotation(field, MANY_TO_MANY);
 
-                            // Collect types from @OneToMany List<T>
-                            if (hasAnnotation(field, ONE_TO_MANY)) {
-                                field.getVariables().forEach(v -> {
-                                    Optional<String> generic = extractGenericTypeName(v.getType());
-                                    generic.ifPresent(typeName -> referenced.add(typeName));
-                                });
+                            if (!isRelAnno && !isOneToMany && !isManyToMany) continue;
+
+                            if (isOneToMany || isManyToMany) {
+                                // Collection relationships: extract generic type (List<T> → T)
+                                field.getVariables().forEach(v ->
+                                        extractGenericTypeName(v.getType()).ifPresent(referenced::add));
                                 continue;
                             }
 
-                            // Collect types from single relationships
+                            // Singular relationships: direct type name
                             field.getVariables().forEach(v -> {
                                 String typeName = simpleTypeName(v.getType());
                                 if (typeName != null) referenced.add(typeName);
                             });
                         }
                     }
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
             });
         }
 
-        // Filter out local entities and standard Java types
         referenced.removeAll(localEntities);
         referenced.removeAll(Set.of("String", "Long", "Integer", "UUID", "Double", "Float", "Boolean"));
         return referenced;
     }
 
-    // Stores structure of Request objects to support correct code generation
-    private static class RequestInfoIndex {
-        final Map<String, RequestInfo> requestInfo = new HashMap<>();
-    }
-
-    private static class RequestInfo {
-        final boolean isRecord;
-        final Set<String> recordComponents = new HashSet<>();
-        final Set<String> pojoGetters = new HashSet<>();
-
-        RequestInfo(boolean isRecord) {
-            this.isRecord = isRecord;
-        }
-    }
+    // =========================================================================
+    // Request-index building (for service-side call-site rewriting)
+    // =========================================================================
 
     /**
      * Builds an index of Request classes to determine if they are Records or POJOs
      * and capture available fields/getters.
+     *
+     * <p>Lombok {@code @Data} / {@code @Getter}: when the class carries one of these
+     * annotations there are no explicit {@code MethodDeclaration} nodes in the AST.
+     * The getter names are inferred from the declared field names so that
+     * {@link #tryBuildRequestIdAccessor} can still produce correct {@code request.getXxxId()}
+     * expressions on the call site.
      */
     private RequestInfoIndex buildRequestIndex(Path serviceRoot) throws IOException {
         RequestInfoIndex idx = new RequestInfoIndex();
@@ -210,7 +345,7 @@ public class RelationshipDecoupler {
                             if (cuOpt.isEmpty()) return;
                             CompilationUnit cu = cuOpt.get();
 
-                            // Process Records
+                            // Records
                             for (RecordDeclaration rd : cu.findAll(RecordDeclaration.class)) {
                                 String name = rd.getNameAsString();
                                 RequestInfo info = new RequestInfo(true);
@@ -218,7 +353,7 @@ public class RelationshipDecoupler {
                                 idx.requestInfo.put(name, info);
                             }
 
-                            // Process POJO Classes
+                            // POJO classes
                             for (ClassOrInterfaceDeclaration cd : cu.findAll(ClassOrInterfaceDeclaration.class)) {
                                 if (cd.isInterface()) continue;
                                 if (!cd.getNameAsString().endsWith("Request")) continue;
@@ -227,29 +362,51 @@ public class RelationshipDecoupler {
                                 String name = cd.getNameAsString();
                                 RequestInfo info = new RequestInfo(false);
 
+                                // Explicit getter methods
                                 for (MethodDeclaration m : cd.getMethods()) {
                                     if (m.getNameAsString().startsWith("get")) {
                                         info.pojoGetters.add(m.getNameAsString());
+                                        String retType = simpleTypeName(m.getType());
+                                        if (retType != null) info.getterTypes.put(m.getNameAsString(), retType);
                                     }
                                 }
+
+                                // Lombok @Data / @Getter: infer getter names from field declarations
+                                if (hasAnnotation(cd, "Data") || hasAnnotation(cd, "Getter")) {
+                                    for (FieldDeclaration fd : cd.getFields()) {
+                                        String typeName = simpleTypeName(fd.getElementType());
+                                        fd.getVariables().forEach(v -> {
+                                            String getter = "get" + upperFirst(v.getNameAsString());
+                                            info.pojoGetters.add(getter);
+                                            if (typeName != null) info.getterTypes.put(getter, typeName);
+                                        });
+                                    }
+                                }
+
                                 idx.requestInfo.put(name, info);
                             }
 
-                        } catch (Exception ignored) {
-                        }
+                        } catch (Exception ignored) {}
                     });
         }
         return idx;
     }
 
+    // =========================================================================
+    // File-level transformation
+    // =========================================================================
+
     /**
-     * Applies AST transformations to a single Java file: removes imports,
-     * transforms entities, and updates service logic.
+     * Applies AST transformations to a single Java file: entity decoupling, service
+     * logic rewriting, validator injection, and import cleanup.
      */
     private void transformFile(Path javaFile,
                                Set<String> localEntities,
                                Set<String> remoteEntities,
-                               RequestInfoIndex requestIndex) throws IOException {
+                               RequestInfoIndex requestIndex,
+                               FractalModule module,
+                               Map<String, RemoteFieldInfo> entityRemoteIdFields,
+                               Map<String, String> collectionGetterRenames) throws IOException {
 
         Optional<CompilationUnit> cuOpt = javaParser.parse(javaFile).getResult();
         if (cuOpt.isEmpty()) return;
@@ -257,17 +414,21 @@ public class RelationshipDecoupler {
         CompilationUnit cu = cuOpt.get();
         boolean modified = false;
 
+        // Track which field names in this file were converted from @ManyToMany collections
+        // so that updateEntityAccessors() knows to use List<String> instead of String.
+        Set<String> collectionIdFields = new HashSet<>();
+
         for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
             if (hasAnnotation(c, "Entity")) {
-                modified |= transformEntityClass(c, remoteEntities);
+                modified |= transformEntityClass(c, remoteEntities, collectionIdFields);
             }
         }
 
-        modified |= transformServiceLogic(cu, remoteEntities, requestIndex);
+        modified |= transformServiceLogic(cu, remoteEntities, requestIndex, collectionGetterRenames);
+        modified |= injectReferenceValidatorUsage(cu, entityRemoteIdFields, module);
 
-        // Remove imports for remote entity types only when they are no longer referenced
-        // after all transformations. This preserves imports for entity objects that remain
-        // as service-call results (e.g. Payment payment = paymentServiceClient.processPayment(...)).
+        // Remove imports for remote entity types that are no longer referenced.
+        // Must run last so the check reflects the final AST state.
         modified |= removeRemoteImports(cu, remoteEntities);
 
         if (modified) {
@@ -276,25 +437,42 @@ public class RelationshipDecoupler {
         }
     }
 
+    // =========================================================================
+    // Entity class transformation
+    // =========================================================================
+
     /**
      * Modifies entity classes: converts relationship fields to ID fields and updates accessors.
+     *
+     * @param collectionIdFields out-parameter populated with OLD field names whose type was
+     *                           widened to {@code List<String>} (i.e. former {@code @ManyToMany}
+     *                           fields).  Used by {@link #updateEntityAccessors} to choose the
+     *                           correct accessor return / parameter type.
      */
-    private boolean transformEntityClass(ClassOrInterfaceDeclaration entityClass, Set<String> remoteEntities) {
+    private boolean transformEntityClass(ClassOrInterfaceDeclaration entityClass,
+                                         Set<String> remoteEntities,
+                                         Set<String> collectionIdFields) {
         boolean modified = false;
         Map<String, String> fieldRenameMap = new HashMap<>();
 
         for (FieldDeclaration field : new ArrayList<>(entityClass.getFields())) {
 
-            // Remove OneToMany lists referencing remote entities
+            // Remove @OneToMany collections referencing remote entities
             if (hasAnnotation(field, ONE_TO_MANY)) {
-                boolean removedAny = removeRemoteOneToManyCollections(entityClass, field, remoteEntities);
-                modified |= removedAny;
+                modified |= removeRemoteOneToManyCollections(entityClass, field, remoteEntities);
+                continue;
+            }
+
+            // Convert @ManyToMany List<RemoteEntity> → @ElementCollection List<String> *Ids
+            if (hasAnnotation(field, MANY_TO_MANY)) {
+                modified |= convertRemoteManyToManyCollection(
+                        entityClass, field, remoteEntities, fieldRenameMap, collectionIdFields);
                 continue;
             }
 
             if (!hasAnyAnnotation(field, REL_ANNOS)) continue;
 
-            // Convert entity references to String ID fields
+            // Convert singular entity references to String ID fields
             for (VariableDeclarator var : field.getVariables()) {
                 String typeName = simpleTypeName(var.getType());
                 if (typeName == null || !remoteEntities.contains(typeName)) continue;
@@ -317,7 +495,7 @@ public class RelationshipDecoupler {
         }
 
         if (!fieldRenameMap.isEmpty()) {
-            modified |= updateEntityAccessors(entityClass, fieldRenameMap);
+            modified |= updateEntityAccessors(entityClass, fieldRenameMap, collectionIdFields);
             modified |= renameFieldReferences(entityClass, fieldRenameMap);
         }
 
@@ -325,7 +503,7 @@ public class RelationshipDecoupler {
     }
 
     /**
-     * Removes list fields annotated with @OneToMany if they reference a remote entity.
+     * Removes list fields annotated with {@code @OneToMany} if they reference a remote entity.
      */
     private boolean removeRemoteOneToManyCollections(ClassOrInterfaceDeclaration entityClass,
                                                      FieldDeclaration field,
@@ -336,7 +514,8 @@ public class RelationshipDecoupler {
             Optional<String> generic = extractGenericTypeName(var.getType());
             if (generic.isPresent() && remoteEntities.contains(generic.get())) {
                 field.remove();
-                entityClass.addOrphanComment(new LineComment(" Removed remote relationship list: " + generic.get()));
+                entityClass.addOrphanComment(
+                        new LineComment(" Removed remote relationship list: " + generic.get()));
                 modified = true;
             }
         }
@@ -344,39 +523,102 @@ public class RelationshipDecoupler {
     }
 
     /**
-     * Updates getter and setter signatures and bodies to match renamed ID fields.
+     * Converts a remote {@code @ManyToMany List<Course> courses} field to
+     * {@code @ElementCollection List<String> courseIds}.
+     *
+     * <p>Side effects:
+     * <ul>
+     *   <li>Adds old field name to {@code fieldRenameMap} and {@code collectionIdFields}</li>
+     *   <li>Adds {@code jakarta.persistence.ElementCollection} import to the CU</li>
+     *   <li>Adds {@code java.util.List} import to the CU (if not already present)</li>
+     * </ul>
      */
-    private boolean updateEntityAccessors(ClassOrInterfaceDeclaration entityClass, Map<String, String> renameMap) {
+    private boolean convertRemoteManyToManyCollection(ClassOrInterfaceDeclaration entityClass,
+                                                       FieldDeclaration field,
+                                                       Set<String> remoteEntities,
+                                                       Map<String, String> fieldRenameMap,
+                                                       Set<String> collectionIdFields) {
+        boolean modified = false;
+
+        for (VariableDeclarator var : field.getVariables()) {
+            Optional<String> generic = extractGenericTypeName(var.getType());
+            if (generic.isEmpty() || !remoteEntities.contains(generic.get())) continue;
+
+            String oldFieldName = var.getNameAsString();       // e.g. "courses"
+            String newFieldName = toIdsFieldName(oldFieldName); // e.g. "courseIds"
+
+            // Change List<Course> → List<String>
+            var.setType(listOfString());
+
+            if (!oldFieldName.equals(newFieldName)) {
+                var.setName(newFieldName);
+                fieldRenameMap.put(oldFieldName, newFieldName);
+                collectionIdFields.add(oldFieldName);
+            }
+
+            // Remove @ManyToMany / @JoinTable; replace with @ElementCollection
+            removeAnnotationsByName(field, Set.of(MANY_TO_MANY, "JoinTable"));
+            field.addAnnotation(new MarkerAnnotationExpr("ElementCollection"));
+
+            // Ensure the required imports exist
+            entityClass.findCompilationUnit().ifPresent(cu -> {
+                ensureImport(cu, "jakarta.persistence.ElementCollection");
+                ensureImport(cu, "java.util.List");
+            });
+
+            entityClass.addOrphanComment(new LineComment(
+                    " Decoupled cross-service ManyToMany: " + generic.get()
+                            + " replaced by ElementCollection " + newFieldName));
+            modified = true;
+        }
+        return modified;
+    }
+
+    /**
+     * Updates getter and setter signatures and bodies to match renamed ID fields.
+     *
+     * @param collectionIdFields set of OLD field names that were widened to {@code List<String>}
+     *                           (former {@code @ManyToMany} fields).  These get
+     *                           {@code List<String>} as their accessor type instead of
+     *                           {@code String}.
+     */
+    private boolean updateEntityAccessors(ClassOrInterfaceDeclaration entityClass,
+                                          Map<String, String> renameMap,
+                                          Set<String> collectionIdFields) {
         boolean modified = false;
 
         for (MethodDeclaration m : entityClass.getMethods()) {
-            // Update Getter
+
+            // --- Getter ---
             if (m.getParameters().isEmpty() && m.getNameAsString().startsWith("get")) {
                 String suffix = m.getNameAsString().substring(3);
                 if (suffix.isEmpty()) continue;
 
                 String guessedField = lowerFirst(suffix);
                 if (renameMap.containsKey(guessedField)) {
-                    String newField = renameMap.get(guessedField);
-                    m.setType("String");
+                    String newField    = renameMap.get(guessedField);
+                    boolean isList     = collectionIdFields.contains(guessedField);
+
+                    m.setType(isList ? listOfString() : new ClassOrInterfaceType(null, "String"));
                     m.setName("get" + upperFirst(newField));
 
-                    m.findAll(ReturnStmt.class).forEach(r -> {
-                        r.getExpression().ifPresent(expr -> {
-                            if (expr.isNameExpr() && expr.asNameExpr().getNameAsString().equals(guessedField)) {
-                                r.setExpression(new NameExpr(newField));
-                            }
-                            if (expr.isFieldAccessExpr() && expr.asFieldAccessExpr().getNameAsString().equals(guessedField)) {
-                                expr.asFieldAccessExpr().setName(newField);
-                            }
-                        });
-                    });
+                    m.findAll(ReturnStmt.class).forEach(r ->
+                            r.getExpression().ifPresent(expr -> {
+                                if (expr.isNameExpr()
+                                        && expr.asNameExpr().getNameAsString().equals(guessedField)) {
+                                    r.setExpression(new NameExpr(newField));
+                                }
+                                if (expr.isFieldAccessExpr()
+                                        && expr.asFieldAccessExpr().getNameAsString().equals(guessedField)) {
+                                    expr.asFieldAccessExpr().setName(newField);
+                                }
+                            }));
 
                     modified = true;
                 }
             }
 
-            // Update Setter
+            // --- Setter ---
             if (m.getNameAsString().startsWith("set") && m.getParameters().size() == 1) {
                 String suffix = m.getNameAsString().substring(3);
                 if (suffix.isEmpty()) continue;
@@ -384,26 +626,25 @@ public class RelationshipDecoupler {
                 String guessedField = lowerFirst(suffix);
                 if (renameMap.containsKey(guessedField)) {
                     String newField = renameMap.get(guessedField);
+                    boolean isList  = collectionIdFields.contains(guessedField);
 
                     m.setName("set" + upperFirst(newField));
-                    m.getParameter(0).setType("String");
+                    m.getParameter(0).setType(isList ? listOfString() : new ClassOrInterfaceType(null, "String"));
                     m.getParameter(0).setName(newField);
 
                     m.findAll(AssignExpr.class).forEach(a -> {
                         Expression target = a.getTarget();
                         if (target.isFieldAccessExpr()) {
                             FieldAccessExpr fa = target.asFieldAccessExpr();
-                            if (fa.getNameAsString().equals(guessedField)) {
-                                fa.setName(newField);
-                            }
-                        } else if (target.isNameExpr()) {
-                            if (target.asNameExpr().getNameAsString().equals(guessedField)) {
-                                a.setTarget(new NameExpr(newField));
-                            }
+                            if (fa.getNameAsString().equals(guessedField)) fa.setName(newField);
+                        } else if (target.isNameExpr()
+                                && target.asNameExpr().getNameAsString().equals(guessedField)) {
+                            a.setTarget(new NameExpr(newField));
                         }
 
                         Expression value = a.getValue();
-                        if (value.isNameExpr() && value.asNameExpr().getNameAsString().equals(guessedField)) {
+                        if (value.isNameExpr()
+                                && value.asNameExpr().getNameAsString().equals(guessedField)) {
                             a.setValue(new NameExpr(newField));
                         }
                     });
@@ -417,9 +658,10 @@ public class RelationshipDecoupler {
     }
 
     /**
-     * Updates internal field references (this.field -> this.fieldId).
+     * Updates internal field references ({@code this.field → this.fieldId}).
      */
-    private boolean renameFieldReferences(ClassOrInterfaceDeclaration entityClass, Map<String, String> renameMap) {
+    private boolean renameFieldReferences(ClassOrInterfaceDeclaration entityClass,
+                                          Map<String, String> renameMap) {
         boolean modified = false;
 
         for (NameExpr ne : entityClass.findAll(NameExpr.class)) {
@@ -441,33 +683,44 @@ public class RelationshipDecoupler {
         return modified;
     }
 
+    // =========================================================================
+    // Service logic transformation
+    // =========================================================================
+
     /**
      * Updates service logic to handle ID fields instead of object references.
-     * Handles variable instantiation, setId calls, and setEntity calls.
+     * Handles variable instantiation, setId calls, setter calls, old collection
+     * getter renames, and chained access warnings.
+     *
+     * @param collectionGetterRenames map of {@code oldGetterName → newGetterName} derived from
+     *                                the entity pre-pass (e.g. {@code "getCourses" → "getCourseIds"})
      */
     private boolean transformServiceLogic(CompilationUnit cu,
                                           Set<String> remoteEntities,
-                                          RequestInfoIndex requestIndex) {
+                                          RequestInfoIndex requestIndex,
+                                          Map<String, String> collectionGetterRenames) {
         boolean modified = false;
 
         for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
+            // Step 0: Remove method parameters whose type is a cross-module entity.
+            // e.g. createBudget(Request r, Tag primaryTag, List<Tag> tags)
+            //   → createBudget(Request r)  (Tag params stripped, body fixed)
+            modified |= stripRemoteEntityMethodParams(method, remoteEntities);
+
             Set<String> localNames = new HashSet<>();
             Map<String, String> remoteVarToIdVar = new HashMap<>();
-            // Vars that hold remote entities returned from service calls — keep as objects,
-            // but setter calls on them need to be rewritten to use .getId()
+            // Vars holding remote entities returned from service calls — kept as objects
             Set<String> remoteEntityServiceVars = new HashSet<>();
 
             method.getParameters().forEach(p -> localNames.add(p.getNameAsString()));
 
-            // 1) Update local variable declarations (Entity e -> String eId)
-            //    Skip vars initialized from method calls — those are service call results
-            //    that should remain as entity objects, not be demoted to String IDs.
+            // Step 1: Update local variable declarations (Entity e → String eId)
+            // Skip vars initialised from method calls — those are service-call results.
             for (VariableDeclarator vd : method.findAll(VariableDeclarator.class)) {
                 String typeName = simpleTypeName(vd.getType());
                 if (typeName == null || !remoteEntities.contains(typeName)) continue;
 
                 if (vd.getInitializer().isPresent() && vd.getInitializer().get().isMethodCallExpr()) {
-                    // e.g. Payment payment = paymentService.processPayment(...) — keep as entity
                     remoteEntityServiceVars.add(vd.getNameAsString());
                     continue;
                 }
@@ -488,11 +741,10 @@ public class RelationshipDecoupler {
 
                 remoteVarToIdVar.put(oldName, newName);
                 localNames.add(newName);
-
                 modified = true;
             }
 
-            // 2) Update setId calls (e.setId(x) -> eId = x)
+            // Step 2: Update setId calls (e.setId(x) → eId = x)
             for (MethodCallExpr call : method.findAll(MethodCallExpr.class)) {
                 if (call.getScope().isEmpty()) continue;
                 if (!call.getNameAsString().equals("setId")) continue;
@@ -505,7 +757,8 @@ public class RelationshipDecoupler {
                 if (!remoteVarToIdVar.containsKey(varName)) continue;
 
                 String idVar = remoteVarToIdVar.get(varName);
-                AssignExpr assign = new AssignExpr(new NameExpr(idVar), call.getArgument(0), AssignExpr.Operator.ASSIGN);
+                AssignExpr assign = new AssignExpr(
+                        new NameExpr(idVar), call.getArgument(0), AssignExpr.Operator.ASSIGN);
 
                 Optional<Statement> stmtOpt = call.findAncestor(Statement.class);
                 if (stmtOpt.isPresent() && stmtOpt.get().isExpressionStmt()) {
@@ -514,7 +767,7 @@ public class RelationshipDecoupler {
                 }
             }
 
-            // 3) Update setter calls (setEntity(e) -> setEntityId(eId) or setEntityId(request.getId()))
+            // Step 3: Update setter calls (setEntity(e) → setEntityId(eId) / setEntityId(req.getId()))
             for (MethodCallExpr call : method.findAll(MethodCallExpr.class)) {
                 if (!call.getNameAsString().startsWith("set")) continue;
                 if (call.getArguments().size() != 1) continue;
@@ -527,18 +780,17 @@ public class RelationshipDecoupler {
                 // Case A: Variable was renamed locally
                 if (remoteVarToIdVar.containsKey(argName)) {
                     String idVar = remoteVarToIdVar.get(argName);
-
                     if (!call.getNameAsString().endsWith("Id")) {
                         call.setName(call.getNameAsString() + "Id");
                     }
-
                     call.setArgument(0, new NameExpr(idVar));
                     modified = true;
                     continue;
                 }
 
                 // Case B: Try to resolve ID from Request object
-                Optional<Expression> requestAccessor = tryBuildRequestIdAccessor(method, call.getNameAsString(), requestIndex);
+                Optional<Expression> requestAccessor =
+                        tryBuildRequestIdAccessor(method, call.getNameAsString(), requestIndex);
                 if (requestAccessor.isPresent()) {
                     if (!call.getNameAsString().endsWith("Id")) {
                         call.setName(call.getNameAsString() + "Id");
@@ -549,9 +801,7 @@ public class RelationshipDecoupler {
                 }
 
                 // Case C: Variable holds a remote entity returned from a service call.
-                // Rename setter to *Id and convert the entity's Long @Id to String.
-                // e.g. order.setPayment(payment) → order.setPaymentId(String.valueOf(payment.getId()))
-                // String.valueOf() is used (vs .toString()) to avoid NPE on null IDs.
+                // Rename setter to *Id and convert .getId() to String.
                 if (remoteEntityServiceVars.contains(argName)) {
                     if (!call.getNameAsString().endsWith("Id")) {
                         call.setName(call.getNameAsString() + "Id");
@@ -562,19 +812,316 @@ public class RelationshipDecoupler {
                     modified = true;
                 }
             }
+
+            // Step 4: Rename old collection getters (getCourses → getCourseIds) and warn
+            //         on any complex chain that accesses entity properties via the renamed getter.
+            if (!collectionGetterRenames.isEmpty()) {
+                final boolean[] step4Modified = {false};
+
+                for (MethodCallExpr call : new ArrayList<>(method.findAll(MethodCallExpr.class))) {
+                    String callName = call.getNameAsString();
+                    if (!collectionGetterRenames.containsKey(callName)) continue;
+
+                    String newGetterName = collectionGetterRenames.get(callName);
+                    call.setName(newGetterName);
+                    step4Modified[0] = true;
+
+                    // If this renamed call is the scope of an outer chained call, the chain
+                    // now accesses List<String> items rather than entity objects → warn developer.
+                    call.getParentNode().ifPresent(parent -> {
+                        if (parent instanceof MethodCallExpr outerCall
+                                && outerCall.getScope().map(s -> s == call).orElse(false)) {
+                            call.findAncestor(Statement.class).ifPresent(stmt -> {
+                                if (stmt.getComment().isEmpty()) {
+                                    stmt.setComment(new LineComment(
+                                            " [FractalX] DECOUPLING WARNING: " + newGetterName
+                                                    + "() returns List<String>."
+                                                    + " This chain accesses remote entity properties"
+                                                    + " that no longer exist here."
+                                                    + " Rewrite using a remote service lookup."));
+                                }
+                            });
+                        }
+                    });
+                }
+
+                modified |= step4Modified[0];
+            }
+        }
+
+        return modified;
+    }
+
+    // =========================================================================
+    // Remote entity method-parameter stripping
+    // =========================================================================
+
+    /**
+     * Removes method parameters whose declared type (or generic type argument) is a
+     * cross-module entity type, then fixes any body statements that still reference the
+     * removed parameter names.
+     *
+     * <p>Example:
+     * <pre>
+     *   createBudgetWithTag(Request r, Tag primaryTag, List&lt;Tag&gt; tags)
+     *   →  createBudgetWithTag(Request r)
+     *   budget.setTags(tags) → budget.setTagIds(new java.util.ArrayList&lt;&gt;())
+     * </pre>
+     */
+    private boolean stripRemoteEntityMethodParams(MethodDeclaration method,
+                                                  Set<String> remoteEntities) {
+        // Collect params whose base or generic type is a remote entity
+        Set<String> removedNames = new LinkedHashSet<>();
+        Map<String, Boolean> isListParam = new HashMap<>();
+
+        for (Parameter param : new ArrayList<>(method.getParameters())) {
+            String base = simpleTypeName(param.getType());
+            boolean directMatch = base != null && remoteEntities.contains(base);
+            boolean genericMatch = !directMatch
+                    && extractGenericTypeName(param.getType())
+                               .map(remoteEntities::contains).orElse(false);
+            if (directMatch || genericMatch) {
+                removedNames.add(param.getNameAsString());
+                isListParam.put(param.getNameAsString(), genericMatch);
+                method.getParameters().remove(param);
+            }
+        }
+
+        if (removedNames.isEmpty()) return false;
+        if (method.getBody().isEmpty()) return true;
+
+        BlockStmt body = method.getBody().get();
+
+        for (Statement stmt : new ArrayList<>(body.getStatements())) {
+            boolean refsRemovedParam = stmt.findAll(NameExpr.class).stream()
+                    .map(NameExpr::getNameAsString)
+                    .anyMatch(removedNames::contains);
+            if (!refsRemovedParam) continue;
+
+            if (!stmt.isExpressionStmt()) {
+                body.getStatements().remove(stmt);
+                continue;
+            }
+
+            Expression expr = stmt.asExpressionStmt().getExpression();
+            if (!expr.isMethodCallExpr()) {
+                body.getStatements().remove(stmt);
+                continue;
+            }
+
+            MethodCallExpr call = expr.asMethodCallExpr();
+            String callName = call.getNameAsString();
+
+            // Setter call with removed param as argument
+            if (callName.startsWith("set") && call.getArguments().size() == 1
+                    && call.getArgument(0).isNameExpr()
+                    && removedNames.contains(call.getArgument(0).asNameExpr().getNameAsString())) {
+                String paramName = call.getArgument(0).asNameExpr().getNameAsString();
+                if (isListParam.getOrDefault(paramName, false)) {
+                    // List<RemoteEntity> param: setFoo(listParam) → setFooIds(new ArrayList<>())
+                    // Use entity naming convention to derive the correct id-list setter name.
+                    String suffix      = callName.substring(3);              // "Tags"
+                    String idFieldName = toIdsFieldName(lowerFirst(suffix)); // "tagIds"
+                    call.setName("set" + upperFirst(idFieldName));           // "setTagIds"
+                    call.setArgument(0, new ObjectCreationExpr(null,
+                            new ClassOrInterfaceType(null, "java.util.ArrayList"),
+                            new NodeList<>()));
+                }
+                // Singular entity param: leave the statement so Step 3 Case B can rewrite
+                // setFoo(param) → setFooId(request.getFooId()).
+                continue;
+            }
+
+            // Log call: drop the removed-param arguments (dangling {} in format string is harmless)
+            if (callName.equals("info") || callName.equals("debug")
+                    || callName.equals("warn") || callName.equals("error")) {
+                for (int i = call.getArguments().size() - 1; i >= 1; i--) {
+                    Expression arg = call.getArgument(i);
+                    if (arg.isNameExpr()
+                            && removedNames.contains(arg.asNameExpr().getNameAsString())) {
+                        call.getArguments().remove(i);
+                    }
+                }
+                continue;
+            }
+
+            // Any other statement referencing a removed param — remove it
+            body.getStatements().remove(stmt);
+        }
+
+        return true;
+    }
+
+    // ReferenceValidator injection into @Service classes
+    // =========================================================================
+
+    /**
+     * Injects a {@code ReferenceValidator} field, constructor parameter, and pre-save
+     * validation calls into any {@code @Service} class found in {@code cu}.
+     *
+     * <p>Skips injection when {@code entityRemoteIdFields} is empty (no remote relationships
+     * exist) or when the class already carries a {@code referenceValidator} field (idempotent).
+     */
+    private boolean injectReferenceValidatorUsage(CompilationUnit cu,
+                                                   Map<String, RemoteFieldInfo> entityRemoteIdFields,
+                                                   FractalModule module) {
+        if (entityRemoteIdFields.isEmpty() || module.getDependencies().isEmpty()) return false;
+
+        boolean modified = false;
+
+        String validationPackage = "org.fractalx.generated."
+                + module.getServiceName().replace("-", "") + ".validation";
+
+        for (ClassOrInterfaceDeclaration svcClass : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (svcClass.isInterface()) continue;
+            if (!hasAnnotation(svcClass, "Service")) continue;
+
+            // Idempotency guard
+            boolean alreadyInjected = svcClass.getFields().stream()
+                    .anyMatch(f -> f.getElementType().asString().equals("ReferenceValidator"));
+            if (alreadyInjected) continue;
+
+            // 1. Add private final field
+            svcClass.addField("ReferenceValidator", "referenceValidator",
+                    Modifier.Keyword.PRIVATE, Modifier.Keyword.FINAL);
+
+            // 2. Import
+            ensureImport(cu, validationPackage + ".ReferenceValidator");
+
+            // 3. Update constructor (or create one if none exist and no Lombok ctor annotation)
+            List<ConstructorDeclaration> ctors = svcClass.getConstructors();
+            if (!ctors.isEmpty()) {
+                ConstructorDeclaration ctor = ctors.get(0);
+                ctor.addParameter(new Parameter(
+                        new ClassOrInterfaceType(null, "ReferenceValidator"), "referenceValidator"));
+                ctor.getBody().addStatement(new ExpressionStmt(new AssignExpr(
+                        new FieldAccessExpr(new ThisExpr(), "referenceValidator"),
+                        new NameExpr("referenceValidator"),
+                        AssignExpr.Operator.ASSIGN)));
+            } else if (!hasAnnotation(svcClass, "RequiredArgsConstructor")
+                    && !hasAnnotation(svcClass, "AllArgsConstructor")) {
+                // No constructor and no Lombok — generate a minimal one
+                ConstructorDeclaration ctor = svcClass.addConstructor(Modifier.Keyword.PUBLIC);
+                ctor.addParameter(new Parameter(
+                        new ClassOrInterfaceType(null, "ReferenceValidator"), "referenceValidator"));
+                ctor.getBody().addStatement(new ExpressionStmt(new AssignExpr(
+                        new FieldAccessExpr(new ThisExpr(), "referenceValidator"),
+                        new NameExpr("referenceValidator"),
+                        AssignExpr.Operator.ASSIGN)));
+            }
+            // If @RequiredArgsConstructor / @AllArgsConstructor: the added final field is enough.
+
+            // 4. Inject validation calls before repository.save() in service methods
+            for (MethodDeclaration method : svcClass.getMethods()) {
+                modified |= injectValidationBeforeSave(method, entityRemoteIdFields);
+            }
+
+            modified = true;
         }
 
         return modified;
     }
 
     /**
-     * Attempts to build an ID accessor (e.g. request.getCustomerId()) based on the setter name and request type.
+     * For each {@code repository.save(entityVar)} call in {@code method}, inserts
+     * {@code referenceValidator.validateXExists(entityVar.getXId())} statements
+     * (and the collection variant) immediately before the save statement.
+     *
+     * <p>Uses {@link ValidationNaming} to derive method names so they are guaranteed to
+     * match what {@link ReferenceValidatorGenerator} generates in the validator bean.
+     */
+    private boolean injectValidationBeforeSave(MethodDeclaration method,
+                                               Map<String, RemoteFieldInfo> entityRemoteIdFields) {
+        boolean modified = false;
+
+        for (MethodCallExpr saveCall : new ArrayList<>(method.findAll(MethodCallExpr.class))) {
+            if (!saveCall.getNameAsString().equals("save")) continue;
+            if (saveCall.getArguments().size() != 1) continue;
+
+            Expression arg = saveCall.getArgument(0);
+            if (!arg.isNameExpr()) continue;
+
+            String entityVarName = arg.asNameExpr().getNameAsString();
+
+            // Resolve the declared type of the entity variable within this method scope
+            String entityType = null;
+            for (VariableDeclarator vd : method.findAll(VariableDeclarator.class)) {
+                if (vd.getNameAsString().equals(entityVarName)) {
+                    entityType = simpleTypeName(vd.getType());
+                    break;
+                }
+            }
+            if (entityType == null) continue;
+
+            RemoteFieldInfo info = entityRemoteIdFields.get(entityType);
+            if (info == null || info.isEmpty()) continue;
+
+            Optional<Statement> stmtOpt = saveCall.findAncestor(Statement.class);
+            if (stmtOpt.isEmpty()) continue;
+            Statement saveStmt = stmtOpt.get();
+
+            Optional<BlockStmt> blockOpt = saveStmt.findAncestor(BlockStmt.class);
+            if (blockOpt.isEmpty()) continue;
+            BlockStmt block = blockOpt.get();
+
+            NodeList<Statement> stmts = block.getStatements();
+            int saveIdx = -1;
+            for (int i = 0; i < stmts.size(); i++) {
+                if (stmts.get(i) == saveStmt) { saveIdx = i; break; }
+            }
+            if (saveIdx < 0) continue;
+
+            List<Statement> validateStmts = new ArrayList<>();
+
+            // Singular: referenceValidator.validatePaymentExists(entity.getPaymentId())
+            for (Map.Entry<String, String> entry : info.singleTypeToIdField.entrySet()) {
+                String type      = entry.getKey();   // "Payment"
+                String idField   = entry.getValue(); // "paymentId"
+                MethodCallExpr getter   = new MethodCallExpr(
+                        new NameExpr(entityVarName), "get" + upperFirst(idField));
+                MethodCallExpr validate = new MethodCallExpr(
+                        new NameExpr("referenceValidator"),
+                        ValidationNaming.singleValidateMethod(type),   // shared utility
+                        new NodeList<>(getter));
+                validateStmts.add(new ExpressionStmt(validate));
+            }
+
+            // Collection: referenceValidator.validateAllCourseExist(entity.getCourseIds())
+            for (Map.Entry<String, String> entry : info.collectionTypeToIdsField.entrySet()) {
+                String type     = entry.getKey();    // "Course"
+                String idsField = entry.getValue();  // "courseIds"
+                MethodCallExpr getter   = new MethodCallExpr(
+                        new NameExpr(entityVarName), "get" + upperFirst(idsField));
+                MethodCallExpr validate = new MethodCallExpr(
+                        new NameExpr("referenceValidator"),
+                        ValidationNaming.collectionValidateMethod(type), // shared utility
+                        new NodeList<>(getter));
+                validateStmts.add(new ExpressionStmt(validate));
+            }
+
+            for (int i = 0; i < validateStmts.size(); i++) {
+                stmts.add(saveIdx + i, validateStmts.get(i));
+            }
+
+            if (!validateStmts.isEmpty()) modified = true;
+        }
+
+        return modified;
+    }
+
+    // =========================================================================
+    // Request accessor helper
+    // =========================================================================
+
+    /**
+     * Attempts to build an ID accessor (e.g. {@code request.getCustomerId()}) based on
+     * the setter name and request type.
      */
     private Optional<Expression> tryBuildRequestIdAccessor(MethodDeclaration method,
-                                                           String setterName,
-                                                           RequestInfoIndex requestIndex) {
+                                                            String setterName,
+                                                            RequestInfoIndex requestIndex) {
         if (!setterName.startsWith("set") || setterName.length() <= 3) return Optional.empty();
-        String base = lowerFirst(setterName.substring(3));
+        String base   = lowerFirst(setterName.substring(3));
         String idName = base.endsWith("Id") ? base : base + "Id";
 
         Optional<Parameter> requestParamOpt = method.getParameters().stream()
@@ -582,8 +1129,7 @@ public class RelationshipDecoupler {
                 .findFirst();
         if (requestParamOpt.isEmpty()) return Optional.empty();
 
-        Parameter requestParam = requestParamOpt.get();
-        String requestType = simpleTypeName(requestParam.getType());
+        String requestType = simpleTypeName(requestParamOpt.get().getType());
         if (requestType == null) return Optional.empty();
 
         RequestInfo info = requestIndex.requestInfo.get(requestType);
@@ -596,28 +1142,36 @@ public class RelationshipDecoupler {
         } else {
             String getter = "get" + upperFirst(idName);
             if (info.pojoGetters.contains(getter)) {
-                return Optional.of(new MethodCallExpr(new NameExpr("request"), getter));
+                MethodCallExpr getterCall = new MethodCallExpr(new NameExpr("request"), getter);
+                // If the DTO field type is not String, the converted entity ID field (String) would
+                // cause a type mismatch. Wrap with String.valueOf() to coerce safely.
+                String fieldType = info.getterTypes.get(getter);
+                if (fieldType != null && !fieldType.equals("String")) {
+                    return Optional.of(new MethodCallExpr(new NameExpr("String"), "valueOf",
+                            new NodeList<>(getterCall)));
+                }
+                return Optional.of(getterCall);
             }
         }
 
         return Optional.empty();
     }
 
+    // =========================================================================
+    // Import cleanup
+    // =========================================================================
+
     /**
      * Removes imports for remote entity types that are no longer referenced in the file.
      *
-     * <p>This must run after all AST transformations so that the reference check reflects
-     * the final state of the file. Types that are still used (e.g. a {@code Payment}
-     * variable returned from a service call) retain their import; types whose fields
-     * were converted to String IDs lose theirs.
+     * <p>Must run after all AST transformations so the reference check reflects the
+     * final state of the file.
      */
     private boolean removeRemoteImports(CompilationUnit cu, Set<String> remoteEntities) {
         boolean modified = false;
 
-        // Collect every ClassOrInterfaceType still present after transformation
         Set<String> stillReferenced = new HashSet<>();
-        cu.findAll(ClassOrInterfaceType.class)
-                .forEach(t -> stillReferenced.add(t.getNameAsString()));
+        cu.findAll(ClassOrInterfaceType.class).forEach(t -> stillReferenced.add(t.getNameAsString()));
 
         List<ImportDeclaration> toRemove = new ArrayList<>();
         for (ImportDeclaration imp : cu.getImports()) {
@@ -634,9 +1188,9 @@ public class RelationshipDecoupler {
         return modified;
     }
 
-    // ------------------------------------------------------------
-    // Utility Methods
-    // ------------------------------------------------------------
+    // =========================================================================
+    // Utility methods
+    // =========================================================================
 
     private boolean hasAnnotation(NodeWithAnnotations<?> node, String annoSimpleName) {
         return node.getAnnotations().stream()
@@ -651,16 +1205,14 @@ public class RelationshipDecoupler {
     }
 
     private void removeAnnotationsByName(NodeWithAnnotations<?> node, Set<String> annoNames) {
-        NodeList<AnnotationExpr> anns = node.getAnnotations();
-        anns.removeIf(a -> annoNames.contains(a.getNameAsString()));
+        node.getAnnotations().removeIf(a -> annoNames.contains(a.getNameAsString()));
     }
 
     private String simpleTypeName(Type t) {
         if (t.isPrimitiveType()) return null;
         if (t.isArrayType()) return simpleTypeName(t.asArrayType().getComponentType());
         if (t.isClassOrInterfaceType()) {
-            ClassOrInterfaceType ct = t.asClassOrInterfaceType();
-            return ct.getName().getIdentifier();
+            return t.asClassOrInterfaceType().getName().getIdentifier();
         }
         return t.asString();
     }
@@ -673,6 +1225,34 @@ public class RelationshipDecoupler {
         if (args.isEmpty()) return Optional.empty();
         String name = simpleTypeName(args.get(0));
         return Optional.ofNullable(name);
+    }
+
+    /**
+     * Converts a plural collection field name to its decoupled ID-list name.
+     * <p>Examples: {@code "courses" → "courseIds"}, {@code "products" → "productIds"},
+     * {@code "aliases" → "aliasIds"} (ends in 'ses' → strip 's', add 'Ids').
+     */
+    private String toIdsFieldName(String fieldName) {
+        if (fieldName.endsWith("s") && !fieldName.endsWith("ss") && fieldName.length() > 1) {
+            return fieldName.substring(0, fieldName.length() - 1) + "Ids";
+        }
+        return fieldName + "Ids";
+    }
+
+    /** Returns a {@code List<String>} type node for use in setType() calls. */
+    private static ClassOrInterfaceType listOfString() {
+        return new ClassOrInterfaceType(null, "List")
+                .setTypeArguments(new ClassOrInterfaceType(null, "String"));
+    }
+
+    /** Adds the given fully-qualified import to {@code cu} if not already present. */
+    private void ensureImport(CompilationUnit cu, String fqn) {
+        if (cu == null) return;
+        boolean present = cu.getImports().stream()
+                .anyMatch(imp -> imp.getNameAsString().equals(fqn));
+        if (!present) {
+            cu.addImport(fqn);
+        }
     }
 
     private String lowerFirst(String s) {

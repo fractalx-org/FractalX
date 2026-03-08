@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Central orchestrator for applying distributed systems capabilities to each
@@ -62,7 +63,11 @@ public class DistributedServiceHelper {
         log.info("⚡ [Distributed] Applying distributed features to {}...", module.getServiceName());
 
         // 1. Enforce data isolation (dual-package @EntityScan + @EnableJpaRepositories)
-        isolationGen.generateIsolationConfig(module, srcMainJava);
+        if (hasJpaContent(module)) {
+            isolationGen.generateIsolationConfig(module, srcMainJava);
+        } else {
+            log.info("   ⏭ No JPA entities in {} — skipping IsolationConfig", module.getServiceName());
+        }
 
         // 2. Detect & apply database configuration (fractalx-config.yml → application.yml)
         String driverClass = dbConfigGen.generateDbConfig(module, sourceRoot, srcMainResources);
@@ -82,8 +87,10 @@ public class DistributedServiceHelper {
         flywayGen.generateMigration(module, serviceRoot);
 
         // 5. Generate transactional outbox (for services with cross-module deps or sagas)
-        if (!module.getDependencies().isEmpty()) {
+        if (hasJpaContent(module) && !module.getDependencies().isEmpty()) {
             outboxGen.generateOutbox(module, serviceRoot, sagaDefinitions);
+        } else if (!module.getDependencies().isEmpty()) {
+            log.info("   ⏭ No JPA entities in {} — skipping Outbox (no DB to persist events)", module.getServiceName());
         }
 
         // 6. Generate reference validators for decoupled foreign keys
@@ -92,6 +99,20 @@ public class DistributedServiceHelper {
         // 7. Generate DATA_README.md
         dataReadmeGen.generateServiceDataReadme(module, serviceRoot, driverClass, sagaDefinitions);
 
+        // 8. Provision any implied dependencies detected in the fully-generated source
+        //    (e.g. Lombok, jakarta.validation copied with model classes from other modules)
+        dependencyManager.provisionImpliedDependencies(module, serviceRoot);
+
         log.info("   ✓ [Distributed] Upgrade complete for {}", module.getServiceName());
+    }
+
+    private boolean hasJpaContent(FractalModule module) {
+        Set<String> imports = module.getDetectedImports();
+        if (imports == null || imports.isEmpty()) return false;
+        return imports.stream().anyMatch(i ->
+                i.startsWith("jakarta.persistence") ||
+                i.startsWith("javax.persistence") ||
+                i.startsWith("org.springframework.data.jpa") ||
+                i.startsWith("org.springframework.data.repository"));
     }
 }
