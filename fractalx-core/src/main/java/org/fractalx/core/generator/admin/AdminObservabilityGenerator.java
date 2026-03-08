@@ -750,12 +750,36 @@ class AdminObservabilityGenerator {
                                     && (service == null || service.isBlank())) {
                                 return searchByCorrelationAcrossAllServices(correlationId, limit);
                             }
-                            StringBuilder url = new StringBuilder(jaegerQueryUrl + "/api/traces?limit=" + limit);
-                            if (service != null && !service.isBlank()) url.append("&service=").append(service);
-                            if (correlationId != null && !correlationId.isBlank()) {
-                                String tagsJson = "{\\"correlation.id\\":\\"" + correlationId.replace("\\"", "") + "\\"}";
-                                url.append("&tags=").append(java.net.URLEncoder.encode(tagsJson, java.nio.charset.StandardCharsets.UTF_8));
+                            // Single-service search: try Jaeger tag search, fall back to in-memory scan
+                            if (correlationId != null && !correlationId.isBlank()
+                                    && service != null && !service.isBlank()) {
+                                String tagsJson = "{\\"correlationId\\":\\"" + correlationId.replace("\\"", "") + "\\"}";
+                                String tagUrl = jaegerQueryUrl + "/api/traces?limit=" + limit + "&lookback=168h"
+                                        + "&service=" + java.net.URLEncoder.encode(service, java.nio.charset.StandardCharsets.UTF_8)
+                                        + "&tags=" + java.net.URLEncoder.encode(tagsJson, java.nio.charset.StandardCharsets.UTF_8);
+                                Map<?, ?> tagResult = rest.getForObject(tagUrl, Map.class);
+                                List<?> tagData = (tagResult != null && tagResult.get("data") instanceof List<?>)
+                                        ? (List<?>) tagResult.get("data") : List.of();
+                                if (!tagData.isEmpty()) {
+                                    return ResponseEntity.ok(tagResult);
+                                }
+                                // Fallback: fetch all traces for this service and filter in memory
+                                String allUrl = jaegerQueryUrl + "/api/traces?limit=" + limit + "&lookback=168h"
+                                        + "&service=" + java.net.URLEncoder.encode(service, java.nio.charset.StandardCharsets.UTF_8);
+                                Map<?, ?> allResult = rest.getForObject(allUrl, Map.class);
+                                if (allResult != null && allResult.get("data") instanceof List<?> allData) {
+                                    List<Object> filtered = new java.util.ArrayList<>();
+                                    for (Object t : allData) {
+                                        if (t instanceof Map<?, ?> tm && spanTagMatchesCorrelationId(tm, correlationId)) {
+                                            filtered.add(t);
+                                        }
+                                    }
+                                    return ResponseEntity.ok(Map.of("data", filtered));
+                                }
+                                return ResponseEntity.ok(Map.of("data", List.of()));
                             }
+                            StringBuilder url = new StringBuilder(jaegerQueryUrl + "/api/traces?limit=" + limit + "&lookback=168h");
+                            if (service != null && !service.isBlank()) url.append("&service=").append(service);
                             return ResponseEntity.ok(rest.getForObject(url.toString(), Object.class));
                         } catch (Exception e) {
                             return ResponseEntity.ok(Map.of("error", "Jaeger unavailable: " + e.getMessage()));
@@ -770,21 +794,42 @@ class AdminObservabilityGenerator {
                             List<String> services = svcResp != null && svcResp.get("data") instanceof List<?>
                                     ? (List<String>) svcResp.get("data") : List.of();
 
-                            // 2. Query each service for traces with this correlation ID
                             List<Object> merged = new java.util.ArrayList<>();
                             java.util.Set<String> seen = new java.util.HashSet<>();
                             for (String svc : services) {
                                 try {
-                                    String tagsJson = "{\\"correlation.id\\":\\"" + correlationId.replace("\\"", "") + "\\"}";
-                                    String url = jaegerQueryUrl + "/api/traces?service=" + svc
+                                    // 2a. Try Jaeger tag-index search first (fast path)
+                                    String tagsJson = "{\\"correlationId\\":\\"" + correlationId.replace("\\"", "") + "\\"}";
+                                    String tagUrl = jaegerQueryUrl + "/api/traces?service="
+                                            + java.net.URLEncoder.encode(svc, java.nio.charset.StandardCharsets.UTF_8)
                                             + "&tags=" + java.net.URLEncoder.encode(tagsJson, java.nio.charset.StandardCharsets.UTF_8)
-                                            + "&limit=" + limit;
-                                    Map<String, Object> result = rest.getForObject(url, Map.class);
-                                    if (result != null && result.get("data") instanceof List<?> data) {
-                                        for (Object trace : data) {
+                                            + "&limit=" + limit + "&lookback=168h";
+                                    Map<String, Object> tagResult = rest.getForObject(tagUrl, Map.class);
+                                    List<?> tagData = (tagResult != null && tagResult.get("data") instanceof List<?>)
+                                            ? (List<?>) tagResult.get("data") : List.of();
+                                    if (!tagData.isEmpty()) {
+                                        for (Object trace : tagData) {
                                             if (trace instanceof Map<?, ?> t) {
                                                 String tid = String.valueOf(t.get("traceID"));
                                                 if (seen.add(tid)) merged.add(trace);
+                                            }
+                                        }
+                                    } else {
+                                        // 2b. Fallback: fetch all recent traces and scan span tags in memory.
+                                        // Needed when Jaeger tag indexing is disabled or hasn't indexed the tag yet.
+                                        String allUrl = jaegerQueryUrl + "/api/traces?service="
+                                                + java.net.URLEncoder.encode(svc, java.nio.charset.StandardCharsets.UTF_8)
+                                                + "&limit=" + limit + "&lookback=168h";
+                                        Map<String, Object> allResult = rest.getForObject(allUrl, Map.class);
+                                        if (allResult != null && allResult.get("data") instanceof List<?> allData) {
+                                            for (Object trace : allData) {
+                                                if (trace instanceof Map<?, ?> t) {
+                                                    String tid = String.valueOf(t.get("traceID"));
+                                                    if (!seen.contains(tid) && spanTagMatchesCorrelationId(t, correlationId)) {
+                                                        seen.add(tid);
+                                                        merged.add(trace);
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -794,6 +839,30 @@ class AdminObservabilityGenerator {
                         } catch (Exception e) {
                             return ResponseEntity.ok(Map.of("error", "Jaeger service list unavailable: " + e.getMessage()));
                         }
+                    }
+
+                    /** Scans all spans in a trace for a correlationId tag (any known key variant). */
+                    @SuppressWarnings("unchecked")
+                    private boolean spanTagMatchesCorrelationId(Map<?, ?> trace, String correlationId) {
+                        Object spans = trace.get("spans");
+                        if (!(spans instanceof List<?> spanList)) return false;
+                        for (Object span : spanList) {
+                            if (!(span instanceof Map<?, ?> spanMap)) continue;
+                            Object tags = spanMap.get("tags");
+                            if (!(tags instanceof List<?> tagList)) continue;
+                            for (Object tag : tagList) {
+                                if (!(tag instanceof Map<?, ?> tagMap)) continue;
+                                String key = String.valueOf(tagMap.get("key"));
+                                String val = String.valueOf(tagMap.get("value"));
+                                if (correlationId.equals(val)
+                                        && (key.equals("correlationId")
+                                         || key.equals("x-correlation-id")
+                                         || key.equals("correlation.id"))) {
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
                     }
 
                     @GetMapping("/traces/services")

@@ -1,9 +1,11 @@
 package org.fractalx.runtime;
 
 import io.grpc.*;
+import io.micrometer.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.stereotype.Component;
 
@@ -25,6 +27,9 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
     private static final String CORRELATION_ID_KEY = "correlationId";
     private static final Metadata.Key<String> CORRELATION_METADATA_KEY =
             Metadata.Key.of("x-correlation-id", Metadata.ASCII_STRING_MARSHALLER);
+
+    @Autowired(required = false)
+    private Tracer tracer;
 
     // ---- Client side: inject correlationId into outgoing gRPC metadata ----
 
@@ -70,6 +75,13 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
         // For unary calls, invokeMethod() is triggered inside onHalfClose().
         return new ForwardingServerCallListener.SimpleForwardingServerCallListener<>(delegate) {
 
+            private void tagCurrentSpan(String cid) {
+                if (tracer != null) {
+                    io.micrometer.tracing.Span span = tracer.currentSpan();
+                    if (span != null) span.tag(CORRELATION_ID_KEY, cid);
+                }
+            }
+
             @Override
             public void onMessage(ReqT message) {
                 MDC.put(CORRELATION_ID_KEY, cid);
@@ -83,6 +95,7 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
             @Override
             public void onHalfClose() {
                 MDC.put(CORRELATION_ID_KEY, cid);
+                tagCurrentSpan(cid);
                 try {
                     super.onHalfClose();
                 } finally {

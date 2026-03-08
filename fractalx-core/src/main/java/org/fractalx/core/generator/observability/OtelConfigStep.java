@@ -72,8 +72,8 @@ public class OtelConfigStep implements ServiceFileGenerator {
                 /**
                  * Tags the active Micrometer/OTel span with the current request's correlation ID.
                  *
-                 * <p>The tag key "correlation.id" matches what the admin service uses when querying
-                 * Jaeger ({@code /api/traces?tags=correlation.id%%3D<value>}), so correlation ID
+                 * <p>The tag key "correlationId" matches what the admin service uses when querying
+                 * Jaeger ({@code /api/traces?tags={"correlationId":"<value>"}), so correlation ID
                  * search in the admin UI traces tab will work out of the box.
                  *
                  * <p>This interceptor runs in {@code preHandle()} which is guaranteed to execute
@@ -100,7 +100,7 @@ public class OtelConfigStep implements ServiceFileGenerator {
                                 if (correlationId != null && !correlationId.isBlank()) {
                                     io.micrometer.tracing.Span span = tracer.currentSpan();
                                     if (span != null) {
-                                        span.tag("correlation.id", correlationId);
+                                        span.tag("correlationId", correlationId);
                                     }
                                 }
                                 return true;

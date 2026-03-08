@@ -268,8 +268,10 @@ public class GatewayOpenApiGenerator {
     }
 
     private void appendServiceFolder(StringBuilder sb, FractalModule m) {
-        String base = pathBase(m);
-        String name = displayName(m);
+        String base   = pathBase(m);                                    // e.g. "orders"
+        String entity = m.getServiceName().replace("-service", "");     // e.g. "order"
+        String name   = displayName(m);
+        String body   = buildSampleBody(entity);
 
         sb.append("    {\n");
         sb.append("      \"name\": \"").append(name).append("\",\n");
@@ -277,16 +279,16 @@ public class GatewayOpenApiGenerator {
 
         appendPostmanRequest(sb, "List " + name, "GET",
                 "{{gateway_url}}/api/" + base, null, listTests(), true);
-        sb.append(",\n");
+        sb.append("\n");
         appendPostmanRequest(sb, "Create " + name, "POST",
-                "{{gateway_url}}/api/" + base, "{}", createTests(), true);
-        sb.append(",\n");
+                "{{gateway_url}}/api/" + base, body, createTests(), true);
+        sb.append("\n");
         appendPostmanRequest(sb, "Get " + name + " by ID", "GET",
                 "{{gateway_url}}/api/" + base + "/{{id}}", null, getByIdTests(), true);
-        sb.append(",\n");
+        sb.append("\n");
         appendPostmanRequest(sb, "Update " + name, "PUT",
-                "{{gateway_url}}/api/" + base + "/{{id}}", "{}", updateTests(), true);
-        sb.append(",\n");
+                "{{gateway_url}}/api/" + base + "/{{id}}", body, updateTests(), true);
+        sb.append("\n");
         appendPostmanRequest(sb, "Delete " + name, "DELETE",
                 "{{gateway_url}}/api/" + base + "/{{id}}", null, deleteTests(), false);
 
@@ -397,8 +399,86 @@ public class GatewayOpenApiGenerator {
     // Helpers
     // -------------------------------------------------------------------------
 
+    /** Strips the "-service" suffix and pluralises for REST path conventions. */
     private String pathBase(FractalModule m) {
-        return m.getServiceName().replace("-service", "");
+        String entity = m.getServiceName().replace("-service", "");
+        return pluralize(entity);
+    }
+
+    /** Simple English pluralisation sufficient for typical entity names. */
+    private String pluralize(String word) {
+        if (word.endsWith("ry"))  return word.substring(0, word.length() - 2) + "ries"; // inventory→inventories
+        if (word.endsWith("y"))   return word.substring(0, word.length() - 1) + "ies";  // category→categories
+        if (word.endsWith("s") || word.endsWith("x") || word.endsWith("z")
+                || word.endsWith("ch") || word.endsWith("sh"))
+            return word + "es";
+        return word + "s";
+    }
+
+    /**
+     * Builds a realistic JSON sample request body based on the entity name.
+     * Used in POST/PUT Postman requests so testers have a real starting point.
+     */
+    private String buildSampleBody(String entity) {
+        return switch (entity) {
+            case "order" -> """
+                    {
+                      "customerId": 1,
+                      "items": [
+                        { "productId": 1, "quantity": 2, "unitPrice": 29.99 }
+                      ],
+                      "shippingAddress": "123 Main St, Springfield",
+                      "notes": "Leave at door"
+                    }""";
+            case "payment" -> """
+                    {
+                      "orderId": 1,
+                      "amount": 59.98,
+                      "currency": "USD",
+                      "method": "CREDIT_CARD",
+                      "cardLast4": "4242"
+                    }""";
+            case "inventory", "product" -> """
+                    {
+                      "name": "Sample Product",
+                      "description": "A short product description",
+                      "sku": "SKU-0001",
+                      "quantity": 100,
+                      "price": 29.99
+                    }""";
+            case "budget" -> """
+                    {
+                      "name": "Q2 Operating Budget",
+                      "amount": 50000.00,
+                      "currency": "USD",
+                      "period": "2026-Q2",
+                      "category": "OPERATIONS"
+                    }""";
+            case "user", "customer" -> """
+                    {
+                      "firstName": "Jane",
+                      "lastName": "Doe",
+                      "email": "jane.doe@example.com",
+                      "phone": "+1-555-0100"
+                    }""";
+            case "notification" -> """
+                    {
+                      "recipientId": 1,
+                      "type": "EMAIL",
+                      "subject": "Your order has been processed",
+                      "body": "Thank you for your order."
+                    }""";
+            default -> """
+                    {
+                      "name": "Sample %s",
+                      "description": "Auto-generated placeholder — replace with real fields",
+                      "status": "ACTIVE"
+                    }""".formatted(capitalize(entity));
+        };
+    }
+
+    private String capitalize(String s) {
+        return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
     private String displayName(FractalModule m) {
@@ -416,6 +496,8 @@ public class GatewayOpenApiGenerator {
     private String escapeJson(String s) {
         return s.replace("\\", "\\\\")
                 .replace("\"", "\\\"")
-                .replace("\t", "\\t");
+                .replace("\t", "\\t")
+                .replace("\n", "\\n")
+                .replace("\r", "");
     }
 }

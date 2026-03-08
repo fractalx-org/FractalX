@@ -32,6 +32,14 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
         </dependency>
+        <!-- Tracer API — used by TraceFilter to tag spans with correlationId.
+             Version is managed by Spring Boot BOM. Optional so services that
+             don't include micrometer-tracing still compile fine. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing</artifactId>
+            <optional>true</optional>
+        </dependency>
 
         <dependency>
             <groupId>org.slf4j</groupId>

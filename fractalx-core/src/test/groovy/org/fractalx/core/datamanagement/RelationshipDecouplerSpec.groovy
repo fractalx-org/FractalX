@@ -225,6 +225,157 @@ class RelationshipDecouplerSpec extends Specification {
         read("OrderItem.java").contains("Order order")
     }
 
+    def "@ManyToMany remote entity field is converted to @ElementCollection List<String> courseIds"() {
+        given: "Student entity references remote Course via @ManyToMany"
+        write("Student.java", """
+            package org.fractalx.test.order;
+            import jakarta.persistence.*;
+            import org.fractalx.test.lms.Course;
+            import java.util.List;
+            @Entity
+            public class Student {
+                @Id private Long id;
+                @ManyToMany
+                private List<Course> courses;
+            }
+        """)
+
+        when: "Course.java is NOT in serviceRoot — it is a remote entity"
+        decoupler.transform(serviceRoot, module)
+
+        then:
+        def result = read("Student.java")
+        result.contains("List<String>")
+        result.contains("courseIds")
+        result.contains("@ElementCollection")
+        !result.contains("@ManyToMany")
+        !result.contains("List<Course>")
+    }
+
+    def "@ManyToMany getter is renamed and returns List<String>"() {
+        given:
+        write("Student.java", """
+            package org.fractalx.test.order;
+            import jakarta.persistence.*;
+            import org.fractalx.test.lms.Course;
+            import java.util.List;
+            @Entity
+            public class Student {
+                @Id private Long id;
+                @ManyToMany
+                private List<Course> courses;
+                public List<Course> getCourses() { return courses; }
+                public void setCourses(List<Course> courses) { this.courses = courses; }
+            }
+        """)
+
+        when:
+        decoupler.transform(serviceRoot, module)
+
+        then:
+        def result = read("Student.java")
+        result.contains("getCourseIds()")
+        result.contains("setCourseIds(")
+        !result.contains("getCourses()")
+        !result.contains("setCourses(List<Course>")
+    }
+
+    def "Lombok @Data Request class: getters inferred from fields for setter call-site rewrite"() {
+        given: """Order entity with @ManyToOne Payment (remote).
+               CreateOrderRequest uses Lombok @Data — no explicit getters in the AST.
+               The service passes the 'payment' method param to order.setPayment();
+               after decoupling, Case B should rewrite it to order.setPaymentId(request.getPaymentId())
+               using the getter inferred from the @Data-annotated field."""
+        write("Order.java", """
+            package org.fractalx.test.order;
+            import jakarta.persistence.*;
+            import org.fractalx.test.payment.Payment;
+            @Entity
+            public class Order {
+                @Id private Long id;
+                @ManyToOne
+                private Payment payment;
+            }
+        """)
+        write("CreateOrderRequest.java", """
+            package org.fractalx.test.order;
+            import lombok.Data;
+            @Data
+            public class CreateOrderRequest {
+                private String paymentId;
+            }
+        """)
+        // The service receives a Payment param (remote entity passed in by caller) and a
+        // CreateOrderRequest that holds the canonical paymentId.
+        // order.setPayment(payment) — 'payment' is a NameExpr NOT in remoteVarToIdVar
+        // (it's a method param, not a locally-declared var), so Case B fires.
+        write("OrderService.java", """
+            package org.fractalx.test.order;
+            import org.springframework.stereotype.Service;
+            import org.fractalx.test.payment.Payment;
+            @Service
+            public class OrderService {
+                private final OrderRepository orderRepository;
+                public OrderService(OrderRepository orderRepository) {
+                    this.orderRepository = orderRepository;
+                }
+                public Order create(Payment payment, CreateOrderRequest request) {
+                    Order order = new Order();
+                    order.setPayment(payment);
+                    orderRepository.save(order);
+                    return order;
+                }
+            }
+        """)
+
+        when:
+        decoupler.transform(serviceRoot, module)
+
+        then: "call-site rewrite uses getPaymentId() inferred from the Lombok @Data field"
+        def svc = read("OrderService.java")
+        svc.contains("getPaymentId()")
+        svc.contains("setPaymentId(")
+    }
+
+    def "chained access on decoupled @ManyToMany collection gets DECOUPLING WARNING comment"() {
+        given: "Student entity references remote Course via @ManyToMany; service chains on getCourses()"
+        write("Student.java", """
+            package org.fractalx.test.order;
+            import jakarta.persistence.*;
+            import org.fractalx.test.lms.Course;
+            import java.util.List;
+            @Entity
+            public class Student {
+                @Id private Long id;
+                @ManyToMany
+                private List<Course> courses;
+            }
+        """)
+        write("StudentService.java", """
+            package org.fractalx.test.order;
+            import org.springframework.stereotype.Service;
+            @Service
+            public class StudentService {
+                private final StudentRepository studentRepository;
+                public StudentService(StudentRepository studentRepository) {
+                    this.studentRepository = studentRepository;
+                }
+                public boolean hasMathCourse(Student student) {
+                    return student.getCourses().stream().anyMatch(c -> c.getTitle().equals("Math"));
+                }
+            }
+        """)
+
+        when:
+        decoupler.transform(serviceRoot, module)
+
+        then: "getCourses() renamed to getCourseIds() and a DECOUPLING WARNING comment is added"
+        def svc = read("StudentService.java")
+        svc.contains("getCourseIds()")
+        svc.contains("DECOUPLING WARNING")
+        !svc.contains("getCourses()")
+    }
+
     def "transformation is a no-op when there are no remote entity references"() {
         given: "simple entity with no cross-module relationships"
         def original = """
