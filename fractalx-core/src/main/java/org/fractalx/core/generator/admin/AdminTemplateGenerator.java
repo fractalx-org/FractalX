@@ -1950,7 +1950,7 @@ class AdminTemplateGenerator {
                                 const h = db.health || 'UNKNOWN';
                                 const summary = db.dbSummary;
                                 let rowCount = '—';
-                                if (summary && summary.totalRows !== undefined) {
+                                if (summary && !summary.unavailable && summary.totalRows !== undefined) {
                                     rowCount = summary.totalRows + ' rows';
                                 } else if (db.instanceCount !== undefined && db.instanceCount >= 0) {
                                     rowCount = db.instanceCount + ' rows';

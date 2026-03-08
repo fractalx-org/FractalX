@@ -185,10 +185,19 @@ class AdminDataConsistencyGenerator {
                     svcName, schemas, port, port));
         }
 
-        // Append saga-orchestrator DB (H2 in-memory, port 8099)
-        dsConfigEntries.append(
-            "        DS_CONFIG.put(\"saga-orchestrator\", new DsConfig(\"jdbc:h2:mem:sagadb\",\"sa\",\"\",\"org.h2.Driver\",true,8099));\n"
-        );
+        // Append saga-orchestrator DB — read from generated YAML, fall back to known defaults
+        {
+            Map<String, String> sagaYaml = readServiceYamlConfig(outputRoot, "fractalx-saga-orchestrator");
+            String sagaUrl  = sagaYaml.getOrDefault("url",  "jdbc:h2:mem:saga_db");
+            String sagaUser = sagaYaml.getOrDefault("username", "sa");
+            String sagaPass = sagaYaml.getOrDefault("password", "");
+            String sagaDrv  = sagaYaml.getOrDefault("driver", "org.h2.Driver");
+            int    sagaPort = sagaYaml.containsKey("port") ? parseInt(sagaYaml.get("port"), 8099) : 8099;
+            boolean sagaH2  = sagaUrl.startsWith("jdbc:h2");
+            dsConfigEntries.append(String.format(
+                "        DS_CONFIG.put(\"saga-orchestrator\", new DsConfig(\"%s\",\"%s\",\"%s\",\"%s\",%s,%d));\n",
+                sagaUrl, sagaUser, sagaPass, sagaDrv, sagaH2, sagaPort));
+        }
         dbChecks.append(
             "        {Map<String,Object> db = new LinkedHashMap<>();" +
             " db.put(\"service\",\"saga-orchestrator\");" +
@@ -421,10 +430,22 @@ class AdminDataConsistencyGenerator {
                     @SuppressWarnings("unchecked")
                     private Map<String, Object> fetchDbSummary(int port) {
                         try {
-                            return restTemplate.getForObject(
+                            Map<String, Object> resp = restTemplate.getForObject(
                                     "http://localhost:" + port + "/api/internal/db-summary", Map.class);
+                            // restTemplate.getForObject can return null for empty responses — normalise to empty summary
+                            if (resp == null) {
+                                return new LinkedHashMap<>(Map.of("totalRows", 0, "entityCounts", Map.of()));
+                            }
+                            // Ensure totalRows key is always present so the UI can display the count
+                            if (!resp.containsKey("totalRows")) {
+                                Map<String, Object> normalised = new LinkedHashMap<>(resp);
+                                normalised.put("totalRows", 0);
+                                return normalised;
+                            }
+                            return resp;
                         } catch (Exception e) {
-                            return Map.of("error", e.getMessage());
+                            // Service unavailable — return sentinel so JS shows "—" rather than 0
+                            return Map.of("unavailable", true, "reason", e.getMessage());
                         }
                     }
 
@@ -492,36 +513,45 @@ class AdminDataConsistencyGenerator {
         if (outputRoot == null) return result;
         Yaml yaml = new Yaml();
 
-        // server.port lives in the base application.yml
+        // Base application.yml: server.port and (for some services) spring.datasource.*
         Path baseYml = outputRoot.resolve(serviceName).resolve("src/main/resources/application.yml");
         if (Files.exists(baseYml)) {
             try (InputStream is = Files.newInputStream(baseYml)) {
                 Map<String, Object> data = yaml.load(is);
-                if (data != null && data.get("server") instanceof Map<?, ?> serverMap) {
-                    Object p = serverMap.get("port");
-                    if (p != null) result.put("port", String.valueOf(p));
+                if (data != null) {
+                    if (data.get("server") instanceof Map<?, ?> serverMap) {
+                        Object p = serverMap.get("port");
+                        if (p != null) result.put("port", String.valueOf(p));
+                    }
+                    // Some services (e.g. saga-orchestrator) put datasource in the base YAML
+                    extractDatasource(data, result);
                 }
             } catch (Exception ignored) {}
         }
 
-        // spring.datasource.* lives in the dev profile YAML (active by default in local dev)
+        // Dev profile YAML overrides datasource config for regular services
+        // (application-dev.yml takes priority over application.yml for datasource values)
         Path devYml = outputRoot.resolve(serviceName).resolve("src/main/resources/application-dev.yml");
         if (Files.exists(devYml)) {
             try (InputStream is = Files.newInputStream(devYml)) {
                 Map<String, Object> data = yaml.load(is);
-                if (data != null && data.get("spring") instanceof Map<?, ?> springMap) {
-                    Object dsObj = ((Map<?, ?>) springMap).get("datasource");
-                    if (dsObj instanceof Map<?, ?> dsMap) {
-                        if (dsMap.get("url") != null) result.put("url", String.valueOf(dsMap.get("url")));
-                        if (dsMap.get("driver-class-name") != null) result.put("driver", String.valueOf(dsMap.get("driver-class-name")));
-                        if (dsMap.get("username") != null) result.put("username", String.valueOf(dsMap.get("username")));
-                        Object pwd = dsMap.get("password");
-                        result.put("password", (pwd != null && !"null".equals(String.valueOf(pwd))) ? String.valueOf(pwd) : "");
-                    }
+                if (data != null) {
+                    extractDatasource(data, result);  // dev values win
                 }
             } catch (Exception ignored) {}
         }
         return result;
+    }
+
+    /** Extracts spring.datasource.{url,driver-class-name,username,password} into result map. */
+    private void extractDatasource(Map<String, Object> data, Map<String, String> result) {
+        if (!(data.get("spring") instanceof Map<?, ?> springMap)) return;
+        if (!(springMap.get("datasource") instanceof Map<?, ?> dsMap)) return;
+        if (dsMap.get("url") != null) result.put("url", String.valueOf(dsMap.get("url")));
+        if (dsMap.get("driver-class-name") != null) result.put("driver", String.valueOf(dsMap.get("driver-class-name")));
+        if (dsMap.get("username") != null) result.put("username", String.valueOf(dsMap.get("username")));
+        Object pwd = dsMap.get("password");
+        result.put("password", (pwd != null && !"null".equals(String.valueOf(pwd))) ? String.valueOf(pwd) : "");
     }
 
     /** Removes a trailing {@code ,\n} so List.of() method calls don't end with a stray comma. */
