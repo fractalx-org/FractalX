@@ -70,15 +70,18 @@ public class ReferenceValidatorGenerator {
                 buildReferenceValidator(validationPackage, basePackage, module, remoteIdTypes)
         );
 
-        // Generate exists() stub for each remote type's NetScope client if not already present
-        for (String remoteType : remoteIdTypes) {
-            String clientName     = remoteType + "ExistsClient";
-            String targetService  = NetScopeClientGenerator.beanTypeToServiceName(remoteType);
-            Path   clientFile     = validationPath.resolve(clientName + ".java");
+        // Generate exists() stub for each remote type's NetScope client if not already present.
+        // Strip the "List:" prefix for collection types — the same exists(String id) interface
+        // handles both singular and collection validation (the validator iterates the list).
+        for (String rawType : remoteIdTypes) {
+            String bareType      = rawType.startsWith("List:") ? rawType.substring(5) : rawType;
+            String clientName    = bareType + "ExistsClient";
+            String targetService = NetScopeClientGenerator.beanTypeToServiceName(bareType);
+            Path   clientFile    = validationPath.resolve(clientName + ".java");
 
             if (!Files.exists(clientFile)) {
                 Files.writeString(clientFile, buildExistsClient(validationPackage, clientName,
-                        remoteType, targetService, module));
+                        bareType, targetService, module));
             }
         }
 
@@ -108,6 +111,26 @@ public class ReferenceValidatorGenerator {
                         if (!hasAnnotation(cls, "Entity")) continue;
 
                         for (FieldDeclaration field : cls.getFields()) {
+
+                            // Detect @ElementCollection List<String> *Ids fields produced by
+                            // RelationshipDecoupler for cross-service @ManyToMany relationships.
+                            // Prefix "List:" marks the type as a collection so buildReferenceValidator()
+                            // can generate the correct validateAll*Exist(List<String>) method.
+                            if (hasAnnotation(field, "ElementCollection")) {
+                                field.getVariables().forEach(v -> {
+                                    String name = v.getNameAsString(); // e.g. "courseIds"
+                                    if (name.endsWith("Ids") && name.length() > 3) {
+                                        String base = name.substring(0, name.length() - 3); // "course"
+                                        if (!base.isEmpty()) {
+                                            String collectionType = Character.toUpperCase(base.charAt(0))
+                                                    + base.substring(1); // "Course"
+                                            types.add("List:" + collectionType);
+                                        }
+                                    }
+                                });
+                                continue; // not a String field — skip the *Id check below
+                            }
+
                             String typeName = field.getElementType().asString();
                             if (!"String".equals(typeName)) continue;
 
@@ -117,8 +140,8 @@ public class ReferenceValidatorGenerator {
                                 if (name.endsWith("Id") && name.length() > 2) {
                                     String base = name.substring(0, name.length() - 2);
                                     if (!base.isEmpty()) {
-                                        String typeName2 = Character.toUpperCase(base.charAt(0)) + base.substring(1);
-                                        types.add(typeName2);
+                                        String singularType = Character.toUpperCase(base.charAt(0)) + base.substring(1);
+                                        types.add(singularType);
                                     }
                                 }
                             });
@@ -141,17 +164,35 @@ public class ReferenceValidatorGenerator {
                                            String basePackage,
                                            FractalModule module,
                                            Set<String> remoteTypes) {
+
+        // Split into singular types (String *Id) and collection types (List:<Type> prefix)
+        Set<String> singleTypes     = new LinkedHashSet<>();
+        Set<String> collectionTypes = new LinkedHashSet<>();
+        for (String t : remoteTypes) {
+            if (t.startsWith("List:")) collectionTypes.add(t.substring(5));
+            else                       singleTypes.add(t);
+        }
+        // All distinct bare type names (for client generation)
+        Set<String> allBareTypes = new LinkedHashSet<>();
+        allBareTypes.addAll(singleTypes);
+        allBareTypes.addAll(collectionTypes);
+
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(validationPackage).append(";\n\n");
 
-        for (String type : remoteTypes) {
+        for (String type : allBareTypes) {
             sb.append("import ").append(validationPackage).append(".").append(type).append("ExistsClient;\n");
         }
-        sb.append("""
-                import jakarta.persistence.EntityNotFoundException;
-                import org.springframework.stereotype.Component;
+        if (!collectionTypes.isEmpty()) {
+            sb.append("import java.util.List;\n");
+        }
+        sb.append("import org.springframework.stereotype.Component;\n\n");
 
-                """);
+        // Javadoc — use first single type (or first collection type) as the example
+        String exampleType = singleTypes.isEmpty()
+                ? collectionTypes.iterator().next()
+                : singleTypes.iterator().next();
+        String exampleParam = Character.toLowerCase(exampleType.charAt(0)) + exampleType.substring(1) + "Id";
 
         sb.append("/**\n");
         sb.append(" * Validates cross-service referential integrity using NetScope client calls.\n");
@@ -161,17 +202,16 @@ public class ReferenceValidatorGenerator {
         sb.append(" *\n");
         sb.append(" * <pre>\n");
         sb.append(" * // Example usage in a @Transactional service method:\n");
-        sb.append(" * referenceValidator.validate").append(remoteTypes.iterator().next())
-          .append("Exists(").append(Character.toLowerCase(remoteTypes.iterator().next().charAt(0)))
-          .append(remoteTypes.iterator().next().substring(1)).append("Id);\n");
+        sb.append(" * referenceValidator.").append(ValidationNaming.singleValidateMethod(exampleType))
+          .append("(").append(exampleParam).append(");\n");
         sb.append(" * </pre>\n");
         sb.append(" *\n * Auto-generated by FractalX — service: ").append(module.getServiceName()).append(".\n */\n");
         sb.append("@Component\n");
         sb.append("public class ReferenceValidator {\n\n");
 
-        // Fields
-        for (String type : remoteTypes) {
-            String fieldName = Character.toLowerCase(type.charAt(0)) + type.substring(1) + "ExistsClient";
+        // Fields — one ExistsClient per bare type
+        for (String type : allBareTypes) {
+            String fieldName = lc(type) + "ExistsClient";
             sb.append("    private final ").append(type).append("ExistsClient ").append(fieldName).append(";\n");
         }
         sb.append("\n");
@@ -179,41 +219,62 @@ public class ReferenceValidatorGenerator {
         // Constructor
         sb.append("    public ReferenceValidator(");
         List<String> ctorParams = new ArrayList<>();
-        for (String type : remoteTypes) {
-            String clientType = type + "ExistsClient";
-            String fieldName  = Character.toLowerCase(type.charAt(0)) + type.substring(1) + "ExistsClient";
-            ctorParams.add(clientType + " " + fieldName);
+        for (String type : allBareTypes) {
+            ctorParams.add(type + "ExistsClient " + lc(type) + "ExistsClient");
         }
         sb.append(String.join(", ", ctorParams)).append(") {\n");
-        for (String type : remoteTypes) {
-            String fieldName = Character.toLowerCase(type.charAt(0)) + type.substring(1) + "ExistsClient";
+        for (String type : allBareTypes) {
+            String fieldName = lc(type) + "ExistsClient";
             sb.append("        this.").append(fieldName).append(" = ").append(fieldName).append(";\n");
         }
         sb.append("    }\n\n");
 
-        // Validate methods
-        for (String type : remoteTypes) {
-            String clientField = Character.toLowerCase(type.charAt(0)) + type.substring(1) + "ExistsClient";
-            String param       = Character.toLowerCase(type.charAt(0)) + type.substring(1) + "Id";
+        // Singular validate methods — names via ValidationNaming (shared with RelationshipDecoupler)
+        for (String type : singleTypes) {
+            String clientField = lc(type) + "ExistsClient";
+            String param       = lc(type) + "Id";
             sb.append("    /**\n");
             sb.append("     * Verifies that a ").append(type).append(" with the given ID exists in the remote service.\n");
-            sb.append("     * @throws EntityNotFoundException if the ID cannot be resolved\n");
+            sb.append("     * @throws IllegalArgumentException if the ID cannot be resolved\n");
             sb.append("     */\n");
-            sb.append("    public void validate").append(type).append("Exists(String ").append(param).append(") {\n");
+            sb.append("    public void ").append(ValidationNaming.singleValidateMethod(type))
+              .append("(String ").append(param).append(") {\n");
             sb.append("        if (").append(param).append(" == null || ").append(param).append(".isBlank()) {\n");
-            sb.append("            throw new EntityNotFoundException(\"").append(type)
+            sb.append("            throw new IllegalArgumentException(\"").append(type)
               .append(" ID must not be null or blank\");\n");
             sb.append("        }\n");
-            sb.append("        boolean exists = ").append(clientField).append(".exists(").append(param).append(");\n");
-            sb.append("        if (!exists) {\n");
-            sb.append("            throw new EntityNotFoundException(\"").append(type)
+            sb.append("        if (!").append(clientField).append(".exists(").append(param).append(")) {\n");
+            sb.append("            throw new IllegalArgumentException(\"").append(type)
               .append(" not found: \" + ").append(param).append(");\n");
+            sb.append("        }\n");
+            sb.append("    }\n\n");
+        }
+
+        // Collection validate methods — names via ValidationNaming (shared with RelationshipDecoupler)
+        for (String type : collectionTypes) {
+            String param = lc(type) + "Ids";
+            sb.append("    /**\n");
+            sb.append("     * Verifies that every ").append(type).append(" ID in the list exists in the remote service.\n");
+            sb.append("     * Delegates to {@link #").append(ValidationNaming.singleValidateMethod(type)).append("}.\n");
+            sb.append("     * @throws IllegalArgumentException if any ID cannot be resolved\n");
+            sb.append("     */\n");
+            sb.append("    public void ").append(ValidationNaming.collectionValidateMethod(type))
+              .append("(List<String> ").append(param).append(") {\n");
+            sb.append("        if (").append(param).append(" == null) return;\n");
+            sb.append("        for (String id : ").append(param).append(") {\n");
+            sb.append("            ").append(ValidationNaming.singleValidateMethod(type)).append("(id);\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
         }
 
         sb.append("}\n");
         return sb.toString();
+    }
+
+    /** Lower-cases the first character of {@code s}. */
+    private static String lc(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return Character.toLowerCase(s.charAt(0)) + s.substring(1);
     }
 
     private String buildExistsClient(String pkg, String clientName,

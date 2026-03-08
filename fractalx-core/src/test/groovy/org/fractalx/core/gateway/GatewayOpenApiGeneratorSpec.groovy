@@ -83,8 +83,8 @@ class GatewayOpenApiGeneratorSpec extends Specification {
 
         then:
         def spec = openApi()
-        spec.contains("/api/order:")
-        spec.contains("/api/order/{id}:")
+        spec.contains("/api/orders:")
+        spec.contains("/api/orders/{id}:")
         spec.contains("operationId: \"order-service-list\"")
         spec.contains("operationId: \"order-service-create\"")
         spec.contains("operationId: \"order-service-get-by-id\"")

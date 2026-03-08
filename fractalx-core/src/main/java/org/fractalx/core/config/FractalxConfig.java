@@ -53,8 +53,12 @@ public record FractalxConfig(
 ) {
 
     /** Per-service overrides read from fractalx-config.yml. */
-    public record ServiceOverride(int port, boolean tracingEnabled) {
+    public record ServiceOverride(int port, boolean tracingEnabled,
+                                  String datasourceUrl, String datasourceUsername,
+                                  String datasourcePassword, String datasourceDriver) {
         public boolean hasPort() { return port > 0; }
+        public boolean hasDatasource() { return datasourceUrl != null && !datasourceUrl.isBlank(); }
+        public boolean isH2() { return datasourceUrl != null && datasourceUrl.startsWith("jdbc:h2"); }
     }
 
     // ── Defaults ─────────────────────────────────────────────────────────────

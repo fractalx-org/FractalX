@@ -696,7 +696,7 @@ public class SagaOrchestratorGenerator {
         sb.append("        // or generate a fresh UUID if the caller did not supply one.\n");
         sb.append("        String correlationId = (incomingCorrelationId != null && !incomingCorrelationId.isBlank())\n");
         sb.append("                ? incomingCorrelationId\n");
-        sb.append("                : UUID.randomUUID().toString();\n\n");
+        sb.append("                : (MDC.get(\"correlationId\") != null ? MDC.get(\"correlationId\") : UUID.randomUUID().toString());\n\n");
 
         sb.append("        SagaInstance instance = new SagaInstance();\n");
         sb.append("        instance.setSagaId(\"").append(saga.getSagaId()).append("\");\n");
