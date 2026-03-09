@@ -85,14 +85,15 @@ class AdminIncidentGeneratorSpec extends Specification {
         c.contains("stats(")
     }
 
-    def "IncidentStore is pre-seeded with one example incident"() {
+    def "IncidentStore starts empty"() {
         when:
         generator.generate(srcMainJava, basePackage)
 
         then:
         def c = read("IncidentStore.java")
-        c.contains("UUID.randomUUID")
-        c.contains("RESOLVED")
+        c.contains("ConcurrentHashMap")
+        !c.contains("UUID.randomUUID")
+        c.contains("public IncidentStore() {}")
     }
 
     def "IncidentController is a @RestController mapped to /api/incidents"() {
