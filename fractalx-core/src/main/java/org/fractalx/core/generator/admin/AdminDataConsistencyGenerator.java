@@ -181,8 +181,8 @@ class AdminDataConsistencyGenerator {
             String schemas = (m.getOwnedSchemas() != null && !m.getOwnedSchemas().isEmpty())
                     ? String.join(", ", m.getOwnedSchemas()) : "default";
             dbChecks.append(String.format(
-                    "        {Map<String,Object> db = new LinkedHashMap<>(); db.put(\"service\",\"%s\"); db.put(\"schemas\",\"%s\"); db.put(\"health\", fetchDbHealth(%d)); db.put(\"dbSummary\", fetchDbSummary(%d)); dbList.add(db);}\n",
-                    svcName, schemas, port, port));
+                    "        {Map<String,Object> db = new LinkedHashMap<>(); db.put(\"service\",\"%s\"); db.put(\"schemas\",\"%s\"); db.put(\"health\", fetchDbHealth(%d)); dbList.add(db);}\n",
+                    svcName, schemas, port));
         }
 
         // Append saga-orchestrator DB — read from generated YAML, fall back to known defaults
@@ -203,8 +203,6 @@ class AdminDataConsistencyGenerator {
             " db.put(\"service\",\"saga-orchestrator\");" +
             " db.put(\"schemas\",\"saga_instance\");" +
             " db.put(\"health\", fetchDbHealth(SAGA_ORCHESTRATOR_PORT));" +
-            " db.put(\"instanceCount\", fetchSagaInstanceCount());" +
-            " db.put(\"dbSummary\", fetchDbSummary(SAGA_ORCHESTRATOR_PORT));" +
             " dbList.add(db);}\n"
         );
 
