@@ -71,7 +71,8 @@ public class PomGenerator implements ServiceFileGenerator {
     private static final Set<String> FRACTALX_MANAGED = Set.of(
             "netscope-server", "netscope-client", "fractalx-runtime",
             "spring-boot-starter-web", "spring-boot-starter-actuator",
-            "spring-boot-starter-aop", "resilience4j-spring-boot3"
+            "spring-boot-starter-aop", "resilience4j-spring-boot3",
+            "spring-cloud-context"
     );
 
     private final ObservabilityInjector observabilityInjector;
@@ -126,6 +127,13 @@ public class PomGenerator implements ServiceFileGenerator {
                                 <type>pom</type>
                                 <scope>import</scope>
                             </dependency>
+                            <dependency>
+                                <groupId>org.springframework.cloud</groupId>
+                                <artifactId>spring-cloud-dependencies</artifactId>
+                                <version>2023.0.0</version>
+                                <type>pom</type>
+                                <scope>import</scope>
+                            </dependency>
                         </dependencies>
                     </dependencyManagement>
 
@@ -162,6 +170,10 @@ public class PomGenerator implements ServiceFileGenerator {
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-starter-aop</artifactId>
+                        </dependency>
+                        <dependency>
+                            <groupId>org.springframework.cloud</groupId>
+                            <artifactId>spring-cloud-context</artifactId>
                         </dependency>
 
                         <!-- ── From source monolith pom (unused deps removed) ── -->

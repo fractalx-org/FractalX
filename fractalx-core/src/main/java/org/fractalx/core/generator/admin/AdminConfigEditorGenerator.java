@@ -44,6 +44,9 @@ class AdminConfigEditorGenerator {
         Files.writeString(pkg.resolve("ConfigEditorController.java"), """
                 package org.fractalx.admin.svcconfig;
 
+                import org.springframework.http.HttpEntity;
+                import org.springframework.http.HttpHeaders;
+                import org.springframework.http.MediaType;
                 import org.springframework.http.ResponseEntity;
                 import org.springframework.http.client.SimpleClientHttpRequestFactory;
                 import org.springframework.web.bind.annotation.*;
@@ -149,7 +152,10 @@ class AdminConfigEditorGenerator {
                                     String url = "http://localhost:" + cfg.httpPort() + "/actuator/refresh";
                                     Map<String, Object> result = new LinkedHashMap<>();
                                     try {
-                                        rest.postForObject(url, null, Object.class);
+                                        HttpHeaders headers = new HttpHeaders();
+                                        headers.setContentType(MediaType.APPLICATION_JSON);
+                                        HttpEntity<String> entity = new HttpEntity<>("{}", headers);
+                                        rest.postForObject(url, entity, Object.class);
                                         result.put("success", true);
                                         result.put("message", "Refresh triggered on " + service);
                                         result.put("url", url);
