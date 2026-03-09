@@ -33,20 +33,29 @@ public class GatewayConfigGenerator {
     public void generateConfig(Path srcMainResources,
                                List<FractalModule> modules,
                                List<RouteDefinition> routes) throws IOException {
-        generateConfig(srcMainResources, modules, routes, FractalxConfig.defaults());
+        generateConfig(srcMainResources, modules, routes, FractalxConfig.defaults(), SecurityProfile.none());
     }
 
     public void generateConfig(Path srcMainResources,
                                List<FractalModule> modules,
                                List<RouteDefinition> routes,
                                FractalxConfig cfg) throws IOException {
+        generateConfig(srcMainResources, modules, routes, cfg, SecurityProfile.none());
+    }
+
+    public void generateConfig(Path srcMainResources,
+                               List<FractalModule> modules,
+                               List<RouteDefinition> routes,
+                               FractalxConfig cfg,
+                               SecurityProfile securityProfile) throws IOException {
         log.debug("Generating gateway configuration");
         Files.writeString(srcMainResources.resolve("application.yml"),
-                generateApplicationYml(modules, cfg));
+                generateApplicationYml(modules, cfg, securityProfile));
         log.info("✓ Generated gateway configuration");
     }
 
-    private String generateApplicationYml(List<FractalModule> modules, FractalxConfig cfg) {
+    private String generateApplicationYml(List<FractalModule> modules, FractalxConfig cfg,
+                                           SecurityProfile securityProfile) {
         if (modules == null || modules.isEmpty()) {
             log.warn("No modules provided for gateway configuration");
             modules = new ArrayList<>(); // Use empty list to avoid NPE
@@ -80,6 +89,19 @@ public class GatewayConfigGenerator {
         ymlBuilder.append(routesConfig.toString());
         ymlBuilder.append("\n");
 
+        // Security defaults driven by detected monolith security profile
+        boolean secEnabled  = securityProfile.securityEnabled();
+        boolean bearerOn    = securityProfile.authType() == SecurityProfile.AuthType.BEARER_JWT;
+        boolean oauth2On    = securityProfile.authType() == SecurityProfile.AuthType.OAUTH2;
+        boolean basicOn     = securityProfile.authType() == SecurityProfile.AuthType.BASIC;
+        String  jwtSecret   = securityProfile.jwtSecret()   != null ? securityProfile.jwtSecret()
+                              : "fractalx-default-secret-change-in-prod-min-32chars!!";
+        String  jwkUri      = securityProfile.jwkSetUri()   != null ? securityProfile.jwkSetUri()
+                              : securityProfile.issuerUri() != null ? securityProfile.issuerUri()
+                              : cfg.oauth2JwksUri();
+        String  basicUser   = securityProfile.basicUsername() != null ? securityProfile.basicUsername() : "fractalx";
+        String  basicPass   = securityProfile.basicPassword() != null ? securityProfile.basicPassword() : "changeme";
+
         ymlBuilder.append("fractalx:\n");
         ymlBuilder.append("  registry:\n");
         ymlBuilder.append("    url: ${FRACTALX_REGISTRY_URL:").append(cfg.registryUrl()).append("}\n");
@@ -88,19 +110,19 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}\n");
         ymlBuilder.append("  gateway:\n");
         ymlBuilder.append("    security:\n");
-        ymlBuilder.append("      # Set enabled: true and configure one or more auth mechanisms below\n");
-        ymlBuilder.append("      enabled: ${GATEWAY_SECURITY_ENABLED:false}\n");
+        ymlBuilder.append("      # Auth type detected from monolith: ").append(securityProfile.authType()).append("\n");
+        ymlBuilder.append("      enabled: ${GATEWAY_SECURITY_ENABLED:").append(secEnabled).append("}\n");
         ymlBuilder.append("      public-paths: /api/*/public/**, /api/*/auth/**\n");
         ymlBuilder.append("      bearer:\n");
-        ymlBuilder.append("        enabled: ${GATEWAY_BEARER_ENABLED:false}\n");
-        ymlBuilder.append("        jwt-secret: ${JWT_SECRET:fractalx-default-secret-change-in-prod-min-32chars!!}\n");
+        ymlBuilder.append("        enabled: ${GATEWAY_BEARER_ENABLED:").append(bearerOn).append("}\n");
+        ymlBuilder.append("        jwt-secret: ${JWT_SECRET:").append(jwtSecret).append("}\n");
         ymlBuilder.append("      oauth2:\n");
-        ymlBuilder.append("        enabled: ${GATEWAY_OAUTH2_ENABLED:false}\n");
-        ymlBuilder.append("        jwk-set-uri: ${OAUTH2_JWK_URI:").append(cfg.oauth2JwksUri()).append("}\n");
+        ymlBuilder.append("        enabled: ${GATEWAY_OAUTH2_ENABLED:").append(oauth2On).append("}\n");
+        ymlBuilder.append("        jwk-set-uri: ${OAUTH2_JWK_URI:").append(jwkUri).append("}\n");
         ymlBuilder.append("      basic:\n");
-        ymlBuilder.append("        enabled: ${GATEWAY_BASIC_ENABLED:false}\n");
-        ymlBuilder.append("        username: ${GATEWAY_BASIC_USER:fractalx}\n");
-        ymlBuilder.append("        password: ${GATEWAY_BASIC_PASS:changeme}\n");
+        ymlBuilder.append("        enabled: ${GATEWAY_BASIC_ENABLED:").append(basicOn).append("}\n");
+        ymlBuilder.append("        username: ${GATEWAY_BASIC_USER:").append(basicUser).append("}\n");
+        ymlBuilder.append("        password: ${GATEWAY_BASIC_PASS:").append(basicPass).append("}\n");
         ymlBuilder.append("      api-key:\n");
         ymlBuilder.append("        enabled: ${GATEWAY_APIKEY_ENABLED:false}\n");
         ymlBuilder.append("        valid-keys:\n");
@@ -112,6 +134,25 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("    rate-limit:\n");
         ymlBuilder.append("      default-rps: ${GATEWAY_DEFAULT_RPS:100}\n");
         ymlBuilder.append("\n");
+
+        // Resilience4j circuit breaker config per service (fixes missing YAML bug)
+        if (modules != null && !modules.isEmpty()) {
+            ymlBuilder.append("resilience4j:\n");
+            ymlBuilder.append("  circuitbreaker:\n    instances:\n");
+            for (FractalModule m : modules) {
+                ymlBuilder.append("      ").append(m.getServiceName()).append(":\n");
+                ymlBuilder.append("        failure-rate-threshold: 50\n");
+                ymlBuilder.append("        wait-duration-in-open-state: 30s\n");
+                ymlBuilder.append("        permitted-number-of-calls-in-half-open-state: 5\n");
+                ymlBuilder.append("        sliding-window-size: 10\n");
+            }
+            ymlBuilder.append("  timelimiter:\n    instances:\n");
+            for (FractalModule m : modules) {
+                ymlBuilder.append("      ").append(m.getServiceName()).append(":\n");
+                ymlBuilder.append("        timeout-duration: 5s\n");
+            }
+            ymlBuilder.append("\n");
+        }
 
         ymlBuilder.append("management:\n");
         ymlBuilder.append("  endpoints:\n");

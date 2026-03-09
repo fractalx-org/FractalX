@@ -1,5 +1,7 @@
 package org.fractalx.core.gateway;
 
+import org.fractalx.core.gateway.SecurityProfile.AuthType;
+import org.fractalx.core.gateway.SecurityProfile.RouteSecurityRule;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Generates the gateway security layer with four pluggable authentication mechanisms:
@@ -24,19 +27,31 @@ public class GatewaySecurityGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(GatewaySecurityGenerator.class);
 
+    /** Generate with no monolith security profile (all mechanisms disabled by default). */
     public void generate(Path srcMainJava, List<FractalModule> modules) throws IOException {
+        generate(srcMainJava, modules, SecurityProfile.none());
+    }
+
+    /**
+     * Generate gateway security layer driven by the detected monolith {@link SecurityProfile}.
+     * Auth mechanisms matching the monolith are enabled by default; route-level authorization
+     * rules are carried over so the same tokens / credentials work without change.
+     */
+    public void generate(Path srcMainJava, List<FractalModule> modules,
+                         SecurityProfile profile) throws IOException {
         Path pkg = createPkg(srcMainJava, "org/fractalx/gateway/security");
 
-        generateAuthProperties(pkg);
-        generateSecurityConfig(pkg);
+        generateAuthProperties(pkg, profile);
+        generateSecurityConfig(pkg, profile);
         generateJwtBearerFilter(pkg);
         generateApiKeyFilter(pkg);
         generateBasicAuthFilter(pkg);
 
-        log.info("Generated gateway security (OAuth2 / Bearer / Basic / API-Key)");
+        log.info("Generated gateway security — authType={} routeRules={}",
+                profile.authType(), profile.routeRules().size());
     }
 
-    private void generateAuthProperties(Path pkg) throws IOException {
+    private void generateAuthProperties(Path pkg, SecurityProfile profile) throws IOException {
         // Note: "&#42;" is the HTML entity for "*" — prevents "&#42;/" from being
         // misread as the Javadoc block-comment terminator "*/" inside the <pre> block.
         String content = """
@@ -76,7 +91,7 @@ public class GatewaySecurityGenerator {
                 @ConfigurationProperties(prefix = "fractalx.gateway.security")
                 public class GatewayAuthProperties {
 
-                    private boolean enabled = false;
+                    private boolean enabled = %s;
                     private String[] publicPaths = {"/api/*/public/**", "/api/*/auth/**"};
 
                     private Bearer bearer = new Bearer();
@@ -98,8 +113,8 @@ public class GatewaySecurityGenerator {
                     public void setApiKey(ApiKey apiKey) { this.apiKey = apiKey; }
 
                     public static class Bearer {
-                        private boolean enabled = false;
-                        private String jwtSecret = "fractalx-default-secret-change-in-prod-min-32chars!!";
+                        private boolean enabled = %s;
+                        private String jwtSecret = "%s";
                         public boolean isEnabled() { return enabled; }
                         public void setEnabled(boolean enabled) { this.enabled = enabled; }
                         public String getJwtSecret() { return jwtSecret; }
@@ -107,8 +122,8 @@ public class GatewaySecurityGenerator {
                     }
 
                     public static class OAuth2 {
-                        private boolean enabled = false;
-                        private String jwkSetUri = "http://localhost:8080/realms/fractalx/protocol/openid-connect/certs";
+                        private boolean enabled = %s;
+                        private String jwkSetUri = "%s";
                         public boolean isEnabled() { return enabled; }
                         public void setEnabled(boolean enabled) { this.enabled = enabled; }
                         public String getJwkSetUri() { return jwkSetUri; }
@@ -116,9 +131,9 @@ public class GatewaySecurityGenerator {
                     }
 
                     public static class Basic {
-                        private boolean enabled = false;
-                        private String username = "fractalx";
-                        private String password = "changeme";
+                        private boolean enabled = %s;
+                        private String username = "%s";
+                        private String password = "%s";
                         public boolean isEnabled() { return enabled; }
                         public void setEnabled(boolean enabled) { this.enabled = enabled; }
                         public String getUsername() { return username; }
@@ -136,17 +151,43 @@ public class GatewaySecurityGenerator {
                         public void setValidKeys(List<String> keys) { this.validKeys = keys; }
                     }
                 }
-                """;
+                """.formatted(
+                        profile.securityEnabled(),
+                        profile.authType() == AuthType.BEARER_JWT,
+                        profile.jwtSecret() != null
+                                ? profile.jwtSecret()
+                                : "fractalx-default-secret-change-in-prod-min-32chars!!",
+                        profile.authType() == AuthType.OAUTH2,
+                        profile.jwkSetUri() != null
+                                ? profile.jwkSetUri()
+                                : profile.issuerUri() != null
+                                        ? profile.issuerUri()
+                                        : "http://localhost:8080/realms/fractalx/protocol/openid-connect/certs",
+                        profile.authType() == AuthType.BASIC,
+                        profile.basicUsername() != null ? profile.basicUsername() : "fractalx",
+                        profile.basicPassword() != null ? profile.basicPassword() : "changeme");
+
         Files.writeString(pkg.resolve("GatewayAuthProperties.java"), content);
     }
 
-    private void generateSecurityConfig(Path pkg) throws IOException {
-        // The three auth filters (ApiKeyFilter, JwtBearerFilter, BasicAuthGatewayFilter)
-        // implement GlobalFilter + Ordered and are @Component beans. Spring Cloud Gateway
-        // picks them up automatically — they must NOT be passed to addFilterBefore()
-        // because that method expects WebFilter, not GlobalFilter. Authentication rejection
-        // (HTTP 401) is handled directly inside each GlobalFilter implementation.
-        // OAuth2 resource-server support is the only thing wired through Spring Security here.
+    private void generateSecurityConfig(Path pkg, SecurityProfile profile) throws IOException {
+        // Build authorizeExchange chain from detected route rules
+        String authorizeChain = buildAuthorizeChain(profile);
+
+        // OAuth2 block — only emitted if OAuth2 was detected
+        String oauth2Block = profile.authType() == AuthType.OAUTH2
+                ? """
+                        // OAuth2 resource-server: validates JWT from the external IdP detected in the monolith.
+                        if (authProps.isEnabled() && authProps.getOauth2().isEnabled()) {
+                            http.oauth2ResourceServer(oauth2 -> oauth2
+                                    .jwt(jwt -> jwt.jwkSetUri(authProps.getOauth2().getJwkSetUri())));
+                        }
+                  """
+                : """
+                        // OAuth2 not detected in monolith — enable via fractalx.gateway.security.oauth2.enabled
+                        // if you add an external IdP later.
+                  """;
+
         String content = """
                 package org.fractalx.gateway.security;
 
@@ -157,6 +198,16 @@ public class GatewaySecurityGenerator {
                 import org.springframework.security.config.web.server.ServerHttpSecurity;
                 import org.springframework.security.web.server.SecurityWebFilterChain;
 
+                /**
+                 * Gateway security configuration.
+                 * Auth type detected from monolith: %s
+                 * Route rules carried over: %d
+                 *
+                 * Auth GlobalFilter beans (auto-registered by Spring Cloud Gateway):
+                 *   JwtBearerFilter  (order -90) — HMAC-SHA256 Bearer JWT
+                 *   ApiKeyFilter     (order -95) — X-Api-Key header / api_key param
+                 *   BasicAuthGatewayFilter (order -85) — HTTP Basic credentials
+                 */
                 @Configuration
                 @EnableWebFluxSecurity
                 @EnableConfigurationProperties(GatewayAuthProperties.class)
@@ -174,34 +225,68 @@ public class GatewaySecurityGenerator {
                             .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                             .formLogin(ServerHttpSecurity.FormLoginSpec::disable);
 
-                        // Always public — actuator, discovery, docs, fallback, and configured paths
                         http.authorizeExchange(ex -> ex
+                %s
+                        );
+
+                %s
+                        return http.build();
+                    }
+                }
+                """.formatted(
+                        profile.authType(),
+                        profile.routeRules().size(),
+                        authorizeChain,
+                        oauth2Block);
+
+        Files.writeString(pkg.resolve("GatewaySecurityConfig.java"), content);
+    }
+
+    /**
+     * Builds the {@code .authorizeExchange(...)} chain from the detected {@link SecurityProfile}.
+     * Always starts with infrastructure paths (actuator, docs, fallback) as permitAll.
+     * Detected route rules follow. Ends with either {@code authenticated()} (if rules found)
+     * or {@code permitAll()} (if no security detected).
+     */
+    private String buildAuthorizeChain(SecurityProfile profile) {
+        StringBuilder chain = new StringBuilder();
+
+        // Infrastructure paths — always public
+        chain.append("""
                                 .pathMatchers("/actuator/health", "/actuator/info",
                                         "/services/**", "/api-docs/**", "/swagger-ui/**",
                                         "/fallback/**").permitAll()
                                 .pathMatchers(authProps.getPublicPaths()).permitAll()
-                                .anyExchange().permitAll()
-                        );
+                """);
 
-                        // Auth GlobalFilter beans (auto-registered by Spring Cloud Gateway):
-                        //   JwtBearerFilter (order -90)  — HMAC-SHA256 Bearer JWT
-                        //   ApiKeyFilter (order -95)      — X-Api-Key header / api_key param
-                        //   BasicAuthGatewayFilter (order -85) — HTTP Basic credentials
-                        // These GlobalFilter beans must NOT be passed to addFilterBefore() because
-                        // that method expects WebFilter; Spring Cloud Gateway discovers them automatically.
+        // Detected route rules from monolith
+        for (RouteSecurityRule rule : profile.routeRules()) {
+            if (rule.permitAll()) {
+                chain.append("""
+                                        .pathMatchers("%s").permitAll()
+                        """.formatted(rule.pathPattern()));
+            } else if (rule.roles().size() == 1) {
+                chain.append("""
+                                        .pathMatchers("%s").hasRole("%s")
+                        """.formatted(rule.pathPattern(), rule.roles().get(0)));
+            } else {
+                String rolesArg = rule.roles().stream()
+                        .map(r -> "\"" + r + "\"")
+                        .collect(Collectors.joining(", "));
+                chain.append("""
+                                        .pathMatchers("%s").hasAnyRole(%s)
+                        """.formatted(rule.pathPattern(), rolesArg));
+            }
+        }
 
-                        // OAuth2 resource-server (external IdP): only active when explicitly enabled.
-                        // Bearer/Basic/ApiKey auth is enforced by the GlobalFilter beans directly.
-                        if (authProps.isEnabled() && authProps.getOauth2().isEnabled()) {
-                            http.oauth2ResourceServer(oauth2 -> oauth2
-                                    .jwt(jwt -> jwt.jwkSetUri(authProps.getOauth2().getJwkSetUri())));
-                        }
+        // Catch-all: authenticated if security was detected, otherwise open
+        if (profile.hasRouteRules() || profile.isAnyAuthDetected()) {
+            chain.append("                                .anyExchange().authenticated()");
+        } else {
+            chain.append("                                .anyExchange().permitAll()");
+        }
 
-                        return http.build();
-                    }
-                }
-                """;
-        Files.writeString(pkg.resolve("GatewaySecurityConfig.java"), content);
+        return chain.toString();
     }
 
     private void generateJwtBearerFilter(Path pkg) throws IOException {

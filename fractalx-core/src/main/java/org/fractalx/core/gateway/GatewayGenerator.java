@@ -70,33 +70,39 @@ public class GatewayGenerator {
         GatewayApplicationGenerator appGen = new GatewayApplicationGenerator();
         appGen.generateApplicationClass(srcMainJava);
 
-        // Step 4: Generate configuration
-        GatewayConfigGenerator configGen = new GatewayConfigGenerator();
-        configGen.generateConfig(srcMainResources, modules, allRoutes, fractalxConfig);
+        // Step 4: Detect monolith security configuration
+        SecurityProfile securityProfile = new SecurityAnalyzer().analyze(
+                sourceRoot, sourceRoot.resolve("src/main/resources"));
+        log.info("Monolith security profile — authType={} rules={}",
+                securityProfile.authType(), securityProfile.routeRules().size());
 
-        // Step 5: Generate documentation
+        // Step 5: Generate configuration (security profile drives YAML defaults + resilience4j)
+        GatewayConfigGenerator configGen = new GatewayConfigGenerator();
+        configGen.generateConfig(srcMainResources, modules, allRoutes, fractalxConfig, securityProfile);
+
+        // Step 6: Generate documentation
         ApiDocumentationGenerator docGen = new ApiDocumentationGenerator();
         docGen.generateDocumentation(gatewayRoot, modules, allRoutes);
 
-        // Step 6: Dynamic route locator (registry-backed with static fallback)
+        // Step 7: Dynamic route locator (registry-backed with static fallback)
         new GatewayRouteLocatorGenerator().generate(srcMainJava, modules);
 
-        // Step 7: Multi-mechanism security (OAuth2 / Bearer / Basic / API-Key)
-        new GatewaySecurityGenerator().generate(srcMainJava, modules);
+        // Step 8: Multi-mechanism security — mirrors monolith auth type and route rules
+        new GatewaySecurityGenerator().generate(srcMainJava, modules, securityProfile);
 
-        // Step 8: Gateway-level circuit breakers + fallback controller
+        // Step 9: Gateway-level circuit breakers + fallback controller
         new GatewayCircuitBreakerGenerator().generate(srcMainJava, modules);
 
-        // Step 9: In-memory rate limiter
+        // Step 10: In-memory rate limiter
         new GatewayRateLimiterGenerator().generate(srcMainJava, modules);
 
-        // Step 10: Global CORS filter
+        // Step 11: Global CORS filter
         new GatewayCorsGenerator().generate(srcMainJava);
 
-        // Step 11: Request tracing + structured logging + metrics filter
+        // Step 12: Request tracing + structured logging + metrics filter
         new GatewayObservabilityGenerator().generate(srcMainJava, modules);
 
-        // Step 12: OpenAPI 3.0.3 spec + Postman Collection v2.1 (with inline tests)
+        // Step 13: OpenAPI 3.0.3 spec + Postman Collection v2.1 (with inline tests)
         new GatewayOpenApiGenerator().generate(gatewayRoot, modules);
 
         log.info("✓ API Gateway generated at: {}", gatewayRoot.toAbsolutePath());
