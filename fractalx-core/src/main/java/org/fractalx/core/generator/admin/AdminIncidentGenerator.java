@@ -13,7 +13,7 @@ import java.nio.file.Path;
  * <p>Produces 3 classes in {@code org.fractalx.admin.incidents}:
  * <ol>
  *   <li>{@code Incident}          — immutable record with severity, status, timeline</li>
- *   <li>{@code IncidentStore}     — thread-safe in-memory store (pre-seeded with 1 example)</li>
+ *   <li>{@code IncidentStore}     — thread-safe in-memory store</li>
  *   <li>{@code IncidentController} — REST API: /api/incidents/**</li>
  * </ol>
  *
@@ -92,29 +92,17 @@ class AdminIncidentGenerator {
                 package org.fractalx.admin.incidents;
 
                 import org.springframework.stereotype.Component;
-                import java.time.Instant;
                 import java.util.*;
                 import java.util.concurrent.ConcurrentHashMap;
                 import java.util.stream.Collectors;
 
-                /** Thread-safe in-memory incident store. Pre-seeded with one example incident. */
+                /** Thread-safe in-memory incident store. */
                 @Component
                 public class IncidentStore {
 
                     private final ConcurrentHashMap<String, Incident> incidents = new ConcurrentHashMap<>();
 
-                    public IncidentStore() {
-                        // Seed one example resolved incident
-                        String id = UUID.randomUUID().toString();
-                        incidents.put(id, new Incident(
-                                id, "High latency on payment-service",
-                                "P99 response time exceeded 2s threshold during peak load.",
-                                "P2", "RESOLVED", "payment-service",
-                                "Resolved by increasing connection pool size.", "admin",
-                                Instant.now().minusSeconds(3600),
-                                Instant.now().minusSeconds(1800),
-                                Instant.now().minusSeconds(1800)));
-                    }
+                    public IncidentStore() {}
 
                     public List<Incident> getAll() {
                         return incidents.values().stream()
