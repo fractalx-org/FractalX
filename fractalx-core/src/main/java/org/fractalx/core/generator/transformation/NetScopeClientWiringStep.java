@@ -5,10 +5,13 @@ import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.FractalModule;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import org.slf4j.Logger;
@@ -18,6 +21,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Rewires cross-module service references in copied source files so they point to
@@ -135,6 +140,40 @@ public class NetScopeClientWiringStep implements ServiceFileGenerator {
         }
 
         if (modified) {
+            // Collect all *Client field names that were wired in this file
+            Set<String> clientFieldNames = deps.stream()
+                    .map(beanType -> decapitalize(beanType + "Client"))
+                    .collect(Collectors.toSet());
+
+            // For every concrete class in the file, add @Transactional to methods that
+            // call a wired *Client field but do not already have @Transactional.
+            for (ClassOrInterfaceDeclaration clazz : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                if (clazz.isInterface()) continue;
+
+                for (MethodDeclaration method : clazz.getMethods()) {
+                    if (method.getBody().isEmpty()) continue; // abstract / native
+
+                    boolean callsClient = method.findAll(MethodCallExpr.class).stream()
+                            .anyMatch(call -> call.getScope()
+                                    .filter(scope -> scope instanceof NameExpr)
+                                    .map(scope -> clientFieldNames.contains(((NameExpr) scope).getNameAsString()))
+                                    .orElse(false));
+
+                    if (!callsClient) continue;
+
+                    boolean alreadyAnnotated = method.getAnnotations().stream()
+                            .anyMatch(a -> a.getNameAsString().equals("Transactional")
+                                    || a.getNameAsString().endsWith(".Transactional"));
+
+                    if (!alreadyAnnotated) {
+                        method.addAnnotation("Transactional");
+                        cu.addImport("org.springframework.transaction.annotation.Transactional");
+                        log.info("Added @Transactional to {}#{} in {}",
+                                clazz.getNameAsString(), method.getNameAsString(), javaFile.getFileName());
+                    }
+                }
+            }
+
             Files.writeString(javaFile, cu.toString());
             log.info("Wired NetScope client references in: {}", javaFile.getFileName());
         }
