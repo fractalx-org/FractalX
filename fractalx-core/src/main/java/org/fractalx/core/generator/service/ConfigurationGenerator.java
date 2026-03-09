@@ -85,7 +85,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   endpoints:
                     web:
                       exposure:
-                        include: health,info,metrics,prometheus
+                        include: health,info,metrics,prometheus,refresh
                   endpoint:
                     health:
                       show-details: always
