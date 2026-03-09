@@ -140,40 +140,6 @@ public class NetScopeClientWiringStep implements ServiceFileGenerator {
         }
 
         if (modified) {
-            // Collect all *Client field names that were wired in this file
-            Set<String> clientFieldNames = deps.stream()
-                    .map(beanType -> decapitalize(beanType + "Client"))
-                    .collect(Collectors.toSet());
-
-            // For every concrete class in the file, add @Transactional to methods that
-            // call a wired *Client field but do not already have @Transactional.
-            for (ClassOrInterfaceDeclaration clazz : cu.findAll(ClassOrInterfaceDeclaration.class)) {
-                if (clazz.isInterface()) continue;
-
-                for (MethodDeclaration method : clazz.getMethods()) {
-                    if (method.getBody().isEmpty()) continue; // abstract / native
-
-                    boolean callsClient = method.findAll(MethodCallExpr.class).stream()
-                            .anyMatch(call -> call.getScope()
-                                    .filter(scope -> scope instanceof NameExpr)
-                                    .map(scope -> clientFieldNames.contains(((NameExpr) scope).getNameAsString()))
-                                    .orElse(false));
-
-                    if (!callsClient) continue;
-
-                    boolean alreadyAnnotated = method.getAnnotations().stream()
-                            .anyMatch(a -> a.getNameAsString().equals("Transactional")
-                                    || a.getNameAsString().endsWith(".Transactional"));
-
-                    if (!alreadyAnnotated) {
-                        method.addAnnotation("Transactional");
-                        cu.addImport("org.springframework.transaction.annotation.Transactional");
-                        log.info("Added @Transactional to {}#{} in {}",
-                                clazz.getNameAsString(), method.getNameAsString(), javaFile.getFileName());
-                    }
-                }
-            }
-
             Files.writeString(javaFile, cu.toString());
             log.info("Wired NetScope client references in: {}", javaFile.getFileName());
         }
