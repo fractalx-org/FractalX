@@ -949,10 +949,10 @@ class AdminTemplateGenerator {
                                 <div class="card-bd table-wrap">
                                     <table class="table table-sm mb-0">
                                         <thead><tr>
-                                            <th>Service</th><th>Schemas</th><th>Health</th><th>Row Count</th><th>Actions</th>
+                                            <th>Service</th><th>Schemas</th><th>Health</th><th>Actions</th>
                                         </tr></thead>
                                         <tbody id="databases-tbody">
-                                            <tr><td colspan="5" class="text-muted p-3">Loading…</td></tr>
+                                            <tr><td colspan="4" class="text-muted p-3">Loading…</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -1948,24 +1948,16 @@ class AdminTemplateGenerator {
                             tbody.innerHTML = '';
                             dbs.forEach(db => {
                                 const h = db.health || 'UNKNOWN';
-                                const summary = db.dbSummary;
-                                let rowCount = '—';
-                                if (summary && !summary.unavailable && summary.totalRows !== undefined) {
-                                    rowCount = summary.totalRows + ' rows';
-                                } else if (db.instanceCount !== undefined && db.instanceCount >= 0) {
-                                    rowCount = db.instanceCount + ' rows';
-                                }
                                 tbody.innerHTML += `<tr>
                                     <td>${db.service}</td>
                                     <td><small>${db.schemas || '-'}</small></td>
                                     <td><span class="badge ${h==='UP'?'badge-up':h==='DOWN'?'badge-down':'badge-unknown'} small">${h}</span></td>
-                                    <td class="text-muted small">${rowCount}</td>
                                     <td><button class="btn btn-xs btn-outline-info" onclick="showDbDetails('${db.service}')">Details</button></td>
                                 </tr>`;
                             });
                         }).catch(() => {
                             document.getElementById('databases-tbody').innerHTML =
-                                '<tr><td colspan="5" class="text-muted">DB health unavailable</td></tr>';
+                                '<tr><td colspan="4" class="text-muted">DB health unavailable</td></tr>';
                         });
 
                     fetch('/api/data/outbox')
