@@ -159,7 +159,7 @@ class AdminIncidentGenerator {
 
                 /**
                  * Incident management REST API.
-                 * All state is in-memory; restarts clear incidents except the seeded example.
+                 * All state is in-memory; restarts clear all incidents.
                  */
                 @RestController
                 @RequestMapping("/api/incidents")
