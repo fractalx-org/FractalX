@@ -222,23 +222,48 @@ public class MenuMojo extends FractalxBaseMojo {
 
     /**
      * Shows a service selector on the alt screen.
-     * For "start" the "All services" row is omitted — must pick a specific service.
-     * Each service line shows ● (green, running) or ○ (dim, stopped).
      *
-     * @return "" for All (stop/restart only), service name for a specific service,
-     *         null if user backed out.
+     * <ul>
+     *   <li>start   — all services shown; running ones are dim/non-selectable</li>
+     *   <li>restart — only running services, no "All services" row</li>
+     *   <li>stop    — only running services + "All services" row</li>
+     * </ul>
+     *
+     * @return "" for "All services" (stop only), a service name, or null if backed out.
      */
     private String pickService(FileInputStream tty, String commandName) throws IOException {
-        List<SvcEntry> entries = discoverServiceEntries();
-        boolean showAll = !commandName.equals("start");
+        List<SvcEntry> allEntries = discoverServiceEntries();
+        boolean isStart = commandName.equals("start");
+        boolean isStop  = commandName.equals("stop");
 
-        int total = showAll ? entries.size() + 1 : entries.size();
-        int optW  = entries.stream().mapToInt(e -> e.name().length()).max().orElse(12) + 3;
-        int sel   = 0;
+        // start shows all (running=disabled); stop+restart show only running
+        List<SvcEntry> entries = isStart
+                ? allEntries
+                : allEntries.stream().filter(SvcEntry::running).toList();
+
+        // Build list of selectable positions: -1 = "All services", >=0 = index into entries
+        List<Integer> selectable = new ArrayList<>();
+        if (isStop) selectable.add(-1);
+        for (int i = 0; i < entries.size(); i++) {
+            if (!isStart || !entries.get(i).running()) selectable.add(i);
+        }
+
+        int optW = Math.max(
+                entries.stream().mapToInt(e -> e.name().length()).max().orElse(8),
+                isStop ? "All services".length() : 0) + 3;
         String title = Character.toUpperCase(commandName.charAt(0))
                      + commandName.substring(1) + " \u2014 select service";
 
-        drawSubPicker(entries, sel, optW, title, showAll);
+        if (selectable.isEmpty()) {
+            drawSubPickerEmpty(title, isStart ? "No stopped services to start"
+                                              : "No running services");
+            tty.read();
+            return null;
+        }
+
+        int selIdx = 0;
+        int total  = selectable.size();
+        drawSubPicker(entries, selectable.get(selIdx), optW, title, isStop, isStart);
 
         while (true) {
             int b = tty.read();
@@ -249,38 +274,38 @@ public class MenuMojo extends FractalxBaseMojo {
                     int b2 = tty.read();
                     if (b2 == '[' && tty.available() > 0) {
                         int b3 = tty.read();
-                        if      (b3 == 'A') sel = (sel - 1 + total) % total;
-                        else if (b3 == 'B') sel = (sel + 1) % total;
+                        if      (b3 == 'A') selIdx = (selIdx - 1 + total) % total;
+                        else if (b3 == 'B') selIdx = (selIdx + 1) % total;
                     }
                 } else {
-                    return null;                // bare ESC → back
+                    return null;
                 }
             } else if (b == '\r' || b == '\n') {
-                break;                          // confirmed
+                break;
             } else if (b == 'q' || b == 3 || b == 4) {
-                return null;                    // back to main menu
-            } else if (b == 'k') sel = (sel - 1 + total) % total;
-            else if  (b == 'j') sel = (sel + 1) % total;
+                return null;
+            } else if (b == 'k') selIdx = (selIdx - 1 + total) % total;
+            else if  (b == 'j') selIdx = (selIdx + 1) % total;
 
-            drawSubPicker(entries, sel, optW, title, showAll);
+            drawSubPicker(entries, selectable.get(selIdx), optW, title, isStop, isStart);
         }
 
-        if (showAll) {
-            return sel == 0 ? "" : entries.get(sel - 1).name();
-        } else {
-            return entries.get(sel).name();
-        }
+        int chosen = selectable.get(selIdx);
+        return chosen == -1 ? "" : entries.get(chosen).name();
     }
 
-    private void drawSubPicker(List<SvcEntry> entries, int selected, int optW,
-                               String title, boolean showAll) {
-        // "●" U+25CF (filled circle) = running, "○" U+25CB (empty circle) = stopped
+    /**
+     * @param selectedEntryIdx  index into entries currently highlighted, or -1 for "All services"
+     * @param showAll           show the "All services" row (stop only)
+     * @param showDisabled      render running services as non-selectable dim rows (start only)
+     */
+    private void drawSubPicker(List<SvcEntry> entries, int selectedEntryIdx, int optW,
+                               String title, boolean showAll, boolean showDisabled) {
         final String DOT_UP   = GRN + "\u25CF" + RST;
         final String DOT_DOWN = DIM + "\u25CB" + RST;
 
         StringBuilder sb = new StringBuilder();
-        sb.append(HOME);
-        sb.append("\r\033[2K\r\n");
+        sb.append(HOME).append("\r\033[2K\r\n");
 
         for (int i = 0; i < BANNER.length; i++) {
             String color = i < BANNER_COLORS.length ? BANNER_COLORS[i] : "";
@@ -297,29 +322,54 @@ public class MenuMojo extends FractalxBaseMojo {
           .append("\u25CB").append(" stopped").append(RST).append("\r\n");
         sb.append("\r\033[2K\r\n");
 
-        // Row 0: "All services" — only shown for stop/restart
+        // "All services" row — stop only
         if (showAll) {
-            boolean isSel  = (selected == 0);
-            String cursor  = isSel ? GRN + "\u25B6" + RST : " ";
-            String name    = isSel ? BLD + pad("All services", optW) + RST
-                                   : DIM + pad("All services", optW) + RST;
+            boolean isSel = (selectedEntryIdx == -1);
+            String cursor = isSel ? GRN + "\u25B6" + RST : " ";
+            String name   = isSel ? BLD + pad("All services", optW) + RST
+                                  : DIM + pad("All services", optW) + RST;
             sb.append("\r\033[2K  ").append(cursor).append("  ").append(name).append("\r\n");
         }
 
-        // Service rows: offset by 1 when showAll, 0 when not
         for (int i = 0; i < entries.size(); i++) {
-            SvcEntry e    = entries.get(i);
-            int rowIdx    = showAll ? i + 1 : i;
-            boolean isSel = (selected == rowIdx);
-            String cursor = isSel ? GRN + "\u25B6" + RST : " ";
-            String dot    = e.running() ? DOT_UP : DOT_DOWN;
-            String name   = isSel ? BLD + pad(e.name(), optW) + RST
-                                  : (e.running() ? pad(e.name(), optW) : DIM + pad(e.name(), optW) + RST);
-            String status = e.running() ? GRN + "running" + RST : DIM + "stopped" + RST;
+            SvcEntry e       = entries.get(i);
+            boolean disabled = showDisabled && e.running();
+            boolean isSel    = !disabled && (selectedEntryIdx == i);
+            String dot       = e.running() ? DOT_UP : DOT_DOWN;
+            String status    = e.running() ? GRN + "running" + RST : DIM + "stopped" + RST;
+            String cursor, name;
+            if (disabled) {
+                cursor = DIM + "-" + RST;
+                name   = DIM + pad(e.name(), optW) + RST;
+            } else {
+                cursor = isSel ? GRN + "\u25B6" + RST : " ";
+                name   = isSel ? BLD + pad(e.name(), optW) + RST
+                               : (e.running() ? pad(e.name(), optW)
+                                              : DIM + pad(e.name(), optW) + RST);
+            }
             sb.append("\r\033[2K  ").append(cursor).append("  ")
               .append(dot).append(" ").append(name).append("  ").append(status).append("\r\n");
         }
 
+        sb.append(CLR_END);
+        out.print(sb);
+        out.flush();
+    }
+
+    private void drawSubPickerEmpty(String title, String message) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(HOME).append("\r\033[2K\r\n");
+        for (int i = 0; i < BANNER.length; i++) {
+            String color = i < BANNER_COLORS.length ? BANNER_COLORS[i] : "";
+            sb.append("\r\033[2K").append(color).append(BANNER[i]).append(RST).append("\r\n");
+        }
+        sb.append("\r\033[2K\r\n");
+        sb.append("\r\033[2K  ").append(DIM).append(title).append("  ")
+          .append(FractalxVersion.get()).append(RST).append("\r\n");
+        sb.append("\r\033[2K\r\n");
+        sb.append("\r\033[2K  ").append(YLW).append(message).append(RST).append("\r\n");
+        sb.append("\r\033[2K\r\n");
+        sb.append("\r\033[2K  ").append(DIM).append("Press any key to go back").append(RST).append("\r\n");
         sb.append(CLR_END);
         out.print(sb);
         out.flush();
@@ -348,24 +398,34 @@ public class MenuMojo extends FractalxBaseMojo {
                 String service = "";
 
                 if (isServiceCommand(name)) {
-                    List<SvcEntry> svcs = discoverServiceEntries();
-                    boolean showAll = !name.equals("start");
+                    List<SvcEntry> allSvcs = discoverServiceEntries();
+                    boolean isStart = name.equals("start");
+                    boolean isStop  = name.equals("stop");
+                    // start: only stopped services selectable; stop+restart: only running
+                    List<SvcEntry> svcs = isStart
+                            ? allSvcs.stream().filter(e -> !e.running()).toList()
+                            : allSvcs.stream().filter(SvcEntry::running).toList();
                     out.println();
-                    if (showAll) out.println("  [0] All services");
+                    if (svcs.isEmpty()) {
+                        out.println("  " + (isStart ? "No stopped services to start."
+                                                    : "No running services."));
+                        out.println();
+                        continue;
+                    }
+                    if (isStop) out.println("  [0] All services");
                     for (int i = 0; i < svcs.size(); i++) {
-                        SvcEntry e = svcs.get(i);
-                        String status = e.running() ? " [running]" : " [stopped]";
-                        out.println("  [" + (i + 1) + "] " + e.name() + status);
+                        String status = svcs.get(i).running() ? " [running]" : " [stopped]";
+                        out.println("  [" + (i + 1) + "] " + svcs.get(i).name() + status);
                     }
                     out.println();
-                    out.print(showAll ? "  Select service (0 for all): " : "  Select service: ");
+                    out.print(isStop ? "  Select service (0 for all): " : "  Select service: ");
                     out.flush();
                     if (sc.hasNextInt()) {
                         int s = sc.nextInt();
-                        if (showAll) {
-                            if (s > 0 && s <= svcs.size()) service = svcs.get(s - 1).name();
-                        } else {
-                            if (s >= 1 && s <= svcs.size()) service = svcs.get(s - 1).name();
+                        if (isStop && s == 0) {
+                            service = "";   // All services
+                        } else if (s >= 1 && s <= svcs.size()) {
+                            service = svcs.get(s - 1).name();
                         }
                     }
                 }
