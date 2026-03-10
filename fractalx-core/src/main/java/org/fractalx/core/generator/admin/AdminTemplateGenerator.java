@@ -161,6 +161,7 @@ class AdminTemplateGenerator {
             + buildScriptsIncidents()
             + buildScriptsConfigEditor()
             + buildScriptsCircuitBreaker()
+            + buildScriptsDecompositionStats()
             + buildScriptsOverviewEnhanced()
             + buildScriptsMobileNav()
             + "</script>\n</body>\n</html>\n";
@@ -561,6 +562,9 @@ class AdminTemplateGenerator {
                         </div>
                         <div class="nav-grp">
                             <div class="nav-lbl">Architecture</div>
+                            <a href="#" onclick="showSection('decomposition');closeSidebar()" id="nav-decomposition">
+                                <i class="fas fa-cubes ni"></i> Decomposition
+                            </a>
                             <a href="#" onclick="showSection('communication');closeSidebar()" id="nav-communication">
                                 <i class="fas fa-project-diagram ni"></i> Communication
                             </a>
@@ -647,15 +651,15 @@ class AdminTemplateGenerator {
                             <button class="btn btn-light btn-sm" onclick="refreshCurrent()">
                                 <i class="fas fa-sync-alt"></i> Refresh
                             </button>
-                            <a href="/api/auth/profile" class="d-flex align-items-center gap-2 text-decoration-none"
-                               style="font-size:13px;color:var(--t2)">
+                            <span class="d-flex align-items-center gap-2"
+                               style="font-size:13px;color:var(--t2);cursor:default">
                                 <span style="width:26px;height:26px;background:#f3f4f6;border:1px solid var(--bdr);
                                              border-radius:50%;display:flex;align-items:center;justify-content:center;
                                              font-size:11px;color:var(--t2)">
                                     <i class="fas fa-user"></i>
                                 </span>
                                 <span id="current-user" style="font-weight:500;color:var(--t1)">admin</span>
-                            </a>
+                            </span>
                         </div>
                     </header>
                 """;
@@ -834,6 +838,61 @@ class AdminTemplateGenerator {
 
     private String buildSectionCommunication() {
         return """
+                    <div id="section-decomposition" class="section">
+                        <div class="page-header">
+                            <div>
+                                <h1 class="page-title-h">Decomposition</h1>
+                                <p class="page-sub">Stats and breakdown from the last FractalX decomposition run</p>
+                            </div>
+                            <button class="btn btn-sm btn-primary" onclick="loadDecompositionStats()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                        <!-- Summary stat cards -->
+                        <div id="decomp-cards" class="row g-3 mb-3">
+                            <div class="col-12 text-center text-muted p-4">Loading…</div>
+                        </div>
+                        <!-- Services breakdown -->
+                        <div class="card2 mb-3">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-cubes" style="color:#6366f1"></i>
+                                    <span>Services Breakdown</span>
+                                </div>
+                            </div>
+                            <div class="card-bd table-wrap">
+                                <table class="table table-sm mb-0">
+                                    <thead><tr>
+                                        <th>Service</th><th>Class</th><th>Port</th>
+                                        <th>gRPC Port</th><th>Dependencies</th>
+                                        <th>Schemas</th><th>Indep. Deploy</th>
+                                    </tr></thead>
+                                    <tbody id="decomp-services-tbody">
+                                        <tr><td colspan="7" class="text-muted p-4 text-center">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <!-- Sagas breakdown -->
+                        <div class="card2" id="decomp-sagas-card" style="display:none">
+                            <div class="card-hd">
+                                <div class="card-hd-l">
+                                    <i class="fas fa-random" style="color:#8b5cf6"></i>
+                                    <span>Distributed Sagas</span>
+                                </div>
+                            </div>
+                            <div class="card-bd table-wrap">
+                                <table class="table table-sm mb-0">
+                                    <thead><tr>
+                                        <th>Saga ID</th><th>Service</th><th>Method</th>
+                                        <th>Steps</th><th>Timeout</th>
+                                    </tr></thead>
+                                    <tbody id="decomp-sagas-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="section-communication" class="section">
                         <div class="card2">
                             <div class="card-hd">
@@ -1257,10 +1316,10 @@ class AdminTemplateGenerator {
         return """
                     <div id="section-settings" class="section">
                         <div class="settings-tabs">
-                            <button class="tab-btn active" onclick="showSettingsTab('users')">
+                            <button class="tab-btn" onclick="showSettingsTab('users')" style="display:none">
                                 <i class="fas fa-users me-1"></i>Users
                             </button>
-                            <button class="tab-btn" onclick="showSettingsTab('configuration')">
+                            <button class="tab-btn active" onclick="showSettingsTab('configuration')">
                                 <i class="fas fa-sliders-h me-1"></i>Configuration
                             </button>
                             <button class="tab-btn" onclick="showSettingsTab('notifications')">
@@ -1271,7 +1330,7 @@ class AdminTemplateGenerator {
                             </button>
                         </div>
 
-                        <div id="settings-pane-users" class="settings-pane active">
+                        <div id="settings-pane-users" class="settings-pane" style="display:none">
                             <div class="card2">
                                 <div class="card-hd">
                                     <div class="card-hd-l">
@@ -1297,7 +1356,7 @@ class AdminTemplateGenerator {
                             </div>
                         </div>
 
-                        <div id="settings-pane-configuration" class="settings-pane">
+                        <div id="settings-pane-configuration" class="settings-pane active">
                             <div class="card2">
                                 <div class="card-hd">
                                     <div class="card-hd-l">
@@ -1356,7 +1415,7 @@ class AdminTemplateGenerator {
                                 </div>
                                 <div class="card-bd p-4">
                                     <form onsubmit="updateSettings(event)">
-                                        <div class="mb-3">
+                                        <div class="mb-3" style="display:none">
                                             <label class="form-label">Site Name</label>
                                             <input type="text" class="form-control" id="setting-site-name"
                                                    value="FractalX Admin">
@@ -1366,12 +1425,12 @@ class AdminTemplateGenerator {
                                             <input type="number" class="form-control"
                                                    id="setting-session-timeout" value="30" min="5" max="1440">
                                         </div>
-                                        <div class="mb-3">
+                                        <div class="mb-3" style="display:none">
                                             <label class="form-label">Default Alert Email</label>
                                             <input type="email" class="form-control" id="setting-alert-email"
                                                    placeholder="alerts@example.com">
                                         </div>
-                                        <div class="mb-4 form-check">
+                                        <div class="mb-4 form-check" style="display:none">
                                             <input type="checkbox" class="form-check-input" id="setting-maintenance">
                                             <label class="form-check-label" for="setting-maintenance"
                                                    style="font-weight:400">Maintenance Mode</label>
@@ -1383,6 +1442,42 @@ class AdminTemplateGenerator {
                                             <span id="settings-save-status" class="text-muted"
                                                   style="font-size:12px;display:none">
                                                 <i class="fas fa-check" style="color:#10b981"></i> Saved
+                                            </span>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <div class="card2" style="max-width:560px;margin-top:16px">
+                                <div class="card-hd">
+                                    <div class="card-hd-l">
+                                        <i class="fas fa-key" style="color:#f59e0b"></i>
+                                        <span>Change Password</span>
+                                    </div>
+                                </div>
+                                <div class="card-bd p-4">
+                                    <form onsubmit="changeAdminPassword(event)">
+                                        <div class="mb-3">
+                                            <label class="form-label">New Password</label>
+                                            <input type="password" class="form-control"
+                                                   id="gen-new-password" placeholder="Enter new password"
+                                                   minlength="6" required>
+                                        </div>
+                                        <div class="mb-4">
+                                            <label class="form-label">Confirm New Password</label>
+                                            <input type="password" class="form-control"
+                                                   id="gen-confirm-password" placeholder="Confirm new password"
+                                                   minlength="6" required>
+                                        </div>
+                                        <div id="change-pw-error" class="text-danger mb-2"
+                                             style="font-size:13px;display:none"></div>
+                                        <div class="d-flex align-items-center gap-3">
+                                            <button type="submit" class="btn btn-warning">
+                                                <i class="fas fa-key"></i> Update Password
+                                            </button>
+                                            <span id="change-pw-status" class="text-success"
+                                                  style="font-size:13px;display:none">
+                                                <i class="fas fa-check"></i> Password updated
                                             </span>
                                         </div>
                                     </form>
@@ -1591,7 +1686,8 @@ class AdminTemplateGenerator {
                         analytics: loadAnalyticsSection, explorer: loadExplorerServices,
                         networkmap: loadNetworkMap, grpc: loadGrpcBrowser,
                         incidents: loadIncidents, configeditor: loadConfigEditor,
-                        circuitbreaker: loadCircuitBreakers
+                        circuitbreaker: loadCircuitBreakers,
+                        decomposition: loadDecompositionStats
                     };
                     if (fn[currentSection]) fn[currentSection]();
                     document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
@@ -2709,6 +2805,46 @@ class AdminTemplateGenerator {
                         status.style.display = '';
                         setTimeout(() => status.style.display = 'none', 2000);
                     }).catch(() => {});
+                }
+
+                function changeAdminPassword(e) {
+                    e.preventDefault();
+                    const errEl    = document.getElementById('change-pw-error');
+                    const statusEl = document.getElementById('change-pw-status');
+                    errEl.style.display    = 'none';
+                    statusEl.style.display = 'none';
+                    const newPw  = document.getElementById('gen-new-password').value;
+                    const confPw = document.getElementById('gen-confirm-password').value;
+                    if (newPw !== confPw) {
+                        errEl.textContent    = 'Passwords do not match';
+                        errEl.style.display  = '';
+                        return;
+                    }
+                    fetch('/api/auth/profile')
+                        .then(r => r.json())
+                        .then(profile => {
+                            const username = profile.username;
+                            return fetch('/api/users/' + username + '/password', {
+                                method: 'PUT',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({newPassword: newPw})
+                            });
+                        })
+                        .then(r => {
+                            if (r.ok) {
+                                document.getElementById('gen-new-password').value     = '';
+                                document.getElementById('gen-confirm-password').value = '';
+                                statusEl.style.display = '';
+                                setTimeout(() => statusEl.style.display = 'none', 3000);
+                            } else {
+                                errEl.textContent   = 'Failed to update password';
+                                errEl.style.display = '';
+                            }
+                        })
+                        .catch(() => {
+                            errEl.textContent   = 'Error contacting server';
+                            errEl.style.display = '';
+                        });
                 }
 
                 function loadCurrentUser() {
@@ -4528,6 +4664,106 @@ Click "Show Diff" above to compare active overrides against the base configurati
                             if (rps) rps.textContent = (d.totalRps || 0).toFixed(1);
                             if (cpu) cpu.textContent = (d.avgCpu || 0).toFixed(1) + '%';
                         }).catch(() => {});
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: decomposition stats ----------------------------------------
+
+    private String buildScriptsDecompositionStats() {
+        return """
+                // ── Decomposition Stats ─────────────────────────────────────────────────────
+                function loadDecompositionStats() {
+                    Promise.all([
+                        fetch('/api/decomposition/stats').then(r => r.json()),
+                        fetch('/api/decomposition/services').then(r => r.json()),
+                        fetch('/api/decomposition/sagas').then(r => r.json())
+                    ]).then(([stats, services, sagas]) => {
+                        renderDecompCards(stats);
+                        renderDecompServices(services);
+                        renderDecompSagas(sagas);
+                    }).catch(() => {
+                        document.getElementById('decomp-cards').innerHTML =
+                            '<div class="col-12 text-danger text-center p-4">Failed to load decomposition stats</div>';
+                    });
+                }
+
+                function renderDecompCards(s) {
+                    const fmt = v => v != null ? v : '-';
+                    document.getElementById('decomp-cards').innerHTML = `
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card text-center">
+                                <div class="text-muted" style="font-size:11px;margin-bottom:4px">MICROSERVICES</div>
+                                <div style="font-size:26px;font-weight:700;color:#6366f1">${fmt(s.totalServices)}</div>
+                                <div class="text-muted" style="font-size:11px">Generated</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card text-center">
+                                <div class="text-muted" style="font-size:11px;margin-bottom:4px">CROSS-SERVICE DEPS</div>
+                                <div style="font-size:26px;font-weight:700;color:#3b82f6">${fmt(s.totalDependencies)}</div>
+                                <div class="text-muted" style="font-size:11px">${fmt(s.servicesWithDeps)} services affected</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card text-center">
+                                <div class="text-muted" style="font-size:11px;margin-bottom:4px">DB SCHEMAS</div>
+                                <div style="font-size:26px;font-weight:700;color:#10b981">${fmt(s.totalSchemas)}</div>
+                                <div class="text-muted" style="font-size:11px">${fmt(s.servicesWithDb)} services with DB</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card text-center">
+                                <div class="text-muted" style="font-size:11px;margin-bottom:4px">SAGAS</div>
+                                <div style="font-size:26px;font-weight:700;color:#f59e0b">${fmt(s.totalSagas)}</div>
+                                <div class="text-muted" style="font-size:11px">${fmt(s.totalSagaSteps)} total steps</div>
+                            </div>
+                        </div>
+                        <div class="col-12 mt-1" style="font-size:11px;color:#9ca3af;text-align:right">
+                            FractalX ${s.fractalxVersion || ''} &nbsp;·&nbsp; Generated at ${s.generatedAt ? new Date(s.generatedAt).toLocaleString() : ''}
+                        </div>`;
+                }
+
+                function renderDecompServices(services) {
+                    const tbody = document.getElementById('decomp-services-tbody');
+                    tbody.innerHTML = '';
+                    if (!services.length) {
+                        tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center p-4">No services</td></tr>';
+                        return;
+                    }
+                    services.forEach(s => {
+                        const deps = (s.dependencies || []).join(', ') || '<span class="text-muted">none</span>';
+                        const schemas = (s.ownedSchemas || []).join(', ') || '<span class="text-muted">none</span>';
+                        tbody.innerHTML += `<tr>
+                            <td><strong>${s.name}</strong></td>
+                            <td><code style="font-size:11px">${s.className}</code></td>
+                            <td><code>${s.port}</code></td>
+                            <td><code>${s.grpcPort}</code></td>
+                            <td style="font-size:12px">${deps}</td>
+                            <td style="font-size:12px">${schemas}</td>
+                            <td>${s.independentDeployment
+                                ? '<span class="badge badge-up">Yes</span>'
+                                : '<span class="badge badge-unknown">No</span>'}</td>
+                        </tr>`;
+                    });
+                }
+
+                function renderDecompSagas(sagas) {
+                    const card = document.getElementById('decomp-sagas-card');
+                    if (!sagas.length) { card.style.display = 'none'; return; }
+                    card.style.display = '';
+                    const tbody = document.getElementById('decomp-sagas-tbody');
+                    tbody.innerHTML = '';
+                    sagas.forEach(s => {
+                        const timeout = s.timeoutMs ? (s.timeoutMs / 1000) + 's' : '-';
+                        tbody.innerHTML += `<tr>
+                            <td><code style="font-size:11px">${s.sagaId}</code></td>
+                            <td>${s.service}</td>
+                            <td><code style="font-size:11px">${s.method}</code></td>
+                            <td><span class="badge bg-secondary">${s.steps}</span></td>
+                            <td class="text-muted">${timeout}</td>
+                        </tr>`;
+                    });
                 }
                 """;
     }
