@@ -160,6 +160,7 @@ class AdminTemplateGenerator {
             + buildScriptsGrpcBrowser()
             + buildScriptsIncidents()
             + buildScriptsConfigEditor()
+            + buildScriptsCircuitBreaker()
             + buildScriptsOverviewEnhanced()
             + buildScriptsMobileNav()
             + "</script>\n</body>\n</html>\n";
@@ -587,6 +588,9 @@ class AdminTemplateGenerator {
                             </a>
                             <a href="#" onclick="showSection('analytics');closeSidebar()" id="nav-analytics">
                                 <i class="fas fa-chart-bar ni"></i> Analytics
+                            </a>
+                            <a href="#" onclick="showSection('circuitbreaker');closeSidebar()" id="nav-circuitbreaker" style="display:none">
+                                <i class="fas fa-circle-notch ni"></i> Circuit Breakers
                             </a>
                         </div>
                         <div class="nav-grp">
@@ -1586,7 +1590,8 @@ class AdminTemplateGenerator {
                         settings: loadSettingsSection,
                         analytics: loadAnalyticsSection, explorer: loadExplorerServices,
                         networkmap: loadNetworkMap, grpc: loadGrpcBrowser,
-                        incidents: loadIncidents, configeditor: loadConfigEditor
+                        incidents: loadIncidents, configeditor: loadConfigEditor,
+                        circuitbreaker: loadCircuitBreakers
                     };
                     if (fn[currentSection]) fn[currentSection]();
                     document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
@@ -3335,6 +3340,46 @@ class AdminTemplateGenerator {
 
     private String buildSectionIncidentsA() {
         return """
+                <div class="section" id="section-circuitbreaker">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title-h">Circuit Breakers</h1>
+                            <p class="page-sub">Real-time Resilience4j circuit breaker state across all microservices</p>
+                        </div>
+                        <button class="btn btn-sm btn-primary" onclick="loadCircuitBreakers()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                    <div id="cb-summary-cards" class="row g-3 mb-3">
+                        <div class="col-12 text-center text-muted p-4">Loading circuit breakers…</div>
+                    </div>
+                    <div class="card2">
+                        <div class="card-hd">
+                            <div class="card-hd-l">
+                                <i class="fas fa-circle-notch" style="color:#6366f1"></i>
+                                <span>Circuit Breaker States</span>
+                            </div>
+                        </div>
+                        <div class="card-bd table-wrap">
+                            <table class="table table-sm mb-0">
+                                <thead><tr>
+                                    <th>Service</th>
+                                    <th>Circuit Breaker</th>
+                                    <th>State</th>
+                                    <th>Failure Rate</th>
+                                    <th>Slow Call Rate</th>
+                                    <th>Buffered</th>
+                                    <th>Failed</th>
+                                    <th>Not Permitted</th>
+                                </tr></thead>
+                                <tbody id="cb-tbody">
+                                    <tr><td colspan="8" class="text-muted p-4 text-center">Loading…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="section" id="section-incidents">
                     <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start">
                         <div>
@@ -4483,6 +4528,96 @@ Click "Show Diff" above to compare active overrides against the base configurati
                             if (rps) rps.textContent = (d.totalRps || 0).toFixed(1);
                             if (cpu) cpu.textContent = (d.avgCpu || 0).toFixed(1) + '%';
                         }).catch(() => {});
+                }
+                """;
+    }
+
+    // ---- SCRIPTS: circuit breakers ------------------------------------------
+
+    private String buildScriptsCircuitBreaker() {
+        return """
+                // ── Circuit Breakers ────────────────────────────────────────────────────────
+                function loadCircuitBreakers() {
+                    const tbody = document.getElementById('cb-tbody');
+                    const cards = document.getElementById('cb-summary-cards');
+                    if (!tbody) return;
+                    tbody.innerHTML = '<tr><td colspan="8" class="text-muted p-4 text-center">Loading…</td></tr>';
+                    fetch('/api/circuit-breakers')
+                        .then(r => r.json()).then(data => {
+                            tbody.innerHTML = '';
+                            cards.innerHTML = '';
+                            let totalOpen = 0, totalHalf = 0, totalClosed = 0;
+                            data.forEach(svc => {
+                                if (!svc.reachable) {
+                                    tbody.innerHTML += `<tr>
+                                        <td><strong>${svc.service}</strong></td>
+                                        <td colspan="7" class="text-muted small">
+                                            <i class="fas fa-exclamation-circle text-warning me-1"></i>
+                                            Service unreachable — actuator may be offline
+                                        </td></tr>`;
+                                    return;
+                                }
+                                if (!svc.circuitBreakers || svc.circuitBreakers.length === 0) {
+                                    tbody.innerHTML += `<tr>
+                                        <td><strong>${svc.service}</strong></td>
+                                        <td colspan="7" class="text-muted small">No circuit breakers registered</td>
+                                    </tr>`;
+                                    return;
+                                }
+                                svc.circuitBreakers.forEach((cb, idx) => {
+                                    const state = cb.state || 'UNKNOWN';
+                                    if (state === 'OPEN')      totalOpen++;
+                                    else if (state === 'HALF_OPEN') totalHalf++;
+                                    else if (state === 'CLOSED')    totalClosed++;
+                                    const stateClass = state === 'CLOSED'    ? 'badge-up'
+                                                     : state === 'OPEN'      ? 'badge-down'
+                                                     : state === 'HALF_OPEN' ? 'bg-warning text-dark'
+                                                     : 'badge-unknown';
+                                    const svcCell = idx === 0
+                                        ? `<td rowspan="${svc.circuitBreakers.length}"><strong>${svc.service}</strong></td>`
+                                        : '';
+                                    tbody.innerHTML += `<tr>
+                                        ${svcCell}
+                                        <td><code style="font-size:11px">${cb.name}</code></td>
+                                        <td><span class="badge ${stateClass}">${state}</span></td>
+                                        <td>${cb.failureRate ?? '-'}</td>
+                                        <td>${cb.slowCallRate ?? '-'}</td>
+                                        <td>${cb.bufferedCalls ?? '-'}</td>
+                                        <td>${cb.failedCalls ?? '-'}</td>
+                                        <td>${cb.notPermittedCalls ?? '-'}</td>
+                                    </tr>`;
+                                });
+                            });
+                            if (!tbody.innerHTML) {
+                                tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center p-4">No circuit breakers found</td></tr>';
+                            }
+                            // Summary cards
+                            cards.innerHTML = `
+                                <div class="col-sm-4">
+                                    <div class="stat-card text-center">
+                                        <div class="text-muted" style="font-size:11px;margin-bottom:4px">CLOSED</div>
+                                        <div style="font-size:22px;font-weight:700;color:#22c55e">${totalClosed}</div>
+                                        <div class="text-muted" style="font-size:11px">Healthy</div>
+                                    </div>
+                                </div>
+                                <div class="col-sm-4">
+                                    <div class="stat-card text-center">
+                                        <div class="text-muted" style="font-size:11px;margin-bottom:4px">HALF OPEN</div>
+                                        <div style="font-size:22px;font-weight:700;color:#f59e0b">${totalHalf}</div>
+                                        <div class="text-muted" style="font-size:11px">Recovering</div>
+                                    </div>
+                                </div>
+                                <div class="col-sm-4">
+                                    <div class="stat-card text-center">
+                                        <div class="text-muted" style="font-size:11px;margin-bottom:4px">OPEN</div>
+                                        <div style="font-size:22px;font-weight:700;color:#ef4444">${totalOpen}</div>
+                                        <div class="text-muted" style="font-size:11px">Tripped</div>
+                                    </div>
+                                </div>`;
+                        }).catch(() => {
+                            tbody.innerHTML = '<tr><td colspan="8" class="text-danger p-4 text-center">Failed to load circuit breaker data</td></tr>';
+                            cards.innerHTML = '';
+                        });
                 }
                 """;
     }

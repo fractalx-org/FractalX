@@ -37,6 +37,7 @@ import java.util.List;
  *   <li>{@link AdminIncidentGenerator} — Incident, IncidentStore, IncidentController (/api/incidents/**)</li>
  *   <li>{@link AdminGrpcBrowserGenerator} — GrpcBrowserController (/api/grpc/**)</li>
  *   <li>{@link AdminConfigEditorGenerator} — ConfigEditorController (/api/config/editor/**)</li>
+ *   <li>{@link AdminCircuitBreakerGenerator} — CircuitBreakerController (/api/circuit-breakers/**)</li>
  * </ul>
  */
 public class AdminServiceGenerator {
@@ -69,6 +70,7 @@ public class AdminServiceGenerator {
     private final AdminIncidentGenerator          incidentGenerator;
     private final AdminGrpcBrowserGenerator       grpcBrowserGenerator;
     private final AdminConfigEditorGenerator      configEditorGenerator;
+    private final AdminCircuitBreakerGenerator    circuitBreakerGenerator;
 
     public AdminServiceGenerator() {
         this.pomGenerator             = new AdminPomGenerator();
@@ -93,6 +95,7 @@ public class AdminServiceGenerator {
         this.incidentGenerator        = new AdminIncidentGenerator();
         this.grpcBrowserGenerator     = new AdminGrpcBrowserGenerator();
         this.configEditorGenerator    = new AdminConfigEditorGenerator();
+        this.circuitBreakerGenerator  = new AdminCircuitBreakerGenerator();
     }
 
     public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot)
@@ -154,6 +157,7 @@ public class AdminServiceGenerator {
         incidentGenerator.generate(srcMainJava, BASE_PACKAGE);
         grpcBrowserGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
         configEditorGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        circuitBreakerGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
 
         // Template last (depends on all sub-systems being set up first)
         templateGenerator.generate(templatesPath, modules);

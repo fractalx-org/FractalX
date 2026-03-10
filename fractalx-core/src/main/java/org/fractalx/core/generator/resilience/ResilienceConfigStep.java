@@ -88,6 +88,7 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
             yaml.append("        wait-duration-in-open-state: 30s\n");
             yaml.append("        permitted-number-of-calls-in-half-open-state: 5\n");
             yaml.append("        sliding-window-size: 10\n");
+            yaml.append("        register-health-indicator: true\n");
         }
         yaml.append("  retry:\n    instances:\n");
         for (String dep : dependencies) {
