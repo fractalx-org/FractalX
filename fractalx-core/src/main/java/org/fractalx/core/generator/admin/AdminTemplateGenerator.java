@@ -642,14 +642,14 @@ class AdminTemplateGenerator {
                             <button class="btn btn-light btn-sm" onclick="refreshCurrent()">
                                 <i class="fas fa-sync-alt"></i> Refresh
                             </button>
-                            <a href="/api/auth/profile" class="d-flex align-items-center gap-2 text-decoration-none"
-                               style="font-size:13px;color:var(--t2)">
-                                <span style="width:26px;height:26px;background:#f3f4f6;border:1px solid var(--bdr);
+                            <a href="/api/auth/profile"
+                               style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;line-height:1">
+                                <span style="width:28px;height:28px;background:#f3f4f6;border:1px solid var(--bdr);
                                              border-radius:50%;display:flex;align-items:center;justify-content:center;
-                                             font-size:11px;color:var(--t2)">
+                                             font-size:11px;color:var(--t2);flex-shrink:0">
                                     <i class="fas fa-user"></i>
                                 </span>
-                                <span id="current-user" style="font-weight:500;color:var(--t1)">admin</span>
+                                <span id="current-user" style="font-size:13px;font-weight:500;color:var(--t1)">admin</span>
                             </a>
                         </div>
                     </header>
