@@ -91,11 +91,20 @@ public class StopMojo extends FractalxBaseMojo {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private static final boolean WINDOWS =
+            System.getProperty("os.name", "").toLowerCase().contains("win");
+
     private void killByPort(int port) throws IOException, InterruptedException {
         if (port < 0) return;
-        // lsof -ti :PORT | xargs kill -9   (macOS / Linux)
-        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c",
-                "lsof -ti :" + port + " | xargs kill -9 2>/dev/null || true");
+        ProcessBuilder pb;
+        if (WINDOWS) {
+            // netstat -ano | findstr :<PORT>  → extract PID → taskkill /F /PID <pid>
+            pb = new ProcessBuilder("cmd.exe", "/c",
+                    "for /f \"tokens=5\" %a in ('netstat -ano ^| findstr /R \":" + port + "\\>\"') do taskkill /F /PID %a 2>nul");
+        } else {
+            pb = new ProcessBuilder("/bin/sh", "-c",
+                    "lsof -ti :" + port + " | xargs kill -9 2>/dev/null || true");
+        }
         pb.start().waitFor();
     }
 
@@ -112,7 +121,10 @@ public class StopMojo extends FractalxBaseMojo {
     }
 
     private void exec(Path script, Path workDir) throws IOException, InterruptedException {
-        new ProcessBuilder("/bin/sh", script.toAbsolutePath().toString())
+        List<String> cmd = WINDOWS
+                ? List.of("cmd.exe", "/c", script.toAbsolutePath().toString())
+                : List.of("/bin/sh", script.toAbsolutePath().toString());
+        new ProcessBuilder(cmd)
                 .directory(workDir.toFile())
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .redirectError(ProcessBuilder.Redirect.DISCARD)
