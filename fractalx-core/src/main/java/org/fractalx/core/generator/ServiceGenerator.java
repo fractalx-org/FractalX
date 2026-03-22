@@ -69,8 +69,16 @@ public class ServiceGenerator {
     private final RegistryServiceGenerator  registryServiceGenerator;
     private final DockerComposeGenerator    dockerComposeGenerator;
 
+    private boolean generateGateway = true;
+    private boolean generateAdmin   = true;
+    private boolean generateDocker  = true;
+
     private java.util.function.Consumer<String> onStepStart    = lbl -> {};
     private java.util.function.Consumer<String> onStepComplete = lbl -> {};
+
+    public ServiceGenerator withGateway(boolean v) { this.generateGateway = v; return this; }
+    public ServiceGenerator withAdmin(boolean v)   { this.generateAdmin   = v; return this; }
+    public ServiceGenerator withDocker(boolean v)  { this.generateDocker  = v; return this; }
 
     public void setProgressCallbacks(java.util.function.Consumer<String> onStart,
                                      java.util.function.Consumer<String> onComplete) {
@@ -159,15 +167,17 @@ public class ServiceGenerator {
 
         new LoggerServiceGenerator().generate(outputRoot);
 
-        if (modules.size() > 1) {
+        if (modules.size() > 1 && generateGateway) {
             onStepStart.accept("fractalx-gateway");
             generateApiGateway(modules, fractalxConfig);
             onStepComplete.accept("fractalx-gateway");
         }
 
-        onStepStart.accept("fractalx-admin");
-        adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions);
-        onStepComplete.accept("fractalx-admin");
+        if (generateAdmin) {
+            onStepStart.accept("fractalx-admin");
+            adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions);
+            onStepComplete.accept("fractalx-admin");
+        }
 
         boolean hasSagas = !sagaDefinitions.isEmpty();
         if (hasSagas) {
@@ -178,10 +188,16 @@ public class ServiceGenerator {
             sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
         }
 
-        onStepStart.accept("docker-compose + scripts");
-        dockerComposeGenerator.generate(modules, outputRoot, hasSagas);
-        generateStartScripts(modules, sagaDefinitions);
-        onStepComplete.accept("docker-compose + scripts");
+        if (generateDocker) {
+            onStepStart.accept("docker-compose + scripts");
+            dockerComposeGenerator.generate(modules, outputRoot, hasSagas);
+            generateStartScripts(modules, sagaDefinitions);
+            onStepComplete.accept("docker-compose + scripts");
+        } else {
+            onStepStart.accept("start scripts");
+            generateStartScripts(modules, sagaDefinitions);
+            onStepComplete.accept("start scripts");
+        }
 
         log.debug("Code generation complete!");
     }

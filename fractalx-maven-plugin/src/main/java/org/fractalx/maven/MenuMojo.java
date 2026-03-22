@@ -40,7 +40,7 @@ public class MenuMojo extends FractalxBaseMojo {
     private File sourceDirectory;
 
     @Parameter(property = "fractalx.outputDirectory",
-               defaultValue = "${project.basedir}/fractalx-output")
+               defaultValue = "${project.basedir}/microservices")
     private File outputDirectory;
 
     // ── Menu options (Exit rendered separately as the last item) ──────────────
