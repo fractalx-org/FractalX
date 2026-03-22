@@ -192,21 +192,35 @@ public class StartMojo extends FractalxBaseMojo {
 
     // ── Core: spawn a service process ─────────────────────────────────────────
 
+    private static final boolean WINDOWS =
+            System.getProperty("os.name", "").toLowerCase().contains("win");
+
     private Process spawnService(Path svcDir) throws IOException {
         Path log = logFile(svcDir);
         Files.createDirectories(log.getParent());
 
-        Path startScript = svcDir.resolve("start.sh");
-        if (Files.exists(startScript)) {
-            startScript.toFile().setExecutable(true);
-            return new ProcessBuilder("/bin/sh", startScript.toAbsolutePath().toString())
-                    .directory(svcDir.toFile())
-                    .redirectOutput(log.toFile())
-                    .redirectError(ProcessBuilder.Redirect.appendTo(log.toFile()))
-                    .start();
+        if (WINDOWS) {
+            Path startBat = svcDir.resolve("start.bat");
+            if (Files.exists(startBat)) {
+                return new ProcessBuilder("cmd.exe", "/c", startBat.toAbsolutePath().toString())
+                        .directory(svcDir.toFile())
+                        .redirectOutput(log.toFile())
+                        .redirectError(ProcessBuilder.Redirect.appendTo(log.toFile()))
+                        .start();
+            }
+        } else {
+            Path startSh = svcDir.resolve("start.sh");
+            if (Files.exists(startSh)) {
+                startSh.toFile().setExecutable(true);
+                return new ProcessBuilder("/bin/sh", startSh.toAbsolutePath().toString())
+                        .directory(svcDir.toFile())
+                        .redirectOutput(log.toFile())
+                        .redirectError(ProcessBuilder.Redirect.appendTo(log.toFile()))
+                        .start();
+            }
         }
 
-        return new ProcessBuilder(findMaven(svcDir), "spring-boot:run")
+        return new ProcessBuilder(buildMvnCommand(svcDir, "spring-boot:run"))
                 .directory(svcDir.toFile())
                 .redirectOutput(log.toFile())
                 .redirectError(ProcessBuilder.Redirect.appendTo(log.toFile()))
@@ -215,17 +229,31 @@ public class StartMojo extends FractalxBaseMojo {
 
     // ── Maven path resolution ─────────────────────────────────────────────────
 
+    private static List<String> buildMvnCommand(Path svcDir, String... args) {
+        String mvn = findMaven(svcDir);
+        List<String> cmd = new ArrayList<>();
+        if (WINDOWS) {
+            cmd.add("cmd.exe");
+            cmd.add("/c");
+        }
+        cmd.add(mvn);
+        cmd.addAll(List.of(args));
+        return cmd;
+    }
+
     private static String findMaven(Path svcDir) {
         String home = System.getProperty("maven.home");
         if (home != null) {
-            File mvn = new File(home, "bin/mvn");
-            if (mvn.canExecute()) return mvn.getAbsolutePath();
+            String exe = WINDOWS ? "bin/mvn.cmd" : "bin/mvn";
+            File mvn = new File(home, exe);
+            if (mvn.exists()) return mvn.getAbsolutePath();
         }
-        File mvnw = svcDir.resolve("mvnw").toFile();
-        if (mvnw.canExecute()) return mvnw.getAbsolutePath();
-        File mvnwParent = svcDir.getParent().resolve("mvnw").toFile();
-        if (mvnwParent.canExecute()) return mvnwParent.getAbsolutePath();
-        return "mvn";
+        String wrapper = WINDOWS ? "mvnw.cmd" : "mvnw";
+        File mvnw = svcDir.resolve(wrapper).toFile();
+        if (mvnw.exists()) return mvnw.getAbsolutePath();
+        File mvnwParent = svcDir.getParent().resolve(wrapper).toFile();
+        if (mvnwParent.exists()) return mvnwParent.getAbsolutePath();
+        return WINDOWS ? "mvn.cmd" : "mvn";
     }
 
     // ── Misc helpers ──────────────────────────────────────────────────────────
@@ -248,7 +276,10 @@ public class StartMojo extends FractalxBaseMojo {
     }
 
     private void exec(Path script, Path workDir) throws IOException, InterruptedException {
-        new ProcessBuilder("/bin/sh", script.toAbsolutePath().toString())
+        List<String> cmd = WINDOWS
+                ? List.of("cmd.exe", "/c", script.toAbsolutePath().toString())
+                : List.of("/bin/sh", script.toAbsolutePath().toString());
+        new ProcessBuilder(cmd)
                 .directory(workDir.toFile())
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .redirectError(ProcessBuilder.Redirect.DISCARD)
