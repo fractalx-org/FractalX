@@ -49,7 +49,7 @@ public class VerifyMojo extends FractalxBaseMojo {
     private File sourceDirectory;
 
     @Parameter(property = "fractalx.outputDirectory",
-            defaultValue = "${project.basedir}/fractalx-output")
+            defaultValue = "${project.basedir}/microservices")
     private File outputDirectory;
 
     @Parameter(property = "fractalx.verify.compile",    defaultValue = "false")

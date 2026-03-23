@@ -28,7 +28,7 @@ public class StartMojo extends FractalxBaseMojo {
     private MavenProject project;
 
     @Parameter(property = "fractalx.outputDirectory",
-               defaultValue = "${project.basedir}/fractalx-output")
+               defaultValue = "${project.basedir}/microservices")
     private File outputDirectory;
 
     /** Optional: name of a single service to start. If blank, starts all. */
@@ -64,7 +64,7 @@ public class StartMojo extends FractalxBaseMojo {
     // ── Start all ─────────────────────────────────────────────────────────────
 
     private void startAll(Path root, long t0) throws MojoExecutionException {
-        Path script = root.resolve("start-all.sh");
+        Path script = WINDOWS ? root.resolve("start-all.bat") : root.resolve("start-all.sh");
         if (Files.exists(script)) {
             runWithDashboard(List.of("starting all services via start-all.sh"), "Start", t0,
                     (dash, labels) -> {

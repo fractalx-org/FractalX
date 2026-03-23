@@ -22,7 +22,7 @@ public class RestartMojo extends FractalxBaseMojo {
     private MavenProject project;
 
     @Parameter(property = "fractalx.outputDirectory",
-               defaultValue = "${project.basedir}/fractalx-output")
+               defaultValue = "${project.basedir}/microservices")
     private File outputDirectory;
 
     /** Optional: name of a single service to restart. If blank, restarts all. */
