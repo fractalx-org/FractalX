@@ -242,12 +242,15 @@ public class ServiceGenerator {
     private void generateStartScripts(List<FractalModule> modules,
                                        List<SagaDefinition> sagaDefinitions) throws IOException {
         Path gatewayPath = outputRoot.resolve(GATEWAY_DIR);
+        boolean hasSaga  = !sagaDefinitions.isEmpty();
 
-        generateStartScript(modules, gatewayPath, !sagaDefinitions.isEmpty());
-        generateStopScript(gatewayPath, !sagaDefinitions.isEmpty());
-        generateReadme(modules, !sagaDefinitions.isEmpty());
+        generateStartScript(modules, gatewayPath, hasSaga);
+        generateStopScript(gatewayPath, hasSaga);
+        generateWindowsStartScript(modules, gatewayPath, hasSaga);
+        generateWindowsStopScript(hasSaga);
+        generateReadme(modules, hasSaga);
 
-        log.debug("Generated start scripts");
+        log.debug("Generated start/stop scripts (Unix + Windows)");
     }
 
     private void generateStartScript(List<FractalModule> modules, Path gatewayPath,
@@ -325,6 +328,72 @@ public class ServiceGenerator {
         scriptPath.toFile().setExecutable(true);
     }
 
+    private void generateWindowsStartScript(List<FractalModule> modules, Path gatewayPath,
+                                             boolean hasSagaOrchestrator) throws IOException {
+        StringBuilder bat = new StringBuilder();
+        bat.append("@echo off\r\n");
+        bat.append("setlocal\r\n\r\n");
+        bat.append("echo Starting all FractalX microservices...\r\n\r\n");
+
+        bat.append("echo Starting fractalx-registry on port 8761...\r\n");
+        bat.append("start \"fractalx-registry\" /d \"%~dp0fractalx-registry\" cmd /c ");
+        bat.append("\"mvn spring-boot:run > ..\\fractalx-registry.log 2>&1\"\r\n");
+        bat.append("echo Waiting 5 seconds for registry to become ready...\r\n");
+        bat.append("timeout /t 5 /nobreak > nul\r\n\r\n");
+
+        bat.append("echo Starting microservices...\r\n");
+        for (FractalModule module : modules) {
+            bat.append(String.format("echo Starting %s on port %d...%n",
+                    module.getServiceName(), module.getPort()).replace("\n", "\r\n"));
+            bat.append(String.format(
+                    "start \"%s\" /d \"%%~dp0%s\" cmd /c \"mvn spring-boot:run > ..\\%s.log 2>&1\"\r\n",
+                    module.getServiceName(), module.getServiceName(), module.getServiceName()));
+        }
+
+        if (hasSagaOrchestrator) {
+            bat.append("\r\necho Starting Saga Orchestrator...\r\n");
+            bat.append("start \"fractalx-saga-orchestrator\" /d \"%~dp0fractalx-saga-orchestrator\" ");
+            bat.append("cmd /c \"mvn spring-boot:run > ..\\fractalx-saga-orchestrator.log 2>&1\"\r\n");
+        }
+
+        bat.append("\r\necho.\r\n");
+        if (Files.exists(gatewayPath)) {
+            bat.append(String.format("echo All services started. Gateway: http://localhost:%d%n", GATEWAY_PORT)
+                    .replace("\n", "\r\n"));
+        } else {
+            bat.append("echo All services started. Check *.log files for output.\r\n");
+        }
+        bat.append("echo To stop all services, run: stop-all.bat\r\n");
+        bat.append("echo.\r\n");
+        bat.append("echo Service URLs:\r\n");
+        for (FractalModule module : modules) {
+            bat.append(String.format("echo   %-22s http://localhost:%d%n",
+                    module.getServiceName() + ":", module.getPort()).replace("\n", "\r\n"));
+        }
+        if (hasSagaOrchestrator) {
+            bat.append(String.format("echo   %-22s http://localhost:8099%n", "saga-orchestrator:")
+                    .replace("\n", "\r\n"));
+        }
+
+        Files.writeString(outputRoot.resolve("start-all.bat"), bat.toString());
+    }
+
+    private void generateWindowsStopScript(boolean hasSagaOrchestrator) throws IOException {
+        StringBuilder bat = new StringBuilder();
+        bat.append("@echo off\r\n\r\n");
+        bat.append("echo Stopping all FractalX microservices...\r\n\r\n");
+
+        // Use PowerShell to find and kill java processes started by spring-boot:run.
+        // Get-CimInstance is available on PowerShell 3+ (Windows 7 SP1 and later).
+        bat.append("powershell -NoProfile -Command ^\r\n");
+        bat.append("  \"Get-CimInstance Win32_Process ^\r\n");
+        bat.append("   | Where-Object { $_.CommandLine -like '*spring-boot:run*' } ^\r\n");
+        bat.append("   | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }\"\r\n");
+        bat.append("\r\necho All services stopped.\r\n");
+
+        Files.writeString(outputRoot.resolve("stop-all.bat"), bat.toString());
+    }
+
     private void generateReadme(List<FractalModule> modules, boolean hasSagaOrchestrator) throws IOException {
         StringBuilder readme = new StringBuilder();
         readme.append("# FractalX Generated Microservices\n\n");
@@ -339,7 +408,9 @@ public class ServiceGenerator {
             readme.append("- **fractalx-saga-orchestrator**: http://localhost:8099\n");
         }
 
-        readme.append("\n## Quick Start\n\n```bash\n./start-all.sh\n```\n\n");
+        readme.append("\n## Quick Start\n\n");
+        readme.append("**Unix / macOS / WSL**\n```bash\n./start-all.sh\n```\n\n");
+        readme.append("**Windows (cmd / PowerShell)**\n```bat\nstart-all.bat\n```\n\n");
 
         readme.append("### Start services individually\n\n");
         for (int i = 0; i < modules.size(); i++) {
@@ -354,7 +425,9 @@ public class ServiceGenerator {
                     module.getServiceName(), module.getPort()));
         }
 
-        readme.append("## Stopping Services\n\n```bash\n./stop-all.sh\n```\n\n");
+        readme.append("## Stopping Services\n\n");
+        readme.append("**Unix / macOS / WSL**\n```bash\n./stop-all.sh\n```\n\n");
+        readme.append("**Windows**\n```bat\nstop-all.bat\n```\n\n");
 
         readme.append("## Service Architecture\n\n```\n");
         readme.append("Standalone Services (No Service Discovery)\n");
