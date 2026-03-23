@@ -308,9 +308,11 @@ public class DecomposeMojo extends FractalxBaseMojo {
         link(pw, "fractalx-registry", "http://localhost:" + REGISTRY_PORT);
         out.println();
 
+        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
         section("Get started");
         cmd("cd " + outDir.toAbsolutePath());
-        cmd("./start-all.sh                  # start all services locally");
+        cmd(windows ? "start-all.bat               # start all services locally"
+                    : "./start-all.sh               # start all services locally");
         if (config.generateDocker())
             cmd("docker-compose up -d            # start via Docker");
         out.println();

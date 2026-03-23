@@ -26,7 +26,7 @@ public class ServicesMojo extends FractalxBaseMojo {
     private MavenProject project;
 
     @Parameter(property = "fractalx.outputDirectory",
-               defaultValue = "${project.basedir}/fractalx-output")
+               defaultValue = "${project.basedir}/microservices")
     private File outputDirectory;
 
     @Override
@@ -88,7 +88,8 @@ public class ServicesMojo extends FractalxBaseMojo {
         section("Get started");
         cmd("mvn fractalx:start");
         cmd("mvn fractalx:ps");
-        cmd("docker-compose -f " + outputDirectory.getAbsolutePath() + "/docker-compose.yml up -d");
+        cmd("docker-compose -f \"" + outputDirectory.getAbsolutePath()
+                + java.io.File.separator + "docker-compose.yml\" up -d");
         out.println();
     }
 

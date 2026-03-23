@@ -27,7 +27,7 @@ public class PsMojo extends FractalxBaseMojo {
     private MavenProject project;
 
     @Parameter(property = "fractalx.outputDirectory",
-               defaultValue = "${project.basedir}/fractalx-output")
+               defaultValue = "${project.basedir}/microservices")
     private File outputDirectory;
 
     @Override

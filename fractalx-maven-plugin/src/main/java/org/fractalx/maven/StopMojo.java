@@ -27,7 +27,7 @@ public class StopMojo extends FractalxBaseMojo {
     private MavenProject project;
 
     @Parameter(property = "fractalx.outputDirectory",
-               defaultValue = "${project.basedir}/fractalx-output")
+               defaultValue = "${project.basedir}/microservices")
     private File outputDirectory;
 
     /** Optional: name of a single service to stop. If blank, stops all. */
@@ -58,7 +58,7 @@ public class StopMojo extends FractalxBaseMojo {
     // ── Stop all ──────────────────────────────────────────────────────────────
 
     private void stopAll(Path root, long t0) throws MojoExecutionException {
-        Path script = root.resolve("stop-all.sh");
+        Path script = WINDOWS ? root.resolve("stop-all.bat") : root.resolve("stop-all.sh");
         if (Files.exists(script)) {
             List<String> labels = List.of("stopping all services");
             runWithDashboard(labels, "Stop", t0, () -> exec(script, root));
