@@ -46,7 +46,7 @@ class AdminConfigManagementGenerator {
 
             configEntries.append(String.format(
                     "        new ServiceConfig(\"%s\", %d, %d, \"%s\", \"%s\", %b, false, %s, %s),\n",
-                    m.getServiceName(), m.getPort(), m.getPort() + 10000,
+                    m.getServiceName(), m.getPort(), m.grpcPort(),
                     m.getPackageName(), m.getClassName(),
                     hasOutbox, schemas, envVars));
         }

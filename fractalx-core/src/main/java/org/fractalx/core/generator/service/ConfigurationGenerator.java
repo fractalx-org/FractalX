@@ -17,9 +17,6 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigurationGenerator.class);
 
-    /** gRPC port offset applied on top of the HTTP port. */
-    private static final int GRPC_PORT_OFFSET = 10000;
-
     @Override
     public void generate(GenerationContext context) throws IOException {
         FractalModule module = context.getModule();
@@ -68,7 +65,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     host: ${FRACTALX_REGISTRY_HOST:localhost}
                   saga:
                     orchestrator:
-                      url: ${FRACTALX_SAGA_ORCHESTRATOR_URL:http://localhost:8099}
+                      url: ${FRACTALX_SAGA_ORCHESTRATOR_URL:http://localhost:%d}
                   observability:
                     tracing: %s
                     metrics: true
@@ -102,8 +99,8 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     org.fractalx: DEBUG
                     org.fractalx.netscope: DEBUG
                 """.formatted(module.getServiceName(), module.getPort(),
-                cfg.registryUrl(), tracingEnabled, cfg.loggerUrl(),
-                otelBlock, module.getPort() + GRPC_PORT_OFFSET, samplingProbability);
+                cfg.registryUrl(), cfg.sagaPort(), tracingEnabled, cfg.loggerUrl(),
+                otelBlock, module.grpcPort(), samplingProbability);
     }
 
     /** application-dev.yml — localhost hardcoded, H2 in-memory, suitable for local dev. */
@@ -173,7 +170,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                             sb.append("        host: ${").append(envPfx).append("_HOST:")
                               .append(targetServiceName).append("}\n");
                             sb.append("        port: ${").append(envPfx).append("_GRPC_PORT:")
-                              .append(target.getPort() + GRPC_PORT_OFFSET).append("}\n");
+                              .append(target.grpcPort()).append("}\n");
                         });
             }
         }
@@ -205,7 +202,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     .ifPresent(target -> {
                         sb.append("      ").append(targetServiceName).append(":\n");
                         sb.append("        host: localhost\n");
-                        sb.append("        port: ").append(target.getPort() + GRPC_PORT_OFFSET).append("\n");
+                        sb.append("        port: ").append(target.grpcPort()).append("\n");
                     });
         }
         return sb.toString();

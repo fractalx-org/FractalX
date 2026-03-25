@@ -48,7 +48,7 @@ class AdminServicesDetailGenerator {
             String deps = buildDepsLiteral(m.getDependencies());
             entries.append(String.format(
                     "        new ServiceMeta(\"%s\", %d, %d, \"microservice\", %s, \"%s\", \"%s\"),\n",
-                    m.getServiceName(), m.getPort(), m.getPort() + 10000,
+                    m.getServiceName(), m.getPort(), m.grpcPort(),
                     deps, m.getPackageName(), m.getClassName()));
         }
         // Saga orchestrator — only present when sagas are defined

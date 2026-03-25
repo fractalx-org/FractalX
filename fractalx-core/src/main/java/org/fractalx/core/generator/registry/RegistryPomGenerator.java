@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.registry;
 
+import org.fractalx.core.config.FractalxConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,7 +13,7 @@ class RegistryPomGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(RegistryPomGenerator.class);
 
-    void generate(Path registryRoot) throws IOException {
+    void generate(Path registryRoot, FractalxConfig config) throws IOException {
         String content = """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -31,7 +32,7 @@ class RegistryPomGenerator {
 
                     <properties>
                         <java.version>17</java.version>
-                        <spring-boot.version>3.2.0</spring-boot.version>
+                        <spring-boot.version>__SB_VERSION__</spring-boot.version>
                         <maven.compiler.source>17</maven.compiler.source>
                         <maven.compiler.target>17</maven.compiler.target>
                         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -85,6 +86,7 @@ class RegistryPomGenerator {
                 </project>
                 """;
 
+        content = content.replace("__SB_VERSION__", config.springBootVersion());
         Files.writeString(registryRoot.resolve("pom.xml"), content);
         log.debug("Generated registry pom.xml");
     }

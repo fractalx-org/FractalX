@@ -65,7 +65,7 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
             return;
         }
 
-        int grpcPort = targetModule.getPort() + 10000;
+        int grpcPort = targetModule.grpcPort();
         Set<String> requiredImports = new LinkedHashSet<>();
         List<CrossModuleCall> methods = extractPublicMethods(beanType, context.getSourceRoot(), targetServiceName, requiredImports);
 

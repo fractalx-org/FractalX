@@ -135,7 +135,7 @@ public class AdminServiceGenerator {
         AdminDbConfig dbConfig = AdminDbConfig.readFrom(sourceRoot);
 
         // Core infrastructure
-        pomGenerator.generate(serviceRoot);
+        pomGenerator.generate(serviceRoot, fractalxConfig);
         appGenerator.generate(srcMainJava, BASE_PACKAGE);
         securityConfigGenerator.generate(srcMainJava, BASE_PACKAGE);
         webConfigGenerator.generate(srcMainJava, BASE_PACKAGE);

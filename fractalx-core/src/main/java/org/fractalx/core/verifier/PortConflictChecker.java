@@ -109,7 +109,7 @@ public class PortConflictChecker {
     /** Derives gRPC ports using the HTTP + 10000 convention. */
     private Map<String, Integer> grpcPorts(Map<String, Integer> httpPorts) {
         Map<String, Integer> grpc = new LinkedHashMap<>();
-        httpPorts.forEach((svc, http) -> grpc.put(svc, http + 10000));
+        httpPorts.forEach((svc, http) -> grpc.put(svc, http + FractalModule.GRPC_PORT_OFFSET));
         return grpc;
     }
 
