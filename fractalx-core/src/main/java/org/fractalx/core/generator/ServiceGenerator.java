@@ -147,8 +147,11 @@ public class ServiceGenerator {
 
     public void generateServices(List<FractalModule> modules) throws IOException {
         log.debug("Starting code generation for {} modules", modules.size());
+        // sourceRoot is typically src/main/java; resolve up to the Maven project root
+        // so FractalxConfigReader can find src/main/resources/fractalx-config.yml and pom.xml
+        Path projectRoot = resolveProjectRoot(sourceRoot);
         FractalxConfig fractalxConfig = new FractalxConfigReader()
-                .read(sourceRoot.resolve("src/main/resources"), sourceRoot);
+                .read(projectRoot.resolve("src/main/resources"), projectRoot);
         Files.createDirectories(outputRoot);
 
         // Run repository boundary analysis before generation (warnings only — never fails)
@@ -483,5 +486,30 @@ public class ServiceGenerator {
         );
         Files.writeString(readmePath, updated);
         log.debug("Updated README with gateway information");
+    }
+
+    /**
+     * Resolves the Maven project root from a source path.
+     *
+     * <p>When the plugin passes {@code ${project.build.sourceDirectory}} (typically
+     * {@code src/main/java}), we navigate up three levels to reach the project root
+     * where {@code pom.xml} and {@code src/main/resources} live.
+     * If the resolved path does not look like a project root (no {@code pom.xml}),
+     * we fall back to {@code sourceRoot} itself so callers that already pass the
+     * project root continue to work correctly.
+     */
+    private static Path resolveProjectRoot(Path sourceRoot) {
+        // Try walking up 3 levels (src/main/java → src/main → src → project root)
+        Path candidate = sourceRoot;
+        for (int i = 0; i < 3; i++) {
+            Path parent = candidate.getParent();
+            if (parent == null) break;
+            candidate = parent;
+            if (Files.exists(candidate.resolve("pom.xml"))) {
+                return candidate;
+            }
+        }
+        // Fallback: caller may have already passed the project root
+        return sourceRoot;
     }
 }

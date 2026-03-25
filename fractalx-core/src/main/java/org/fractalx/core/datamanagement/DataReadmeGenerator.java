@@ -173,10 +173,12 @@ public class DataReadmeGenerator {
             }
             md.append("\n");
 
-            md.append("> **⚠️ Important:** Do **not** call `")
-              .append(saga.getSteps().get(0).getBeanType())
-              .append("` or other saga participants directly in your business logic. ");
-            md.append("The orchestrator now manages the full call sequence, state tracking, and rollback.\n\n");
+            if (!saga.getSteps().isEmpty()) {
+                md.append("> **⚠️ Important:** Do **not** call `")
+                  .append(saga.getSteps().get(0).getBeanType())
+                  .append("` or other saga participants directly in your business logic. ");
+                md.append("The orchestrator now manages the full call sequence, state tracking, and rollback.\n\n");
+            }
         }
 
         // ── Participant sagas ─────────────────────────────────────────────────
