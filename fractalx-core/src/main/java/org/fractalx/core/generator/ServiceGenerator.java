@@ -102,12 +102,6 @@ public class ServiceGenerator {
         this.pipeline = buildPipeline();
     }
 
-    private static List<String> deriveCleanupFiles(org.fractalx.core.model.FractalModule module) {
-        return module.getDependencies().stream()
-                .map(dep -> dep + "Impl.java")
-                .toList();
-    }
-
     private List<ServiceFileGenerator> buildPipeline() {
         ObservabilityInjector injector = this.observabilityInjector;
 
@@ -123,7 +117,7 @@ public class ServiceGenerator {
                         new ImportPreserver(),
                         new ImportCleaner()
                 ),
-                context -> new FileCleanupStep(deriveCleanupFiles(context.getModule())).generate(context),
+                new FileCleanupStep(),
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
