@@ -118,6 +118,9 @@ public class SecretLeakScanner {
                 if (sep < 0) continue;
 
                 String key   = line.substring(0, sep).trim();
+                // If the key contains '${', the separator landed inside a Spring EL
+                // expression like "- ${GATEWAY_API_KEY_1:default}" — skip the line.
+                if (key.contains("${")) continue;
                 String value = line.substring(sep + 1).trim()
                         .replaceAll("^['\"]|['\"]$", ""); // strip surrounding quotes
 

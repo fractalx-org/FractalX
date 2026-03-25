@@ -90,6 +90,9 @@ public class CrossBoundaryImportChecker {
 
     private void checkFile(Path javaFile, FractalModule service,
                            List<FractalModule> peers, List<Violation> violations) {
+        // Locate the src/main/java root so we can check for locally-copied model classes.
+        Path srcJava = resolveSrcMainJava(javaFile);
+
         try {
             CompilationUnit cu = StaticJavaParser.parse(javaFile);
             for (ImportDeclaration imp : cu.getImports()) {
@@ -99,6 +102,12 @@ public class CrossBoundaryImportChecker {
                 for (FractalModule peer : peers) {
                     if (peer.getPackageName() != null
                             && importName.startsWith(peer.getPackageName())) {
+
+                        // NetScopeClientGenerator.copyRequiredModelClasses() physically
+                        // copies shared model/enum/DTO files into the consuming service.
+                        // If the file exists locally it is not a cross-boundary import.
+                        if (srcJava != null && isLocalCopy(srcJava, importName)) continue;
+
                         violations.add(new Violation(
                                 service.getServiceName(),
                                 importName,
@@ -112,6 +121,28 @@ public class CrossBoundaryImportChecker {
         } catch (Exception e) {
             log.debug("Could not parse {}: {}", javaFile, e.getMessage());
         }
+    }
+
+    /**
+     * Returns {@code true} when {@code fqn} has a corresponding {@code .java} file
+     * already present under {@code srcJava}. Such files were deliberately copied by
+     * the generator and are local to this service — not cross-boundary violations.
+     */
+    private boolean isLocalCopy(Path srcJava, String fqn) {
+        return Files.exists(srcJava.resolve(fqn.replace('.', '/') + ".java"));
+    }
+
+    /**
+     * Walks up from a {@code .java} file to find the enclosing {@code src/main/java}
+     * directory. Returns {@code null} if not found.
+     */
+    private Path resolveSrcMainJava(Path javaFile) {
+        Path p = javaFile.getParent();
+        while (p != null) {
+            if (p.endsWith("src/main/java")) return p;
+            p = p.getParent();
+        }
+        return null;
     }
 
     // ── Import allow-list ─────────────────────────────────────────────────────

@@ -98,11 +98,19 @@ public class ServiceGraphAnalyzer {
         Map<String, Set<String>> graph = new LinkedHashMap<>();
         Map<String, String> classToService = new HashMap<>();
 
-        // Build class→service lookup
+        // Build class→service lookup.
+        // getDependencies() returns simple class names (e.g. "BillingEngine"), so index by
+        // both the FQN stored in getClassName() and the simple name extracted from it.
         for (FractalModule m : modules) {
             graph.put(m.getServiceName(), new LinkedHashSet<>());
-            if (m.getClassName() != null)
+            if (m.getClassName() != null) {
                 classToService.put(m.getClassName(), m.getServiceName());
+                String fqn = m.getClassName();
+                String simpleName = fqn.contains(".")
+                        ? fqn.substring(fqn.lastIndexOf('.') + 1)
+                        : fqn;
+                classToService.put(simpleName, m.getServiceName());
+            }
         }
 
         // Resolve dependencies
