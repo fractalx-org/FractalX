@@ -32,10 +32,15 @@ public class FractalModule {
         this.detectedImports = Set.copyOf(builder.detectedImports);
     }
 
+    /** Offset added to the HTTP port to derive the gRPC port. Single source of truth. */
+    public static final int GRPC_PORT_OFFSET = 10000;
+
     public String getClassName()             { return className; }
     public String getPackageName()           { return packageName; }
     public String getServiceName()           { return serviceName; }
     public int    getPort()                  { return port; }
+    /** Returns the gRPC port for this service: {@code port + GRPC_PORT_OFFSET}. */
+    public int    grpcPort()                 { return port + GRPC_PORT_OFFSET; }
     public boolean isIndependentDeployment() { return independentDeployment; }
     public List<String> getDependencies()    { return dependencies; }
     public List<String> getOwnedSchemas()    { return ownedSchemas; }
