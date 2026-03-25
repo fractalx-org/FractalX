@@ -45,7 +45,7 @@ class HealthMetricsStepSpec extends Specification {
     private GenerationContext ctx(FractalModule m, List<FractalModule> all = [m]) {
         Files.createDirectories(serviceRoot.resolve("src/main/java"))
         Files.createDirectories(serviceRoot.resolve("src/main/resources"))
-        new GenerationContext(m, serviceRoot, serviceRoot, all, FractalxConfig.defaults(), [])
+        new GenerationContext(m, serviceRoot, serviceRoot, all, FractalxConfig.defaults().withBasePackage("org.fractalx.generated"), [])
     }
 
     private Path healthConfigFile(FractalModule m) {

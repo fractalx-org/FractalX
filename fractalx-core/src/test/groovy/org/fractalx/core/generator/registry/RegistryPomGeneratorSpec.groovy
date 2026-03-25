@@ -5,6 +5,7 @@ import spock.lang.TempDir
 
 import java.nio.file.Files
 import java.nio.file.Path
+import org.fractalx.core.config.FractalxConfig
 
 /**
  * Verifies that RegistryPomGenerator writes a well-formed pom.xml for the
@@ -22,7 +23,7 @@ class RegistryPomGeneratorSpec extends Specification {
 
     def "pom.xml is created at the registry root"() {
         when:
-        generator.generate(registryRoot)
+        generator.generate(registryRoot, FractalxConfig.defaults())
 
         then:
         Files.exists(registryRoot.resolve("pom.xml"))
@@ -30,7 +31,7 @@ class RegistryPomGeneratorSpec extends Specification {
 
     def "pom.xml declares the correct groupId and artifactId"() {
         when:
-        generator.generate(registryRoot)
+        generator.generate(registryRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("<groupId>org.fractalx</groupId>")
@@ -39,7 +40,7 @@ class RegistryPomGeneratorSpec extends Specification {
 
     def "pom.xml targets Java 17 and Spring Boot 3.2.0"() {
         when:
-        generator.generate(registryRoot)
+        generator.generate(registryRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("<java.version>17</java.version>")
@@ -48,7 +49,7 @@ class RegistryPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-starter-web dependency"() {
         when:
-        generator.generate(registryRoot)
+        generator.generate(registryRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-starter-web")
@@ -56,7 +57,7 @@ class RegistryPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-starter-actuator dependency"() {
         when:
-        generator.generate(registryRoot)
+        generator.generate(registryRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-starter-actuator")
@@ -64,7 +65,7 @@ class RegistryPomGeneratorSpec extends Specification {
 
     def "pom.xml uses spring-boot-dependencies BOM for dependency management"() {
         when:
-        generator.generate(registryRoot)
+        generator.generate(registryRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-dependencies")
@@ -74,7 +75,7 @@ class RegistryPomGeneratorSpec extends Specification {
 
     def "pom.xml configures the spring-boot-maven-plugin with repackage goal"() {
         when:
-        generator.generate(registryRoot)
+        generator.generate(registryRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-maven-plugin")
@@ -83,7 +84,7 @@ class RegistryPomGeneratorSpec extends Specification {
 
     def "pom.xml is valid XML (not empty and starts with XML declaration)"() {
         when:
-        generator.generate(registryRoot)
+        generator.generate(registryRoot, FractalxConfig.defaults())
 
         then:
         pom().startsWith("<?xml")

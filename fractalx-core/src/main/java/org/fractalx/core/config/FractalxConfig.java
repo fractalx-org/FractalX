@@ -156,6 +156,14 @@ public record FractalxConfig(
         return (basePackage != null && !basePackage.isBlank()) ? basePackage : "generated";
     }
 
+    /** Returns a copy of this config with the given base package. Convenient for tests. */
+    public FractalxConfig withBasePackage(String basePackage) {
+        return new FractalxConfig(registryUrl, loggerUrl, otelEndpoint, gatewayPort,
+                corsAllowedOrigins, oauth2JwksUri, adminPort, serviceOverrides,
+                basePackage, springBootVersion, springCloudVersion, registryPort,
+                loggerPort, sagaPort, resilience, dockerImages);
+    }
+
     /** Returns the configured port for a service, or {@code defaultPort} if not set. */
     public int portFor(String serviceName, int defaultPort) {
         ServiceOverride ov = serviceOverrides.get(serviceName);

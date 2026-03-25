@@ -62,7 +62,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when: "Payment.java is NOT in serviceRoot — it is a remote entity"
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then: "field type becomes String, name becomes paymentId"
         def result = read("Order.java")
@@ -88,7 +88,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then:
         def result = read("Order.java")
@@ -113,7 +113,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then:
         def result = read("Order.java")
@@ -138,7 +138,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then:
         def result = read("Order.java")
@@ -163,7 +163,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then:
         !read("Order.java").contains("import org.fractalx.test.payment.Payment")
@@ -185,7 +185,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then: "the @OneToMany List<Product> field is removed"
         def result = read("OrderItem.java")
@@ -218,7 +218,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then: "no modification — Order and OrderItem are both local"
         read("Order.java").contains("List<OrderItem>")
@@ -241,7 +241,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when: "Course.java is NOT in serviceRoot — it is a remote entity"
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then:
         def result = read("Student.java")
@@ -270,7 +270,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then:
         def result = read("Student.java")
@@ -329,7 +329,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then: "call-site rewrite uses getPaymentId() inferred from the Lombok @Data field"
         def svc = read("OrderService.java")
@@ -367,7 +367,7 @@ class RelationshipDecouplerSpec extends Specification {
         """)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then: "getCourses() renamed to getCourseIds() and a DECOUPLING WARNING comment is added"
         def svc = read("StudentService.java")
@@ -391,7 +391,7 @@ class RelationshipDecouplerSpec extends Specification {
         write("Order.java", original)
 
         when:
-        decoupler.transform(serviceRoot, module)
+        decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
         then: "file content is effectively unchanged"
         read("Order.java").contains("String customerId")
