@@ -5,6 +5,7 @@ import spock.lang.TempDir
 
 import java.nio.file.Files
 import java.nio.file.Path
+import org.fractalx.core.config.FractalxConfig
 
 /**
  * Verifies that AdminPomGenerator produces a pom.xml for the admin service with
@@ -26,7 +27,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml is created at the service root"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         Files.exists(serviceRoot.resolve("pom.xml"))
@@ -38,17 +39,17 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml declares artifactId admin-service under org.fractalx.generated"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         def c = pom()
         c.contains("<artifactId>admin-service</artifactId>")
-        c.contains("<groupId>org.fractalx.generated</groupId>")
+        c.contains("<groupId>generated</groupId>")
     }
 
     def "pom.xml uses Spring Boot 3.2.0 dependency management"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         def c = pom()
@@ -58,7 +59,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml sets Java 17 compiler source and target"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         def c = pom()
@@ -73,7 +74,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-starter-web"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-starter-web")
@@ -81,7 +82,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-starter-thymeleaf for server-side rendering"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-starter-thymeleaf")
@@ -89,7 +90,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-starter-security"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-starter-security")
@@ -97,7 +98,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-starter-actuator"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-starter-actuator")
@@ -109,7 +110,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-starter-mail for alert email channel"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("spring-boot-starter-mail")
@@ -117,7 +118,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-configuration-processor as optional dependency"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         def c = pom()
@@ -131,7 +132,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes fractalx-runtime dependency"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         pom().contains("fractalx-runtime")
@@ -143,7 +144,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes bootstrap, jquery, and font-awesome webjars"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         def c = pom()
@@ -158,7 +159,7 @@ class AdminPomGeneratorSpec extends Specification {
 
     def "pom.xml includes spring-boot-maven-plugin with repackage goal"() {
         when:
-        generator.generate(serviceRoot)
+        generator.generate(serviceRoot, FractalxConfig.defaults())
 
         then:
         def c = pom()

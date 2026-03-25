@@ -32,7 +32,7 @@ class OtelConfigStepSpec extends Specification {
     private GenerationContext ctx(FractalModule m) {
         Files.createDirectories(serviceRoot.resolve("src/main/java"))
         Files.createDirectories(serviceRoot.resolve("src/main/resources"))
-        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults(), [])
+        new GenerationContext(m, serviceRoot, serviceRoot, [m], FractalxConfig.defaults().withBasePackage("org.fractalx.generated"), [])
     }
 
     /** OtelConfigStep generates into org.fractalx.generated.<serviceNameLower> */

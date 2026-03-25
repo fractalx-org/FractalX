@@ -38,7 +38,7 @@ class DataIsolationGeneratorSpec extends Specification {
 
     def "IsolationConfig.java is created at the correct path under the generated package"() {
         when:
-        generator.generateIsolationConfig(module, srcMainJava)
+        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice")
 
         then:
         def expected = srcMainJava
@@ -48,7 +48,7 @@ class DataIsolationGeneratorSpec extends Specification {
 
     def "IsolationConfig contains @EnableJpaRepositories with both generated and source packages"() {
         when:
-        generator.generateIsolationConfig(module, srcMainJava)
+        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice")
 
         then:
         def content = isolationConfigContent()
@@ -59,7 +59,7 @@ class DataIsolationGeneratorSpec extends Specification {
 
     def "IsolationConfig contains @EntityScan with both generated and source packages"() {
         when:
-        generator.generateIsolationConfig(module, srcMainJava)
+        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice")
 
         then:
         def content = isolationConfigContent()
@@ -77,7 +77,7 @@ class DataIsolationGeneratorSpec extends Specification {
             .build()
 
         when:
-        generator.generateIsolationConfig(hyphenated, srcMainJava)
+        generator.generateIsolationConfig(hyphenated, srcMainJava, "org.fractalx.generated.mycomplexservice")
 
         then:
         def config = srcMainJava
@@ -88,7 +88,7 @@ class DataIsolationGeneratorSpec extends Specification {
 
     def "IsolationConfig is annotated with @Configuration"() {
         when:
-        generator.generateIsolationConfig(module, srcMainJava)
+        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice")
 
         then:
         isolationConfigContent().contains("@Configuration")

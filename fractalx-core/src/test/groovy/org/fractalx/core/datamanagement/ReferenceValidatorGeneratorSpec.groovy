@@ -67,7 +67,7 @@ class ReferenceValidatorGeneratorSpec extends Specification {
         """)
 
         when:
-        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot)
+        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot, "org.fractalx.generated.orderservice")
 
         then:
         Files.exists(validationDir().resolve("ReferenceValidator.java"))
@@ -86,7 +86,7 @@ class ReferenceValidatorGeneratorSpec extends Specification {
         """)
 
         when:
-        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot)
+        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot, "org.fractalx.generated.orderservice")
 
         then:
         def content = Files.readString(validationDir().resolve("ReferenceValidator.java"))
@@ -107,7 +107,7 @@ class ReferenceValidatorGeneratorSpec extends Specification {
         """)
 
         when:
-        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot)
+        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot, "org.fractalx.generated.orderservice")
 
         then:
         def clientFile = validationDir().resolve("PaymentExistsClient.java")
@@ -130,7 +130,7 @@ class ReferenceValidatorGeneratorSpec extends Specification {
         """)
 
         when:
-        generator.generateReferenceValidator(moduleNoDeps(), serviceRoot)
+        generator.generateReferenceValidator(moduleNoDeps(), serviceRoot, "org.fractalx.generated.paymentservice")
 
         then: "no validation package is created"
         !Files.exists(serviceRoot.resolve(
@@ -151,7 +151,7 @@ class ReferenceValidatorGeneratorSpec extends Specification {
         """)
 
         when: "module has deps, entity has customerId"
-        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot)
+        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot, "org.fractalx.generated.orderservice")
 
         then: "CustomerExistsClient is generated (customerId → Customer)"
         Files.exists(validationDir().resolve("CustomerExistsClient.java"))
@@ -172,7 +172,7 @@ class ReferenceValidatorGeneratorSpec extends Specification {
         """)
 
         when:
-        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot)
+        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot, "org.fractalx.generated.orderservice")
 
         then:
         def content = Files.readString(validationDir().resolve("ReferenceValidator.java"))
@@ -198,7 +198,7 @@ class ReferenceValidatorGeneratorSpec extends Specification {
         """)
 
         when:
-        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot)
+        generator.generateReferenceValidator(moduleWithDeps(), serviceRoot, "org.fractalx.generated.orderservice")
 
         then:
         def content = Files.readString(validationDir().resolve("ReferenceValidator.java"))
@@ -225,7 +225,7 @@ class ReferenceValidatorGeneratorSpec extends Specification {
             .build()
 
         when:
-        generator.generateReferenceValidator(mod, serviceRoot)
+        generator.generateReferenceValidator(mod, serviceRoot, "org.fractalx.generated.orderservice")
 
         then:
         def content = Files.readString(validationDir().resolve("ReferenceValidator.java"))

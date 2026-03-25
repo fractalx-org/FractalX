@@ -6,6 +6,7 @@ import spock.lang.TempDir
 
 import java.nio.file.Files
 import java.nio.file.Path
+import org.fractalx.core.config.FractalxConfig
 
 /**
  * Verifies that DockerComposeGenerator produces a correctly structured
@@ -35,7 +36,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "docker-compose.yml is created at the output root"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         Files.exists(outputRoot.resolve("docker-compose.yml"))
@@ -43,7 +44,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "docker-compose.yml is version 3.9"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         compose().startsWith("version: '3.9'")
@@ -51,7 +52,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "fractalx-registry service is included with a health check"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         def c = compose()
@@ -62,7 +63,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "registry is exposed on port 8761"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         compose().contains("8761:8761")
@@ -70,7 +71,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "generated services depend on fractalx-registry being healthy"() {
         when:
-        generator.generate([order, payment], outputRoot, false)
+        generator.generate([order, payment], outputRoot, false, FractalxConfig.defaults())
 
         then:
         def c = compose()
@@ -80,7 +81,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "each service exposes both HTTP port and gRPC port (HTTP + 10000)"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         def c = compose()
@@ -90,7 +91,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "services have SPRING_PROFILES_ACTIVE=docker environment variable"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         compose().contains("SPRING_PROFILES_ACTIVE=docker")
@@ -98,7 +99,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "services have FRACTALX_REGISTRY_URL environment variable"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         compose().contains("FRACTALX_REGISTRY_URL=http://fractalx-registry:8761")
@@ -106,7 +107,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "saga orchestrator service is included when hasSagaOrchestrator is true"() {
         when:
-        generator.generate([order], outputRoot, true)
+        generator.generate([order], outputRoot, true, FractalxConfig.defaults())
 
         then:
         compose().contains("fractalx-saga-orchestrator:")
@@ -114,7 +115,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "saga orchestrator service is NOT included when hasSagaOrchestrator is false"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         !compose().contains("fractalx-saga-orchestrator:")
@@ -122,7 +123,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "admin-service and fractalx-gateway are always included"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         def c = compose()
@@ -135,7 +136,7 @@ class DockerComposeGeneratorSpec extends Specification {
         Files.createDirectories(outputRoot.resolve("order-service"))
 
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         Files.exists(outputRoot.resolve("order-service/Dockerfile"))
@@ -146,7 +147,7 @@ class DockerComposeGeneratorSpec extends Specification {
         Files.createDirectories(outputRoot.resolve("order-service"))
 
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         def dockerfile = Files.readString(outputRoot.resolve("order-service/Dockerfile"))
@@ -161,7 +162,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "Jaeger all-in-one service is included with OTLP enabled"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         def c = compose()
@@ -172,7 +173,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "Jaeger exposes UI port 16686 and OTLP gRPC port 4317"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         def c = compose()
@@ -182,7 +183,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "logger-service is included in docker-compose"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         def c = compose()
@@ -192,7 +193,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "each microservice has OTEL_EXPORTER_OTLP_ENDPOINT pointing to jaeger"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         compose().contains("OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317")
@@ -200,7 +201,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "each microservice has OTEL_SERVICE_NAME set to its service name"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         compose().contains("OTEL_SERVICE_NAME=order-service")
@@ -208,7 +209,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "each microservice has FRACTALX_LOGGER_URL pointing to logger-service"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         compose().contains("FRACTALX_LOGGER_URL=http://logger-service:9099/api/logs")
@@ -216,7 +217,7 @@ class DockerComposeGeneratorSpec extends Specification {
 
     def "admin-service has JAEGER_QUERY_URL environment variable"() {
         when:
-        generator.generate([order], outputRoot, false)
+        generator.generate([order], outputRoot, false, FractalxConfig.defaults())
 
         then:
         compose().contains("JAEGER_QUERY_URL=http://jaeger:")
