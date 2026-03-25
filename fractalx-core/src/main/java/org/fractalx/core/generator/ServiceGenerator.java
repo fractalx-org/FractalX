@@ -41,6 +41,24 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+/*
+ * ███████╗██████╗  █████╗  ██████╗████████╗ █████╗ ██╗     ██╗  ██╗
+ * ██╔════╝██╔══██╗██╔══██╗██╔════╝╚══██╔══╝██╔══██╗██║     ╚██╗██╔╝
+ * █████╗  ██████╔╝███████║██║        ██║   ███████║██║      ╚███╔╝
+ * ██╔══╝  ██╔══██╗██╔══██║██║        ██║   ██╔══██║██║      ██╔██╗
+ * ██║     ██║  ██║██║  ██║╚██████╗   ██║   ██║  ██║███████╗██╔╝ ██╗
+ * ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+ *
+ *  Service Generation Engine  ·  fractalx-core
+ *  The heart of the FractalX decomposition pipeline.
+ *
+ *  Copyright (c) 2025 – 2026  Project FractalX  (https://github.com/fractalx-org)
+ *  Licensed under the Apache License, Version 2.0
+ *
+ *  @author  Sathnindu Kottage  <github.com/sathninduk>
+ *  @since   0.1.0
+ */
+
 /**
  * Orchestrates generation of all microservice projects from analyzed modules.
  *
@@ -102,6 +120,58 @@ public class ServiceGenerator {
         this.pipeline = buildPipeline();
     }
 
+    /**
+     * Constructs the ordered generation pipeline that transforms a monolithic module into a
+     * fully-wired, production-ready microservice.
+     *
+     * <p>Each element is a {@link ServiceFileGenerator} — a single-method functional interface
+     * that receives a {@link GenerationContext} and writes or transforms one logical concern.
+     * Steps are intentionally kept small and composable; new capabilities are added here without
+     * touching any existing step (Open/Closed Principle).
+     *
+     * <p><b>Pipeline stages (order is load-bearing — do not reorder without reading the notes):</b>
+     *
+     * <pre>
+     * ── Phase 1 · Scaffolding ────────────────────────────────────────────────
+     *    PomGenerator              Build descriptor with correct deps &amp; versions
+     *    ApplicationGenerator      Spring Boot entry-point class
+     *    ConfigurationGenerator    application.yml skeleton
+     *    patchConfigurationFile    Injects observability properties into the yml
+     *                              (must run after ConfigurationGenerator writes the file)
+     *
+     * ── Phase 2 · Source Transplantation ─────────────────────────────────────
+     *    CodeCopier                Raw copy of module sources into the service tree
+     *    CodeTransformer           Ordered AST-level rewrites applied in one pass:
+     *      ├ AnnotationRemover       Strips monolith-only markers (@Module, etc.)
+     *      ├ RelationshipDecoupler   Breaks compile-time coupling across module boundaries
+     *      ├ ImportPreserver         Retains imports that the decoupler would otherwise drop
+     *      └ ImportCleaner           Removes imports made redundant by the steps above
+     *    FileCleanupStep           Deletes artefacts that must not exist in the service
+     *
+     * ── Phase 3 · NetScope Wiring ─────────────────────────────────────────────
+     *    NetScopeServerAnnotationStep   Marks service endpoints for the mesh
+     *    NetScopeClientGenerator        Emits typed HTTP clients for each dependency
+     *    NetScopeClientWiringStep       Injects generated clients into call-sites
+     *
+     * ── Phase 4 · Distributed Systems ────────────────────────────────────────
+     *    SagaMethodTransformer     Rewrites cross-service calls → outboxPublisher.publish()
+     *    upgradeService            Adds outbox table, event models, and publisher bean
+     *                              (depends on SagaMethodTransformer having identified sites)
+     *
+     * ── Phase 5 · Observability ───────────────────────────────────────────────
+     *    CorrelationIdGenerator    Writes logback-spring.xml with %X{correlationId} pattern
+     *    OtelConfigStep            OpenTelemetry agent config and span export settings
+     *    HealthMetricsStep         Actuator + Micrometer custom health indicators
+     *    DbSummaryStep             Datasource-level metrics and slow-query logging
+     *
+     * ── Phase 6 · Service Mesh ────────────────────────────────────────────────
+     *    ServiceRegistrationStep       Registry self-registration config
+     *    NetScopeRegistryBridgeStep    Publishes NetScope metadata to the registry
+     *    ResilienceConfigStep          Circuit-breaker, retry, and bulkhead policies
+     * </pre>
+     *
+     * @return an immutable, ordered list of generation steps
+     */
     private List<ServiceFileGenerator> buildPipeline() {
         ObservabilityInjector injector = this.observabilityInjector;
 

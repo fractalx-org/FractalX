@@ -6,6 +6,9 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.ArrayInitializerExpr;
+import com.github.javaparser.ast.expr.ClassExpr;
+import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MemberValuePair;
 import com.github.javaparser.ast.expr.NormalAnnotationExpr;
 import org.slf4j.Logger;
@@ -15,6 +18,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Analyzes source code to identify FractalX decomposable modules.
@@ -72,6 +76,19 @@ public class ModuleAnalyzer {
             });
         }
 
+        // Validate: no two modules may share the same package — CodeCopier would copy the
+        // same directory twice, producing duplicate/conflicting generated services.
+        modules.stream()
+                .collect(Collectors.groupingBy(FractalModule::getPackageName, Collectors.counting()))
+                .forEach((pkg, count) -> {
+                    if (count > 1) {
+                        throw new IllegalStateException(
+                            count + " @DecomposableModule classes share package '" + pkg + "'. " +
+                            "Each module must have its own distinct package subtree. " +
+                            "Move them into separate sub-packages (e.g., com.example.order, com.example.payment).");
+                    }
+                });
+
         return modules;
     }
 
@@ -105,6 +122,8 @@ public class ModuleAnalyzer {
 
         cu.getPackageDeclaration().ifPresent(pd -> builder.packageName(pd.getNameAsString()));
 
+        List<String> explicitDeps = new ArrayList<>();
+
         if (annotation.isNormalAnnotationExpr()) {
             NormalAnnotationExpr normalAnnotation = annotation.asNormalAnnotationExpr();
             for (MemberValuePair pair : normalAnnotation.getPairs()) {
@@ -121,11 +140,32 @@ public class ModuleAnalyzer {
                         }
                     }
                     case "independentDeployment" -> builder.independentDeployment(Boolean.parseBoolean(value));
+                    case "dependencies" -> explicitDeps.addAll(extractClassArrayValues(pair.getValue()));
                 }
             }
         }
 
-        List<String> dependencies = findDependencies(classDecl);
+        List<String> dependencies;
+        if (!explicitDeps.isEmpty()) {
+            dependencies = explicitDeps;
+            log.info("Explicit dependencies declared for {}: {}", builder.build().getServiceName(), dependencies);
+        } else {
+            dependencies = findDependencies(classDecl);
+            if (!dependencies.isEmpty()) {
+                log.warn("Module '{}': dependencies inferred by type-suffix heuristic ({}). " +
+                         "Declare them explicitly with @DecomposableModule(dependencies={{...}}) " +
+                         "for reliability with any naming convention.",
+                         // serviceName not yet set on builder if we call build() — get from annotation
+                         annotation.isNormalAnnotationExpr()
+                             ? annotation.asNormalAnnotationExpr().getPairs().stream()
+                               .filter(p -> "serviceName".equals(p.getNameAsString()))
+                               .map(p -> p.getValue().toString().replace("\"", ""))
+                               .findFirst().orElse("?")
+                             : "?",
+                         dependencies);
+            }
+        }
+
         builder.dependencies(dependencies);
         builder.detectedImports(detectedImports);
 
@@ -167,5 +207,23 @@ public class ModuleAnalyzer {
         );
 
         return new ArrayList<>(dependencies);
+    }
+
+    /**
+     * Extracts simple class names from a {@code dependencies={Foo.class, Bar.class}} annotation value.
+     * Handles both a single {@code ClassExpr} and an {@code ArrayInitializerExpr} of {@code ClassExpr}.
+     */
+    private List<String> extractClassArrayValues(Expression expr) {
+        List<String> result = new ArrayList<>();
+        if (expr instanceof ClassExpr ce) {
+            result.add(ce.getTypeAsString());
+        } else if (expr instanceof ArrayInitializerExpr aie) {
+            for (Expression element : aie.getValues()) {
+                if (element instanceof ClassExpr ce) {
+                    result.add(ce.getTypeAsString());
+                }
+            }
+        }
+        return result;
     }
 }
