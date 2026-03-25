@@ -13,7 +13,7 @@ class AdminPomGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(AdminPomGenerator.class);
 
-    void generate(Path serviceRoot) throws IOException {
+    void generate(Path serviceRoot, org.fractalx.core.config.FractalxConfig config) throws IOException {
         String content = """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -22,7 +22,7 @@ class AdminPomGenerator {
                          http://maven.apache.org/xsd/maven-4.0.0.xsd">
                     <modelVersion>4.0.0</modelVersion>
 
-                    <groupId>org.fractalx.generated</groupId>
+                    <groupId>%s</groupId>
                     <artifactId>admin-service</artifactId>
                     <version>1.0.0-SNAPSHOT</version>
                     <packaging>jar</packaging>
@@ -32,7 +32,7 @@ class AdminPomGenerator {
 
                     <properties>
                         <java.version>17</java.version>
-                        <spring-boot.version>3.2.0</spring-boot.version>
+                        <spring-boot.version>%s</spring-boot.version>
                         <maven.compiler.source>17</maven.compiler.source>
                         <maven.compiler.target>17</maven.compiler.target>
                         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -162,7 +162,7 @@ class AdminPomGenerator {
                         </plugins>
                     </build>
                 </project>
-                """.formatted(FractalxVersion.get());
+                """.formatted(config.effectiveBasePackage(), config.springBootVersion(), FractalxVersion.get());
         Files.writeString(serviceRoot.resolve("pom.xml"), content);
         log.debug("Generated admin pom.xml");
     }

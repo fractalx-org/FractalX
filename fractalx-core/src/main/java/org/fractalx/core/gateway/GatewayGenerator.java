@@ -64,7 +64,7 @@ public class GatewayGenerator {
 
         // Step 2: Generate POM
         GatewayPomGenerator pomGen = new GatewayPomGenerator();
-        pomGen.generatePom(gatewayRoot, modules);
+        pomGen.generatePom(gatewayRoot, modules, fractalxConfig);
 
         // Step 3: Generate Application class
         GatewayApplicationGenerator appGen = new GatewayApplicationGenerator();

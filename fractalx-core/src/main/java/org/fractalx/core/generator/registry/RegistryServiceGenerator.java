@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.registry;
 
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +43,10 @@ public class RegistryServiceGenerator {
     }
 
     public void generate(List<FractalModule> modules, Path outputRoot) throws IOException {
+        generate(modules, outputRoot, FractalxConfig.defaults());
+    }
+
+    public void generate(List<FractalModule> modules, Path outputRoot, FractalxConfig config) throws IOException {
         log.info("Generating fractalx-registry service...");
 
         Path registryRoot     = outputRoot.resolve(REGISTRY_DIR);
@@ -51,7 +56,7 @@ public class RegistryServiceGenerator {
         Files.createDirectories(srcMainJava);
         Files.createDirectories(srcMainResources);
 
-        pomGenerator.generate(registryRoot);
+        pomGenerator.generate(registryRoot, config);
         appGenerator.generate(srcMainJava);
         configGenerator.generate(srcMainResources, modules);
         modelGenerator.generate(srcMainJava);

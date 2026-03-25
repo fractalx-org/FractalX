@@ -1,5 +1,6 @@
 package org.fractalx.core.generator;
 
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.generator.registry.RegistryServiceGenerator;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
@@ -26,23 +27,23 @@ public class DockerComposeGenerator {
     private static final int JAEGER_OTLP_PORT = 4317;
 
     public void generate(List<FractalModule> modules, Path outputRoot,
-                         boolean hasSagaOrchestrator) throws IOException {
-        generateDockerCompose(modules, outputRoot, hasSagaOrchestrator);
-        generateDockerfiles(modules, outputRoot, hasSagaOrchestrator);
+                         boolean hasSagaOrchestrator, FractalxConfig config) throws IOException {
+        generateDockerCompose(modules, outputRoot, hasSagaOrchestrator, config);
+        generateDockerfiles(modules, outputRoot, hasSagaOrchestrator, config);
         log.info("Generated docker-compose.yml and Dockerfiles");
     }
 
     // -------------------------------------------------------------------------
 
     private void generateDockerCompose(List<FractalModule> modules, Path outputRoot,
-                                        boolean hasSagaOrchestrator) throws IOException {
+                                        boolean hasSagaOrchestrator, FractalxConfig config) throws IOException {
         StringBuilder services = new StringBuilder();
 
-        int regPort = RegistryServiceGenerator.REGISTRY_PORT;
+        int regPort = config.registryPort();
 
         // Jaeger all-in-one (no registry dependency — starts independently)
         services.append("  jaeger:\n");
-        services.append("    image: jaegertracing/all-in-one:1.53\n");
+        services.append("    image: ").append(config.dockerImages().jaegerImage()).append("\n");
         services.append("    environment:\n");
         services.append("      - COLLECTOR_OTLP_ENABLED=true\n");
         services.append("      - MEMORY_MAX_TRACES=50000\n");
@@ -54,7 +55,7 @@ public class DockerComposeGenerator {
         // Logger service
         services.append("  logger-service:\n");
         services.append("    build:\n      context: ./logger-service\n      dockerfile: Dockerfile\n");
-        services.append("    ports:\n      - \"").append(LOGGER_PORT).append(":").append(LOGGER_PORT).append("\"\n");
+        services.append("    ports:\n      - \"").append(config.loggerPort()).append(":").append(config.loggerPort()).append("\"\n");
         services.append("    environment:\n");
         services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
         services.append("      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:").append(JAEGER_OTLP_PORT).append("\n");
@@ -71,7 +72,7 @@ public class DockerComposeGenerator {
 
         // Generated microservices
         for (FractalModule m : modules) {
-            int grpcPort = m.getPort() + 10000;
+            int grpcPort = m.grpcPort();
             services.append("  ").append(m.getServiceName()).append(":\n");
             services.append("    build:\n      context: ./").append(m.getServiceName())
                     .append("\n      dockerfile: Dockerfile\n");
@@ -84,11 +85,11 @@ public class DockerComposeGenerator {
             services.append("      - FRACTALX_REGISTRY_HOST=").append(m.getServiceName()).append("\n");
             services.append("      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:").append(JAEGER_OTLP_PORT).append("\n");
             services.append("      - OTEL_SERVICE_NAME=").append(m.getServiceName()).append("\n");
-            services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(LOGGER_PORT).append("/api/logs\n");
+            services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(config.loggerPort()).append("/api/logs\n");
             for (String dep : m.getDependencies()) {
                 String peer   = beanTypeToServiceName(dep);
                 String envPfx = peer.toUpperCase().replace("-", "_");
-                int peerGrpc  = portForService(peer, modules) + 10000;
+                int peerGrpc  = portForService(peer, modules) + FractalModule.GRPC_PORT_OFFSET;
                 services.append("      - ").append(envPfx).append("_HOST=").append(peer).append("\n");
                 services.append("      - ").append(envPfx).append("_GRPC_PORT=").append(peerGrpc).append("\n");
             }
@@ -105,25 +106,25 @@ public class DockerComposeGenerator {
             services.append("      - FRACTALX_REGISTRY_URL=http://fractalx-registry:").append(regPort).append("\n");
             services.append("      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:").append(JAEGER_OTLP_PORT).append("\n");
             services.append("      - OTEL_SERVICE_NAME=fractalx-saga-orchestrator\n");
-            services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(LOGGER_PORT).append("/api/logs\n");
+            services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(config.loggerPort()).append("/api/logs\n");
             services.append("    depends_on:\n      fractalx-registry:\n        condition: service_healthy\n\n");
         }
 
         // Admin service
         services.append("  admin-service:\n");
         services.append("    build:\n      context: ./admin-service\n      dockerfile: Dockerfile\n");
-        services.append("    ports:\n      - \"").append(ADMIN_PORT).append(":").append(ADMIN_PORT).append("\"\n");
+        services.append("    ports:\n      - \"").append(config.adminPort()).append(":").append(config.adminPort()).append("\"\n");
         services.append("    environment:\n");
         services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
         services.append("      - FRACTALX_REGISTRY_URL=http://fractalx-registry:").append(regPort).append("\n");
         services.append("      - JAEGER_QUERY_URL=http://jaeger:").append(JAEGER_UI_PORT).append("\n");
-        services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(LOGGER_PORT).append("/api/logs\n");
+        services.append("      - FRACTALX_LOGGER_URL=http://logger-service:").append(config.loggerPort()).append("/api/logs\n");
         services.append("    depends_on:\n      fractalx-registry:\n        condition: service_healthy\n\n");
 
         // API Gateway
         services.append("  fractalx-gateway:\n");
         services.append("    build:\n      context: ./fractalx-gateway\n      dockerfile: Dockerfile\n");
-        services.append("    ports:\n      - \"").append(GATEWAY_PORT).append(":").append(GATEWAY_PORT).append("\"\n");
+        services.append("    ports:\n      - \"").append(config.gatewayPort()).append(":").append(config.gatewayPort()).append("\"\n");
         services.append("    environment:\n");
         services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
         services.append("      - FRACTALX_REGISTRY_URL=http://fractalx-registry:").append(regPort).append("\n");
@@ -136,10 +137,10 @@ public class DockerComposeGenerator {
     }
 
     private void generateDockerfiles(List<FractalModule> modules, Path outputRoot,
-                                      boolean hasSagaOrchestrator) throws IOException {
+                                      boolean hasSagaOrchestrator, FractalxConfig config) throws IOException {
         String dockerfile = """
                 # Auto-generated by FractalX
-                FROM maven:3.9-eclipse-temurin-17 AS build
+                FROM __MAVEN_IMAGE__ AS build
 
                 WORKDIR /app
 
@@ -149,7 +150,7 @@ public class DockerComposeGenerator {
                 COPY src ./src
                 RUN mvn -B package -DskipTests -q
 
-                FROM eclipse-temurin:17-jre-jammy
+                FROM __JRE_IMAGE__
 
                 WORKDIR /app
 
@@ -160,7 +161,9 @@ public class DockerComposeGenerator {
                 USER fractalx
 
                 ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
-                """;
+                """
+                .replace("__MAVEN_IMAGE__", config.dockerImages().mavenBuildImage())
+                .replace("__JRE_IMAGE__", config.dockerImages().jreRuntimeImage());
 
         List<String> serviceDirs = new ArrayList<>();
         modules.forEach(m -> serviceDirs.add(m.getServiceName()));

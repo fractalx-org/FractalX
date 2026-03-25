@@ -1,6 +1,7 @@
 package org.fractalx.core.generator.service;
 
 import org.fractalx.core.FractalxVersion;
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.FractalModule;
@@ -84,14 +85,15 @@ public class PomGenerator implements ServiceFileGenerator {
     @Override
     public void generate(GenerationContext context) throws IOException {
         FractalModule module = context.getModule();
+        FractalxConfig cfg = context.getFractalxConfig();
         log.debug("Generating pom.xml for {}", module.getServiceName());
         Files.writeString(context.getServiceRoot().resolve("pom.xml"),
-                buildPomContent(module, context.getServiceRoot()));
+                buildPomContent(module, context.getServiceRoot(), cfg));
     }
 
     // ── POM assembly ─────────────────────────────────────────────────────────
 
-    private String buildPomContent(FractalModule module, Path serviceRoot) {
+    private String buildPomContent(FractalModule module, Path serviceRoot, FractalxConfig cfg) {
         String filteredDeps = buildFilteredMonolithDeps(module, serviceRoot);
 
         return """
@@ -102,7 +104,7 @@ public class PomGenerator implements ServiceFileGenerator {
                          http://maven.apache.org/xsd/maven-4.0.0.xsd">
                     <modelVersion>4.0.0</modelVersion>
 
-                    <groupId>org.fractalx.generated</groupId>
+                    <groupId>%s</groupId>
                     <artifactId>%s</artifactId>
                     <version>1.0.0-SNAPSHOT</version>
                     <packaging>jar</packaging>
@@ -112,7 +114,7 @@ public class PomGenerator implements ServiceFileGenerator {
 
                     <properties>
                         <java.version>17</java.version>
-                        <spring-boot.version>3.2.0</spring-boot.version>
+                        <spring-boot.version>%s</spring-boot.version>
                         <maven.compiler.source>17</maven.compiler.source>
                         <maven.compiler.target>17</maven.compiler.target>
                         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -130,7 +132,7 @@ public class PomGenerator implements ServiceFileGenerator {
                             <dependency>
                                 <groupId>org.springframework.cloud</groupId>
                                 <artifactId>spring-cloud-dependencies</artifactId>
-                                <version>2023.0.0</version>
+                                <version>%s</version>
                                 <type>pom</type>
                                 <scope>import</scope>
                             </dependency>
@@ -208,8 +210,11 @@ public class PomGenerator implements ServiceFileGenerator {
                     </build>
                 </project>
                 """.formatted(
+                cfg.effectiveBasePackage(),
                 module.getServiceName(),
                 module.getServiceName(),
+                cfg.springBootVersion(),
+                cfg.springCloudVersion(),
                 NETSCOPE_VERSION,
                 NETSCOPE_VERSION,
                 FRACTALX_RUNTIME_VERSION,

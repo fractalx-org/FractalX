@@ -181,7 +181,7 @@ public class DataReadmeGenerator {
 
         // ── Participant sagas ─────────────────────────────────────────────────
         for (SagaDefinition saga : participantSagas) {
-            int grpcPort = module.getPort() + 10000;
+            int grpcPort = module.grpcPort();
             md.append("### `").append(saga.getSagaId()).append("` — **Participant** 🔗\n\n");
             if (!saga.getDescription().isBlank()) {
                 md.append("> ").append(saga.getDescription()).append("\n\n");
@@ -410,7 +410,7 @@ public class DataReadmeGenerator {
         md.append("| :--- | :---: | :---: |\n");
         for (FractalModule m : modules) {
             md.append("| `").append(m.getServiceName()).append("` | ")
-              .append(m.getPort()).append(" | ").append(m.getPort() + 10000).append(" |\n");
+              .append(m.getPort()).append(" | ").append(m.grpcPort()).append(" |\n");
         }
         md.append("\n");
         md.append("Configured in `application.yml` under `netscope.client.servers`.\n\n");

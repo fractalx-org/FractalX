@@ -20,7 +20,7 @@ public class LoggerServiceGenerator {
     static final String SERVICE_NAME = "logger-service";
     static final int    PORT         = 9099;
 
-    public void generate(Path outputRoot) throws IOException {
+    public void generate(Path outputRoot, org.fractalx.core.config.FractalxConfig config) throws IOException {
         log.info("Generating Centralized Logger Service...");
 
         Path serviceRoot      = outputRoot.resolve(SERVICE_NAME);
@@ -30,7 +30,7 @@ public class LoggerServiceGenerator {
         Files.createDirectories(srcMainJava);
         Files.createDirectories(srcMainResources);
 
-        generatePom(serviceRoot);
+        generatePom(serviceRoot, config);
         generateApplication(srcMainJava);
         generateModel(srcMainJava);
         generateRepository(srcMainJava);
@@ -42,7 +42,7 @@ public class LoggerServiceGenerator {
 
     // -------------------------------------------------------------------------
 
-    private void generatePom(Path root) throws IOException {
+    private void generatePom(Path root, org.fractalx.core.config.FractalxConfig config) throws IOException {
         String content = """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -51,14 +51,14 @@ public class LoggerServiceGenerator {
                          http://maven.apache.org/xsd/maven-4.0.0.xsd">
                     <modelVersion>4.0.0</modelVersion>
 
-                    <groupId>org.fractalx.generated</groupId>
+                    <groupId>%s</groupId>
                     <artifactId>logger-service</artifactId>
                     <version>1.0.0-SNAPSHOT</version>
 
                     <parent>
                         <groupId>org.springframework.boot</groupId>
                         <artifactId>spring-boot-starter-parent</artifactId>
-                        <version>3.2.0</version>
+                        <version>%s</version>
                     </parent>
 
                     <properties>
@@ -86,7 +86,8 @@ public class LoggerServiceGenerator {
                     </build>
                 </project>
                 """;
-        Files.writeString(root.resolve("pom.xml"), content);
+        Files.writeString(root.resolve("pom.xml"),
+                content.formatted(config.effectiveBasePackage(), config.springBootVersion()));
     }
 
     private void generateConfig(Path resources) throws IOException {

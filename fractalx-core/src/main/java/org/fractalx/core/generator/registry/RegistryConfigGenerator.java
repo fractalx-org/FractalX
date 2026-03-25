@@ -33,7 +33,7 @@ class RegistryConfigGenerator {
             yml.append("        host: ${").append(m.getServiceName().toUpperCase().replace("-", "_"))
                .append("_HOST:localhost}\n");
             yml.append("        port: ").append(m.getPort()).append("\n");
-            yml.append("        grpcPort: ").append(m.getPort() + 10000).append("\n");
+            yml.append("        grpcPort: ").append(m.grpcPort()).append("\n");
             yml.append("        healthUrl: http://localhost:").append(m.getPort()).append("/actuator/health\n");
         }
         yml.append("\nmanagement:\n");

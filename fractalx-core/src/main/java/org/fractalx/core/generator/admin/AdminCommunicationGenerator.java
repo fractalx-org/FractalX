@@ -204,7 +204,7 @@ class AdminCommunicationGenerator {
         return modules.stream()
                 .filter(m -> m.getServiceName().equals(targetServiceName))
                 .findFirst()
-                .map(m -> m.getPort() + 10000)
+                .map(FractalModule::grpcPort)
                 .orElse(0);
     }
 

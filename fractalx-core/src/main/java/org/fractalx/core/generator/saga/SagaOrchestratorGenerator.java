@@ -1,6 +1,7 @@
 package org.fractalx.core.generator.saga;
 
 import org.fractalx.core.FractalxVersion;
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.datamanagement.DataReadmeGenerator;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.MethodParam;
@@ -39,12 +40,13 @@ public class SagaOrchestratorGenerator {
 
     private static final String ORCHESTRATOR_NAME    = "fractalx-saga-orchestrator";
     private static final int    ORCHESTRATOR_PORT    = 8099;
-    private static final String BASE_PACKAGE         = "org.fractalx.generated.sagaorchestrator";
     private static final String FRACTALX_RUNTIME_VER = FractalxVersion.get();
 
     public void generateOrchestratorService(List<FractalModule> modules,
                                             List<SagaDefinition> sagas,
-                                            Path outputRoot) throws IOException {
+                                            Path outputRoot,
+                                            FractalxConfig config) throws IOException {
+        String basePackage = config.effectiveBasePackage() + ".sagaorchestrator";
         if (sagas.isEmpty()) {
             log.info("No @DistributedSaga definitions found — saga orchestrator not generated");
             return;
@@ -59,7 +61,7 @@ public class SagaOrchestratorGenerator {
         Files.createDirectories(resourcesDir);
         Files.createDirectories(serviceRoot.resolve("src/test/java"));
 
-        Path basePkg = packagePath(srcMainJava, BASE_PACKAGE);
+        Path basePkg = packagePath(srcMainJava, basePackage);
         Files.createDirectories(packagePath(basePkg, "model"));
         Files.createDirectories(packagePath(basePkg, "repository"));
         Files.createDirectories(packagePath(basePkg, "service"));
@@ -67,21 +69,21 @@ public class SagaOrchestratorGenerator {
         Files.createDirectories(packagePath(basePkg, "client"));
 
         // ── Infrastructure files ─────────────────────────────────────────────
-        writePom(serviceRoot, modules);
-        writeApplicationClass(srcMainJava);
+        writePom(serviceRoot, modules, config);
+        writeApplicationClass(srcMainJava, basePackage);
         writeApplicationYml(resourcesDir, modules, sagas);
         writeFlywayMigration(resourcesDir);
 
         // ── Shared model ─────────────────────────────────────────────────────
-        writeFile(packagePath(basePkg, "model"), "SagaStatus.java",    buildSagaStatus());
-        writeFile(packagePath(basePkg, "model"), "SagaInstance.java",  buildSagaInstance());
-        writeFile(packagePath(basePkg, "repository"), "SagaInstanceRepository.java", buildRepository());
+        writeFile(packagePath(basePkg, "model"), "SagaStatus.java",    buildSagaStatus(basePackage));
+        writeFile(packagePath(basePkg, "model"), "SagaInstance.java",  buildSagaInstance(basePackage));
+        writeFile(packagePath(basePkg, "repository"), "SagaInstanceRepository.java", buildRepository(basePackage));
 
         // ── Per-saga service ─────────────────────────────────────────────────
         for (SagaDefinition saga : sagas) {
             String serviceClass = saga.toClassName() + "SagaService";
             writeFile(packagePath(basePkg, "service"), serviceClass + ".java",
-                    buildSagaService(saga));
+                    buildSagaService(saga, basePackage));
         }
 
         // ── NetScope client interfaces — aggregated across ALL sagas ─────────
@@ -109,17 +111,17 @@ public class SagaOrchestratorGenerator {
             List<MethodParam> mergedParams = new ArrayList<>(
                     globalParamsByBean.get(entry.getKey()).values());
             writeFile(packagePath(basePkg, "client"), entry.getKey() + "Client.java",
-                    buildNetScopeClient(entry.getKey(), entry.getValue(), modules, mergedParams));
+                    buildNetScopeClient(entry.getKey(), entry.getValue(), modules, mergedParams, basePackage));
         }
 
         // ── Controller ───────────────────────────────────────────────────────
         writeFile(packagePath(basePkg, "controller"), "SagaController.java",
-                buildSagaController(sagas));
+                buildSagaController(sagas, basePackage));
 
         // ── Observability (OTel + correlation tracing) ───────────────────────
-        writeFile(basePkg, "OtelConfig.java",               buildOtelConfig());
-        writeFile(basePkg, "CorrelationTracingConfig.java", buildCorrelationTracingConfig());
-        writeFile(basePkg, "TracingExclusionConfig.java",   buildTracingExclusionConfig());
+        writeFile(basePkg, "OtelConfig.java",               buildOtelConfig(basePackage));
+        writeFile(basePkg, "CorrelationTracingConfig.java", buildCorrelationTracingConfig(basePackage));
+        writeFile(basePkg, "TracingExclusionConfig.java",   buildTracingExclusionConfig(basePackage));
 
         // ── README ────────────────────────────────────────────────────────────
         new DataReadmeGenerator().generateSagaOrchestratorReadme(sagas, modules, serviceRoot);
@@ -131,7 +133,7 @@ public class SagaOrchestratorGenerator {
     // Infrastructure
     // =========================================================================
 
-    private void writePom(Path serviceRoot, List<FractalModule> modules) throws IOException {
+    private void writePom(Path serviceRoot, List<FractalModule> modules, FractalxConfig config) throws IOException {
         // Collect unique participating services for NetScope client deps
         StringBuilder sb = new StringBuilder();
         sb.append("""
@@ -141,7 +143,7 @@ public class SagaOrchestratorGenerator {
                          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
                          http://maven.apache.org/xsd/maven-4.0.0.xsd">
                     <modelVersion>4.0.0</modelVersion>
-                    <groupId>org.fractalx.generated</groupId>
+                    <groupId>__BASE_GROUP__</groupId>
                     <artifactId>fractalx-saga-orchestrator</artifactId>
                     <version>1.0.0-SNAPSHOT</version>
                     <name>FractalX Saga Orchestrator</name>
@@ -149,7 +151,7 @@ public class SagaOrchestratorGenerator {
 
                     <properties>
                         <java.version>17</java.version>
-                        <spring-boot.version>3.2.0</spring-boot.version>
+                        <spring-boot.version>__SB_VERSION__</spring-boot.version>
                         <maven.compiler.source>17</maven.compiler.source>
                         <maven.compiler.target>17</maven.compiler.target>
                         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -237,11 +239,14 @@ public class SagaOrchestratorGenerator {
                 </project>
                 """);
         writeFile(serviceRoot, "pom.xml",
-                sb.toString().replace("__FX_VERSION__", FractalxVersion.get()));
+                sb.toString()
+                        .replace("__FX_VERSION__", FractalxVersion.get())
+                        .replace("__BASE_GROUP__", config.effectiveBasePackage())
+                        .replace("__SB_VERSION__", config.springBootVersion()));
     }
 
-    private void writeApplicationClass(Path srcMainJava) throws IOException {
-        writeFile(packagePath(srcMainJava, BASE_PACKAGE),
+    private void writeApplicationClass(Path srcMainJava, String basePackage) throws IOException {
+        writeFile(packagePath(srcMainJava, basePackage),
                 "SagaOrchestratorApplication.java",
                 """
                 package %s;
@@ -277,7 +282,7 @@ public class SagaOrchestratorGenerator {
                         return new RestTemplate();
                     }
                 }
-                """.formatted(BASE_PACKAGE, BASE_PACKAGE, BASE_PACKAGE));
+                """.formatted(basePackage, basePackage, basePackage));
     }
 
     private void writeApplicationYml(Path resourcesDir,
@@ -296,7 +301,7 @@ public class SagaOrchestratorGenerator {
         for (String serviceName : participatingServices) {
             int grpcPort = modules.stream()
                     .filter(m -> m.getServiceName().equals(serviceName))
-                    .map(m -> m.getPort() + 10000)
+                    .map(FractalModule::grpcPort)
                     .findFirst()
                     .orElse(19000);
             serversBlock.append("      ").append(serviceName).append(":\n");
@@ -411,7 +416,7 @@ public class SagaOrchestratorGenerator {
     // Model classes
     // =========================================================================
 
-    private String buildSagaStatus() {
+    private String buildSagaStatus(String basePackage) {
         return """
                 package %s.model;
 
@@ -431,10 +436,10 @@ public class SagaOrchestratorGenerator {
                     /** Saga completed with failure after compensation. */
                     FAILED
                 }
-                """.formatted(BASE_PACKAGE);
+                """.formatted(basePackage);
     }
 
-    private String buildSagaInstance() {
+    private String buildSagaInstance(String basePackage) {
         return """
                 package %s.model;
 
@@ -526,10 +531,10 @@ public class SagaOrchestratorGenerator {
                     public LocalDateTime getLastNotificationAttempt() { return lastNotificationAttempt; }
                     public void setLastNotificationAttempt(LocalDateTime v) { lastNotificationAttempt = v; }
                 }
-                """.formatted(BASE_PACKAGE);
+                """.formatted(basePackage);
     }
 
-    private String buildRepository() {
+    private String buildRepository(String basePackage) {
         return """
                 package %s.repository;
 
@@ -550,14 +555,14 @@ public class SagaOrchestratorGenerator {
                     /** Used by the notification retry poller to find sagas whose owner wasn't notified yet. */
                     List<SagaInstance> findByOwnerNotifiedFalseAndStatusIn(List<SagaStatus> statuses);
                 }
-                """.formatted(BASE_PACKAGE, BASE_PACKAGE, BASE_PACKAGE);
+                """.formatted(basePackage, basePackage, basePackage);
     }
 
     // =========================================================================
     // Per-saga service
     // =========================================================================
 
-    private String buildSagaService(SagaDefinition saga) {
+    private String buildSagaService(SagaDefinition saga, String basePackage) {
         String className    = saga.toClassName() + "SagaService";
         String payloadClass = saga.toClassName() + "Payload";
         List<MethodParam> params = saga.getSagaMethodParams();
@@ -577,13 +582,13 @@ public class SagaOrchestratorGenerator {
         allPayloadFields.addAll(extraVars);
 
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".service;\n\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".model.*;\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".repository.SagaInstanceRepository;\n");
+        sb.append("package ").append(basePackage).append(".service;\n\n");
+        sb.append("import ").append(basePackage).append(".model.*;\n");
+        sb.append("import ").append(basePackage).append(".repository.SagaInstanceRepository;\n");
 
         // Import each participating client
         Set<String> clientImports = saga.getSteps().stream()
-                .map(s -> BASE_PACKAGE + ".client." + s.getBeanType() + "Client")
+                .map(s -> basePackage + ".client." + s.getBeanType() + "Client")
                 .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
         clientImports.forEach(imp -> sb.append("import ").append(imp).append(";\n"));
 
@@ -979,11 +984,12 @@ public class SagaOrchestratorGenerator {
     private String buildNetScopeClient(String beanType,
                                         List<SagaStep> steps,
                                         List<FractalModule> modules,
-                                        List<MethodParam> sagaMethodParams) {
+                                        List<MethodParam> sagaMethodParams,
+                                        String basePackage) {
         String targetServiceName = steps.get(0).getTargetServiceName();
         int grpcPort = modules.stream()
                 .filter(m -> m.getServiceName().equals(targetServiceName))
-                .map(m -> m.getPort() + 10000)
+                .map(FractalModule::grpcPort)
                 .findFirst()
                 .orElse(19000);
 
@@ -1045,7 +1051,7 @@ public class SagaOrchestratorGenerator {
                 %s
                 }
                 """.formatted(
-                BASE_PACKAGE,
+                basePackage,
                 importsStr,
                 beanType, targetServiceName, grpcPort,
                 targetServiceName, beanType,
@@ -1080,14 +1086,14 @@ public class SagaOrchestratorGenerator {
     // Controller
     // =========================================================================
 
-    private String buildSagaController(List<SagaDefinition> sagas) {
+    private String buildSagaController(List<SagaDefinition> sagas, String basePackage) {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ").append(BASE_PACKAGE).append(".controller;\n\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".model.*;\n");
-        sb.append("import ").append(BASE_PACKAGE).append(".repository.SagaInstanceRepository;\n");
+        sb.append("package ").append(basePackage).append(".controller;\n\n");
+        sb.append("import ").append(basePackage).append(".model.*;\n");
+        sb.append("import ").append(basePackage).append(".repository.SagaInstanceRepository;\n");
 
         for (SagaDefinition saga : sagas) {
-            sb.append("import ").append(BASE_PACKAGE).append(".service.")
+            sb.append("import ").append(basePackage).append(".service.")
               .append(saga.toClassName()).append("SagaService;\n");
         }
 
@@ -1178,9 +1184,9 @@ public class SagaOrchestratorGenerator {
     // Observability helpers
     // =========================================================================
 
-    private String buildOtelConfig() {
+    private String buildOtelConfig(String basePackage) {
         return """
-                package org.fractalx.generated.sagaorchestrator;
+                package __BASE_PKG__;
 
                 import io.opentelemetry.api.OpenTelemetry;
                 import io.opentelemetry.api.baggage.propagation.W3CBaggagePropagator;
@@ -1229,12 +1235,12 @@ public class SagaOrchestratorGenerator {
                                 .buildAndRegisterGlobal();
                     }
                 }
-                """;
+                """.replace("__BASE_PKG__", basePackage);
     }
 
-    private String buildCorrelationTracingConfig() {
+    private String buildCorrelationTracingConfig(String basePackage) {
         return """
-                package org.fractalx.generated.sagaorchestrator;
+                package __BASE_PKG__;
 
                 import io.micrometer.tracing.Tracer;
                 import jakarta.servlet.http.HttpServletRequest;
@@ -1274,12 +1280,12 @@ public class SagaOrchestratorGenerator {
                         });
                     }
                 }
-                """;
+                """.replace("__BASE_PKG__", basePackage);
     }
 
-    private String buildTracingExclusionConfig() {
+    private String buildTracingExclusionConfig(String basePackage) {
         return """
-                package org.fractalx.generated.sagaorchestrator;
+                package __BASE_PKG__;
 
                 import io.micrometer.observation.ObservationPredicate;
                 import org.springframework.context.annotation.Bean;
@@ -1304,7 +1310,7 @@ public class SagaOrchestratorGenerator {
                         return (name, context) -> !name.startsWith("tasks.scheduled");
                     }
                 }
-                """;
+                """.replace("__BASE_PKG__", basePackage);
     }
 
     // =========================================================================

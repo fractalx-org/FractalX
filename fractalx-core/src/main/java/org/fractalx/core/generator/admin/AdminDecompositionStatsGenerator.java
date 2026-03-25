@@ -69,7 +69,7 @@ class AdminDecompositionStatsGenerator {
                             ),
                     """.formatted(
                     m.getServiceName(), m.getClassName(), m.getPackageName(),
-                    m.getPort(), m.getPort() + 10000,
+                    m.getPort(), m.grpcPort(),
                     deps, schemas,
                     !m.getDependencies().isEmpty(),
                     !m.getOwnedSchemas().isEmpty(),

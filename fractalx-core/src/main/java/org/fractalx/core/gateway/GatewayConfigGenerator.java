@@ -137,19 +137,20 @@ public class GatewayConfigGenerator {
 
         // Resilience4j circuit breaker config per service (fixes missing YAML bug)
         if (modules != null && !modules.isEmpty()) {
+            FractalxConfig.ResilienceDefaults r = cfg.resilience();
             ymlBuilder.append("resilience4j:\n");
             ymlBuilder.append("  circuitbreaker:\n    instances:\n");
             for (FractalModule m : modules) {
                 ymlBuilder.append("      ").append(m.getServiceName()).append(":\n");
-                ymlBuilder.append("        failure-rate-threshold: 50\n");
-                ymlBuilder.append("        wait-duration-in-open-state: 30s\n");
-                ymlBuilder.append("        permitted-number-of-calls-in-half-open-state: 5\n");
-                ymlBuilder.append("        sliding-window-size: 10\n");
+                ymlBuilder.append("        failure-rate-threshold: ").append(r.failureRateThreshold()).append("\n");
+                ymlBuilder.append("        wait-duration-in-open-state: ").append(r.waitDurationInOpenState()).append("\n");
+                ymlBuilder.append("        permitted-number-of-calls-in-half-open-state: ").append(r.permittedCallsInHalfOpenState()).append("\n");
+                ymlBuilder.append("        sliding-window-size: ").append(r.slidingWindowSize()).append("\n");
             }
             ymlBuilder.append("  timelimiter:\n    instances:\n");
             for (FractalModule m : modules) {
                 ymlBuilder.append("      ").append(m.getServiceName()).append(":\n");
-                ymlBuilder.append("        timeout-duration: 5s\n");
+                ymlBuilder.append("        timeout-duration: ").append(r.timeoutDuration()).append("\n");
             }
             ymlBuilder.append("\n");
         }
