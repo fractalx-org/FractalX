@@ -45,7 +45,13 @@ public class FractalxConfigReader {
         if (!Files.isDirectory(sourceResourcesDir)) return defaults;
 
         // Primary: fractalx-config.yml
-        Map<String, Object> fractalxMap = loadYaml(sourceResourcesDir.resolve("fractalx-config.yml"));
+        Path fractalxConfigPath = sourceResourcesDir.resolve("fractalx-config.yml");
+        if (!Files.exists(fractalxConfigPath)) {
+            log.warn("fractalx-config.yml not found at {} — using defaults for all settings. " +
+                     "Create this file to configure base-package, spring versions, ports, and more.",
+                     fractalxConfigPath);
+        }
+        Map<String, Object> fractalxMap = loadYaml(fractalxConfigPath);
         // Fallback: application.yml for spring-standard keys
         Map<String, Object> appMap      = loadYaml(sourceResourcesDir.resolve("application.yml"));
         // Also check application.properties
@@ -105,12 +111,28 @@ public class FractalxConfigReader {
                 leaf(fx, "base-package"),
                 appProps.getProperty("fractalx.base-package"),
                 pomInfo.basePackage());   // may be null → effectiveBasePackage() handles it
+        if (basePackage == null) {
+            log.warn("base-package not configured (fractalx.base-package not in fractalx-config.yml " +
+                     "and <groupId> not found in pom.xml). " +
+                     "Generated infrastructure classes will use 'generated' as the package prefix. " +
+                     "Set fractalx.base-package in fractalx-config.yml for correct namespacing.");
+        }
 
+        boolean springBootVersionFromConfig = first(
+                leaf(fx, "spring-boot-version"),
+                appProps.getProperty("fractalx.spring-boot-version"),
+                pomInfo.springBootVersion()) != null;
         String springBootVersion = first(
                 leaf(fx, "spring-boot-version"),
                 appProps.getProperty("fractalx.spring-boot-version"),
                 pomInfo.springBootVersion(),
                 defaults.springBootVersion());
+        if (!springBootVersionFromConfig) {
+            log.warn("Spring Boot version not detected from pom.xml properties or fractalx-config.yml " +
+                     "(version may be declared in a parent POM or BOM). " +
+                     "Defaulting to {}. Set fractalx.spring-boot-version in fractalx-config.yml to override.",
+                     defaults.springBootVersion());
+        }
 
         String springCloudVersion = first(
                 leaf(fx, "spring-cloud-version"),
@@ -218,7 +240,8 @@ public class FractalxConfigReader {
 
             return new SourcePomInfo(groupId, springBootVersion, springCloudVersion);
         } catch (Exception e) {
-            log.debug("Could not parse source pom.xml: {}", e.getMessage());
+            log.warn("Could not parse source pom.xml at {} — groupId and Spring versions " +
+                     "will fall back to defaults: {}", pomPath, e.getMessage());
             return SourcePomInfo.empty();
         }
     }

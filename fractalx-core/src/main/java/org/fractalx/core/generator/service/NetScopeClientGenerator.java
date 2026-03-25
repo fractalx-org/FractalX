@@ -97,9 +97,7 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
         List<CrossModuleCall> calls = new ArrayList<>();
 
         try {
-            Optional<Path> sourceFile = Files.walk(sourceRoot)
-                    .filter(p -> p.getFileName().toString().equals(beanType + ".java"))
-                    .findFirst();
+            Optional<Path> sourceFile = findSourceFile(sourceRoot, beanType, targetServiceName);
 
             if (sourceFile.isEmpty()) {
                 log.warn("Source file not found for bean type '{}' – client interface will be empty", beanType);
@@ -273,6 +271,47 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
     public static String beanTypeToServiceName(String beanType) {
         String stripped = beanType.replaceAll("(Service|Client)$", "");
         return stripped.replaceAll("([A-Z])", "-$1").toLowerCase().replaceFirst("^-", "") + "-service";
+    }
+
+    /**
+     * Finds the source file for {@code beanType} under {@code sourceRoot}.
+     *
+     * <p>When multiple files share the same simple name (different packages), the one
+     * whose package declaration starts with {@code expectedServiceName} converted to a
+     * package prefix is preferred. Falls back to the first match with a warning.
+     *
+     * @param sourceRoot          monolith {@code src/main/java}
+     * @param beanType            simple class name, e.g., {@code PaymentService}
+     * @param expectedServiceName logical service name, e.g., {@code payment-service}
+     */
+    private Optional<Path> findSourceFile(Path sourceRoot, String beanType, String expectedServiceName)
+            throws IOException {
+        List<Path> candidates;
+        try (java.util.stream.Stream<Path> stream = Files.walk(sourceRoot)) {
+            candidates = stream
+                    .filter(p -> p.getFileName().toString().equals(beanType + ".java"))
+                    .collect(java.util.stream.Collectors.toList());
+        }
+
+        if (candidates.isEmpty()) return Optional.empty();
+        if (candidates.size() == 1) return Optional.of(candidates.get(0));
+
+        // Multiple candidates — prefer the one whose package matches the target service
+        JavaParser parser = new JavaParser();
+        String pkgHint = expectedServiceName.replace("-", ".");
+        for (Path candidate : candidates) {
+            Optional<CompilationUnit> cu = parser.parse(candidate).getResult();
+            if (cu.isPresent()) {
+                String pkg = cu.get().getPackageDeclaration()
+                        .map(pd -> pd.getNameAsString()).orElse("");
+                if (pkg.contains(pkgHint)) return Optional.of(candidate);
+            }
+        }
+
+        log.warn("Multiple files named {}.java found under {}; using first match. " +
+                 "Declare explicit @DecomposableModule(dependencies={{...}}) to resolve ambiguity.",
+                 beanType, sourceRoot);
+        return Optional.of(candidates.get(0));
     }
 
     private FractalModule findModule(String serviceName, List<FractalModule> modules) {

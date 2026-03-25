@@ -21,27 +21,27 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Set;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
  * Rewires cross-module service references in copied source files so they point to
  * the generated {@code *Client} interfaces instead of the original service classes.
  *
- * <p>After {@link NetScopeClientWiringStep} generates a {@code PaymentServiceClient}
+ * <p>After {@link NetScopeClientGenerator} generates a {@code PaymentServiceClient}
  * interface for an {@code order-service}, this step walks every {@code .java} file
  * in the generated service and performs the following rewrites for each dependency
  * type (e.g., {@code PaymentService}):
  *
  * <ol>
  *   <li>Field declaration type: {@code PaymentService → PaymentServiceClient}</li>
- *   <li>Field variable name: {@code paymentService → paymentServiceClient}</li>
+ *   <li>Field variable name: rewired using the <em>actual declared field name</em>,
+ *       not an assumed {@code decapitalize(TypeName)} convention</li>
  *   <li>Constructor / method parameter types and names: same rename</li>
- *   <li>All {@code NameExpr} references ({@code paymentService.foo()} call sites):
- *       renamed to {@code paymentServiceClient.foo()}</li>
- *   <li>All {@code FieldAccessExpr} references ({@code this.paymentService}):
- *       renamed to {@code this.paymentServiceClient}</li>
- *   <li>Import of the original remote class removed (it no longer exists in this service)</li>
+ *   <li>All {@code NameExpr} references ({@code paymentService.foo()} call sites)</li>
+ *   <li>All {@code FieldAccessExpr} references ({@code this.paymentService})</li>
+ *   <li>Import of the original remote class removed using its fully-qualified name
+ *       (resolved from the module list) to avoid removing unrelated same-named classes</li>
  * </ol>
  *
  * <p>No import is added for the client interface because it is generated in the
@@ -65,7 +65,7 @@ public class NetScopeClientWiringStep implements ServiceFileGenerator {
                 .filter(p -> p.toString().endsWith(".java"))
                 .forEach(javaFile -> {
                     try {
-                        wireClientsInFile(javaFile, deps);
+                        wireClientsInFile(javaFile, deps, context);
                     } catch (IOException e) {
                         log.error("Failed to wire NetScope clients in: {}", javaFile.getFileName(), e);
                     }
@@ -76,20 +76,30 @@ public class NetScopeClientWiringStep implements ServiceFileGenerator {
     // Per-file rewriting
     // -------------------------------------------------------------------------
 
-    private void wireClientsInFile(Path javaFile, List<String> deps) throws IOException {
+    private void wireClientsInFile(Path javaFile, List<String> deps, GenerationContext context)
+            throws IOException {
         CompilationUnit cu = new JavaParser().parse(javaFile).getResult().orElse(null);
         if (cu == null) return;
 
         boolean modified = false;
 
         for (String beanType : deps) {
-            String clientType   = beanType + "Client";
-            String oldFieldName = decapitalize(beanType);
-            String newFieldName = decapitalize(clientType);
+            String clientType = beanType + "Client";
 
             if (!referencesType(cu, beanType)) {
-                continue; // nothing to rewrite in this file
+                continue; // no field of this type in the file — skip
             }
+
+            // Determine the actual declared field name (AST-based, not convention-assumed).
+            // Fall back to decapitalize(beanType) only if no field is found.
+            String oldFieldName = findFieldNameForType(cu, beanType)
+                    .orElseGet(() -> {
+                        String fallback = decapitalize(beanType);
+                        log.debug("No field of type {} found in {}; using name heuristic '{}'",
+                                beanType, javaFile.getFileName(), fallback);
+                        return fallback;
+                    });
+            String newFieldName = oldFieldName + "Client";
 
             // 1. Field declaration: type + variable name
             for (FieldDeclaration field : cu.findAll(FieldDeclaration.class)) {
@@ -132,11 +142,9 @@ public class NetScopeClientWiringStep implements ServiceFileGenerator {
             }
 
             // 5. Remove import of the original remote class (no longer present in this service).
-            //    The generated *Client interface lives in the same package — no import needed.
-            cu.getImports().removeIf(imp ->
-                    !imp.isAsterisk()
-                    && !imp.isStatic()
-                    && imp.getNameAsString().endsWith("." + beanType));
+            //    Resolve the FQN from the module list to avoid removing unrelated classes
+            //    that happen to share the same simple name.
+            removeImport(cu, beanType, context);
         }
 
         if (modified) {
@@ -150,11 +158,55 @@ public class NetScopeClientWiringStep implements ServiceFileGenerator {
     // -------------------------------------------------------------------------
 
     /**
-     * Quick check: does this compilation unit reference the given type name anywhere?
-     * Avoids unnecessary AST traversal for files that clearly don't use the type.
+     * AST-based type reference check: returns true only if the compilation unit
+     * declares a field whose type is exactly {@code typeName}. This avoids false
+     * positives from string literals, comments, and partial name matches.
      */
     private boolean referencesType(CompilationUnit cu, String typeName) {
-        return cu.toString().contains(typeName);
+        return cu.findAll(FieldDeclaration.class).stream()
+                .anyMatch(f -> f.getCommonType().asString().equals(typeName));
+    }
+
+    /**
+     * Finds the actual declared name of the first field with the given type.
+     * Returns empty if no such field exists in the compilation unit.
+     */
+    private Optional<String> findFieldNameForType(CompilationUnit cu, String typeName) {
+        return cu.findAll(FieldDeclaration.class).stream()
+                .filter(f -> f.getCommonType().asString().equals(typeName))
+                .flatMap(f -> f.getVariables().stream())
+                .map(VariableDeclarator::getNameAsString)
+                .findFirst();
+    }
+
+    /**
+     * Removes the import for {@code beanType} using its fully-qualified name resolved from
+     * the module list. Falls back to simple-name suffix match (with a warning) when the FQN
+     * cannot be determined, to avoid silently doing nothing.
+     */
+    private void removeImport(CompilationUnit cu, String beanType, GenerationContext context) {
+        // Resolve FQN: find the module that owns this bean type (its packageName + beanType)
+        String fqn = context.getAllModules().stream()
+                .filter(m -> !m.equals(context.getModule()))   // not the current module
+                .filter(m -> m.getPackageName() != null)
+                .map(m -> m.getPackageName() + "." + beanType)
+                .filter(candidate -> cu.getImports().stream()
+                        .anyMatch(imp -> imp.getNameAsString().equals(candidate)))
+                .findFirst()
+                .orElse(null);
+
+        if (fqn != null) {
+            cu.getImports().removeIf(imp -> imp.getNameAsString().equals(fqn));
+        } else {
+            // FQN not resolved — fall back to suffix match but log a warning
+            boolean removed = cu.getImports().removeIf(imp ->
+                    !imp.isAsterisk()
+                    && !imp.isStatic()
+                    && imp.getNameAsString().endsWith("." + beanType));
+            if (removed) {
+                log.debug("Removed import for {} using suffix fallback (FQN not resolved)", beanType);
+            }
+        }
     }
 
     private static String decapitalize(String name) {

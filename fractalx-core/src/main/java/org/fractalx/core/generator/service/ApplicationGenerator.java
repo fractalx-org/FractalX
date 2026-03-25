@@ -69,13 +69,19 @@ public class ApplicationGenerator implements ServiceFileGenerator {
                 """.formatted(basePackage, clientImport, module.getServiceName(), scanPackages, clientAnnotation, className, className);
     }
 
-    /** Strips the last package segment: {@code com.example.order} → {@code com.example}. */
+    /**
+     * Returns the package to use for {@code @SpringBootApplication}'s component scan scope.
+     *
+     * <p>Previously this stripped the last segment (e.g., {@code com.example.order} →
+     * {@code com.example}), which caused over-broad scanning when all modules share a
+     * parent package (a flat monolith). Using the module's own package is always correct:
+     * {@code @SpringBootApplication} already scans all sub-packages recursively.
+     */
     private String extractBasePackage(String packageName, GenerationContext context) {
         if (packageName == null || packageName.isBlank()) {
             return context.basePackage();
         }
-        int lastDot = packageName.lastIndexOf('.');
-        return lastDot > 0 ? packageName.substring(0, lastDot) : packageName;
+        return packageName;
     }
 
     private Path createPackagePath(Path srcMainJava, String packageName) throws IOException {

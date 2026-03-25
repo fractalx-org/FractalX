@@ -304,4 +304,110 @@ class ModuleAnalyzerSpec extends Specification {
         then:
         modules.isEmpty()
     }
+
+    // ── explicit dependencies attribute ───────────────────────────────────────
+
+    def "explicit dependencies={Foo.class, Bar.class} are extracted regardless of type name suffix"() {
+        given:
+        writeJava("com/example/order/OrderModule.java", """
+            package com.example.order;
+            import org.fractalx.annotations.DecomposableModule;
+            import com.example.payment.PaymentProcessor;
+            import com.example.inventory.InventoryManager;
+            @DecomposableModule(serviceName = "order-service", port = 8081,
+                                dependencies = {PaymentProcessor.class, InventoryManager.class})
+            public class OrderModule {}
+        """)
+
+        when:
+        List<FractalModule> modules = analyzer.analyzeProject(sourceRoot)
+
+        then:
+        modules.size() == 1
+        modules[0].dependencies.toSet() == ["PaymentProcessor", "InventoryManager"].toSet()
+    }
+
+    def "single explicit dependency = Foo.class (no braces) is extracted"() {
+        given:
+        writeJava("com/example/order/OrderModule.java", """
+            package com.example.order;
+            import org.fractalx.annotations.DecomposableModule;
+            @DecomposableModule(serviceName = "order-service", port = 8081,
+                                dependencies = PaymentProcessor.class)
+            public class OrderModule {}
+        """)
+
+        when:
+        List<FractalModule> modules = analyzer.analyzeProject(sourceRoot)
+
+        then:
+        modules[0].dependencies == ["PaymentProcessor"]
+    }
+
+    def "explicit dependencies take precedence over heuristic detection"() {
+        given: "a module with an explicit dep that does not end in Service/Client, plus a field that does"
+        writeJava("com/example/order/OrderModule.java", """
+            package com.example.order;
+            import org.fractalx.annotations.DecomposableModule;
+            @DecomposableModule(serviceName = "order-service", port = 8081,
+                                dependencies = {PaymentProcessor.class})
+            public class OrderModule {
+                private NotADep notADep;
+                private SomeService ignoredByExplicit;
+            }
+        """)
+
+        when:
+        List<FractalModule> modules = analyzer.analyzeProject(sourceRoot)
+
+        then: "only the explicitly declared dep is present"
+        modules[0].dependencies == ["PaymentProcessor"]
+    }
+
+    // ── package conflict validation ───────────────────────────────────────────
+
+    def "two @DecomposableModule classes in the same package throw IllegalStateException"() {
+        given:
+        writeJava("com/example/shared/OrderModule.java", """
+            package com.example.shared;
+            import org.fractalx.annotations.DecomposableModule;
+            @DecomposableModule(serviceName = "order-service", port = 8081)
+            public class OrderModule {}
+        """)
+        writeJava("com/example/shared/PaymentModule.java", """
+            package com.example.shared;
+            import org.fractalx.annotations.DecomposableModule;
+            @DecomposableModule(serviceName = "payment-service", port = 8082)
+            public class PaymentModule {}
+        """)
+
+        when:
+        analyzer.analyzeProject(sourceRoot)
+
+        then:
+        thrown(IllegalStateException)
+    }
+
+    def "two @DecomposableModule classes in distinct packages succeed"() {
+        given:
+        writeJava("com/example/order/OrderModule.java", """
+            package com.example.order;
+            import org.fractalx.annotations.DecomposableModule;
+            @DecomposableModule(serviceName = "order-service", port = 8081)
+            public class OrderModule {}
+        """)
+        writeJava("com/example/payment/PaymentModule.java", """
+            package com.example.payment;
+            import org.fractalx.annotations.DecomposableModule;
+            @DecomposableModule(serviceName = "payment-service", port = 8082)
+            public class PaymentModule {}
+        """)
+
+        when:
+        List<FractalModule> modules = analyzer.analyzeProject(sourceRoot)
+
+        then:
+        noExceptionThrown()
+        modules.size() == 2
+    }
 }

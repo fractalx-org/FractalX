@@ -25,4 +25,19 @@ public @interface DecomposableModule {
      * Database schema ownership
      */
     String[] ownedSchemas() default {};
+
+    /**
+     * Explicit cross-module dependencies: the bean types injected from other modules.
+     *
+     * <p>Declaring these explicitly makes decomposition reliable for any naming convention.
+     * When omitted, FractalX falls back to heuristic detection (types ending in "Service"
+     * or "Client"), which only works if the monolith follows that naming pattern.
+     *
+     * <p>Example:
+     * <pre>
+     * {@code @DecomposableModule(serviceName="order-service", port=8081,
+     *                   dependencies={PaymentProcessor.class, InventoryManager.class})}
+     * </pre>
+     */
+    Class<?>[] dependencies() default {};
 }
