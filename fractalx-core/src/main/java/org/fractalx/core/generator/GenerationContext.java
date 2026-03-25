@@ -46,4 +46,22 @@ public final class GenerationContext {
 
     /** Resolves {@code src/main/resources} under the service root. */
     public Path getSrcMainResources() { return serviceRoot.resolve("src/main/resources"); }
+
+    /**
+     * Returns the base Java package for generated infrastructure classes,
+     * derived from the monolith's groupId or explicit fractalx-config.yml setting.
+     * Example: {@code "com.acme.generated"}
+     */
+    public String basePackage() {
+        return fractalxConfig.effectiveBasePackage();
+    }
+
+    /**
+     * Returns the package for infrastructure classes specific to this service.
+     * Example: if basePackage is {@code "com.acme.generated"} and the service is
+     * {@code "order-service"}, returns {@code "com.acme.generated.orderservice"}.
+     */
+    public String servicePackage() {
+        return basePackage() + "." + module.getServiceName().replace("-", "");
+    }
 }
