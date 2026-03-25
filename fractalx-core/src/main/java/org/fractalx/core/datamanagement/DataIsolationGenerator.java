@@ -15,10 +15,9 @@ public class DataIsolationGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(DataIsolationGenerator.class);
 
-    public void generateIsolationConfig(FractalModule module, Path srcMainJava) throws IOException {
+    public void generateIsolationConfig(FractalModule module, Path srcMainJava,
+                                         String basePackage) throws IOException {
         log.info("🛡️ [Data] Enforcing data boundaries for: {}", module.getServiceName());
-
-        String basePackage = "org.fractalx.generated." + module.getServiceName().replace("-", "");
         String configPackage = basePackage + ".config";
 
         Path configPath = createPackagePath(srcMainJava, configPackage);

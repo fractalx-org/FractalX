@@ -22,18 +22,19 @@ public class ApplicationGenerator implements ServiceFileGenerator {
         FractalModule module = context.getModule();
         log.debug("Generating Application class for {}", module.getServiceName());
 
-        String basePackage = "org.fractalx.generated." + module.getServiceName().replace("-", "");
+        String basePackage = context.servicePackage();
         Path packagePath = createPackagePath(context.getSrcMainJava(), basePackage);
 
         String className = toPascalCase(module.getServiceName()) + "Application";
         Files.writeString(packagePath.resolve(className + ".java"),
-                buildContent(module, basePackage, className));
+                buildContent(module, basePackage, className, context));
 
         log.info("Generated Application class: {}", className);
     }
 
-    private String buildContent(FractalModule module, String basePackage, String className) {
-        String originalPackage = extractBasePackage(module.getPackageName());
+    private String buildContent(FractalModule module, String basePackage, String className,
+                                GenerationContext context) {
+        String originalPackage = extractBasePackage(module.getPackageName(), context);
         String scanPackages = "\"%s\", \"%s\", \"org.fractalx.runtime\"".formatted(basePackage, originalPackage);
 
         String clientAnnotation = module.getDependencies().isEmpty()
@@ -69,9 +70,9 @@ public class ApplicationGenerator implements ServiceFileGenerator {
     }
 
     /** Strips the last package segment: {@code com.example.order} → {@code com.example}. */
-    private String extractBasePackage(String packageName) {
+    private String extractBasePackage(String packageName, GenerationContext context) {
         if (packageName == null || packageName.isBlank()) {
-            return "org.fractalx.testapp";
+            return context.basePackage();
         }
         int lastDot = packageName.lastIndexOf('.');
         return lastDot > 0 ? packageName.substring(0, lastDot) : packageName;

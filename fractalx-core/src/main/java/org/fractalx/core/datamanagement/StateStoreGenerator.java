@@ -16,10 +16,9 @@ public class StateStoreGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(StateStoreGenerator.class);
 
-    public void generateStateStoreConfig(FractalModule module, Path srcMainJava) throws IOException {
+    public void generateStateStoreConfig(FractalModule module, Path srcMainJava,
+                                          String basePackage) throws IOException {
         log.info("⚡ [State] Initializing Distributed State Store (Redis) for: {}", module.getServiceName());
-
-        String basePackage = "org.fractalx.generated." + module.getServiceName().replace("-", "");
         String configPackage = basePackage + ".config";
 
         Path configPath = createPackagePath(srcMainJava, configPackage);

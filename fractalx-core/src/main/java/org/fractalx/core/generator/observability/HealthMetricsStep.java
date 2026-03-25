@@ -41,7 +41,7 @@ public class HealthMetricsStep implements ServiceFileGenerator {
         }
         log.debug("Generating ServiceHealthConfig for {}", module.getServiceName());
 
-        String pkg     = "org.fractalx.generated." + toJavaId(module.getServiceName()).toLowerCase();
+        String pkg     = context.servicePackage();
         Path   pkgPath = resolvePackage(context.getSrcMainJava(), pkg);
 
         Files.writeString(pkgPath.resolve("ServiceHealthConfig.java"),

@@ -65,8 +65,7 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
         if (ownedSagas.isEmpty()) return;
 
         Path srcMainJava = context.getServiceRoot().resolve("src/main/java");
-        String basePackage = "org.fractalx.generated."
-                + context.getModule().getServiceName().replace("-", "");
+        String basePackage = context.servicePackage();
         String outboxPackage = basePackage + ".outbox";
 
         for (SagaDefinition saga : ownedSagas) {

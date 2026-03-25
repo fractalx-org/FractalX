@@ -28,7 +28,7 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
 
         log.debug("Generating NetScope registry bridge for {}", module.getServiceName());
 
-        String generatedPkg = "org.fractalx.generated." + toJavaId(module.getServiceName()).toLowerCase();
+        String generatedPkg = context.servicePackage();
         Path pkgPath = resolvePackage(context.getSrcMainJava(), generatedPkg);
 
         generateBridge(pkgPath, generatedPkg, module.getDependencies());

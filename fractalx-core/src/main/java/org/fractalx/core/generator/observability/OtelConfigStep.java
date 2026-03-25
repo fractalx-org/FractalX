@@ -39,7 +39,7 @@ public class OtelConfigStep implements ServiceFileGenerator {
 
         log.debug("Generating OtelConfig for {}", module.getServiceName());
 
-        String pkg     = "org.fractalx.generated." + toJavaId(module.getServiceName()).toLowerCase();
+        String pkg     = context.servicePackage();
         Path   pkgPath = resolvePackage(context.getSrcMainJava(), pkg);
 
         Files.writeString(pkgPath.resolve("OtelConfig.java"), buildContent(pkg));

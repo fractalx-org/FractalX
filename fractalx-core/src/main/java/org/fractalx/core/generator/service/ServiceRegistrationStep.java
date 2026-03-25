@@ -18,14 +18,12 @@ import java.nio.file.Path;
 public class ServiceRegistrationStep implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceRegistrationStep.class);
-    private static final int GRPC_PORT_OFFSET = 10000;
-
     @Override
     public void generate(GenerationContext context) throws IOException {
         FractalModule module = context.getModule();
         log.debug("Generating service registration for {}", module.getServiceName());
 
-        String generatedPkg = "org.fractalx.generated." + toJavaId(module.getServiceName()).toLowerCase();
+        String generatedPkg = context.servicePackage();
         Path pkgPath = resolvePackage(context.getSrcMainJava(), generatedPkg);
 
         generateRegistryClient(pkgPath, generatedPkg, module);
@@ -95,7 +93,7 @@ public class ServiceRegistrationStep implements ServiceFileGenerator {
     }
 
     private void generateAutoConfig(Path pkgPath, String pkg, FractalModule module) throws IOException {
-        int grpcPort = module.getPort() + GRPC_PORT_OFFSET;
+        int grpcPort = module.grpcPort();
         String content = """
                 package %s;
 
