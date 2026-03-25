@@ -58,7 +58,7 @@ public class RelationshipDecoupler {
      * collects per-entity remote field info, indexes request DTOs, and applies AST
      * modifications to all source files under {@code serviceRoot}.
      */
-    public void transform(Path serviceRoot, FractalModule module) {
+    public void transform(Path serviceRoot, FractalModule module, String basePackage) {
         try {
             String modulePackage = module.getPackageName() != null ? module.getPackageName() : "";
 
@@ -88,7 +88,7 @@ public class RelationshipDecoupler {
                 paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                     try {
                         transformFile(path, localEntities, remoteEntities, requestIndex,
-                                module, entityRemoteIdFields, collectionGetterRenames);
+                                module, entityRemoteIdFields, collectionGetterRenames, basePackage);
                     } catch (Exception e) {
                         log.error("❌ [Data] Failed to transform file: {}", path, e);
                     }
@@ -406,7 +406,8 @@ public class RelationshipDecoupler {
                                RequestInfoIndex requestIndex,
                                FractalModule module,
                                Map<String, RemoteFieldInfo> entityRemoteIdFields,
-                               Map<String, String> collectionGetterRenames) throws IOException {
+                               Map<String, String> collectionGetterRenames,
+                               String basePackage) throws IOException {
 
         Optional<CompilationUnit> cuOpt = javaParser.parse(javaFile).getResult();
         if (cuOpt.isEmpty()) return;
@@ -425,7 +426,7 @@ public class RelationshipDecoupler {
         }
 
         modified |= transformServiceLogic(cu, remoteEntities, requestIndex, collectionGetterRenames);
-        modified |= injectReferenceValidatorUsage(cu, entityRemoteIdFields, module);
+        modified |= injectReferenceValidatorUsage(cu, entityRemoteIdFields, module, basePackage);
 
         // Remove imports for remote entity types that are no longer referenced.
         // Must run last so the check reflects the final AST state.
@@ -964,13 +965,12 @@ public class RelationshipDecoupler {
      */
     private boolean injectReferenceValidatorUsage(CompilationUnit cu,
                                                    Map<String, RemoteFieldInfo> entityRemoteIdFields,
-                                                   FractalModule module) {
+                                                   FractalModule module, String basePackage) {
         if (entityRemoteIdFields.isEmpty() || module.getDependencies().isEmpty()) return false;
 
         boolean modified = false;
 
-        String validationPackage = "org.fractalx.generated."
-                + module.getServiceName().replace("-", "") + ".validation";
+        String validationPackage = basePackage + ".validation";
 
         for (ClassOrInterfaceDeclaration svcClass : cu.findAll(ClassOrInterfaceDeclaration.class)) {
             if (svcClass.isInterface()) continue;

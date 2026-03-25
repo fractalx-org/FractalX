@@ -33,8 +33,7 @@ public class OutboxGenerator {
     private static final Logger log = LoggerFactory.getLogger(OutboxGenerator.class);
 
     public void generateOutbox(FractalModule module, Path serviceRoot,
-                               List<SagaDefinition> sagaDefinitions) throws IOException {
-        String basePackage   = "org.fractalx.generated." + module.getServiceName().replace("-", "");
+                               List<SagaDefinition> sagaDefinitions, String basePackage) throws IOException {
         String outboxPackage = basePackage + ".outbox";
 
         Path outboxPath = createPackagePath(serviceRoot.resolve("src/main/java"), outboxPackage);

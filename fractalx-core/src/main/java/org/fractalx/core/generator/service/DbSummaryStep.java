@@ -36,7 +36,7 @@ public class DbSummaryStep implements ServiceFileGenerator {
             log.debug("No JPA entities in {} — skipping DbSummaryController", module.getServiceName());
             return;
         }
-        String basePackage = "org.fractalx.generated." + toJavaId(module.getServiceName()).toLowerCase();
+        String basePackage = context.servicePackage();
         Path pkgPath = resolvePackage(context.getSrcMainJava(), basePackage);
 
         Files.writeString(pkgPath.resolve("DbSummaryController.java"), buildContent(basePackage));

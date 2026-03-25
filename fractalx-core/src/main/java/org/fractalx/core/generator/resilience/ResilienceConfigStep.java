@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.resilience;
 
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.FractalModule;
@@ -36,11 +37,12 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
         }
         log.debug("Generating resilience config for {}", module.getServiceName());
 
-        String generatedPkg = "org.fractalx.generated." + toJavaId(module.getServiceName()).toLowerCase();
+        String generatedPkg = context.servicePackage();
         Path pkgPath = resolvePackage(context.getSrcMainJava(), generatedPkg);
 
+        FractalxConfig.ResilienceDefaults r = context.getFractalxConfig().resilience();
         generateResilienceConfig(pkgPath, generatedPkg, module.getDependencies());
-        appendResilienceYaml(context.getSrcMainResources(), module.getDependencies());
+        appendResilienceYaml(context.getSrcMainResources(), module.getDependencies(), r);
 
         log.debug("Generated resilience config for {}", module.getServiceName());
     }
@@ -76,7 +78,8 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
         Files.writeString(pkgPath.resolve("NetScopeResilienceConfig.java"), content);
     }
 
-    private void appendResilienceYaml(Path resourcesPath, List<String> dependencies) throws IOException {
+    private void appendResilienceYaml(Path resourcesPath, List<String> dependencies,
+                                       FractalxConfig.ResilienceDefaults r) throws IOException {
         if (dependencies.isEmpty()) return;
 
         StringBuilder yaml = new StringBuilder("\nresilience4j:\n");
@@ -84,25 +87,25 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
         for (String dep : dependencies) {
             String svc = beanTypeToServiceName(dep);
             yaml.append("      ").append(svc).append(":\n");
-            yaml.append("        failure-rate-threshold: 50\n");
-            yaml.append("        wait-duration-in-open-state: 30s\n");
-            yaml.append("        permitted-number-of-calls-in-half-open-state: 5\n");
-            yaml.append("        sliding-window-size: 10\n");
+            yaml.append("        failure-rate-threshold: ").append(r.failureRateThreshold()).append("\n");
+            yaml.append("        wait-duration-in-open-state: ").append(r.waitDurationInOpenState()).append("\n");
+            yaml.append("        permitted-number-of-calls-in-half-open-state: ").append(r.permittedCallsInHalfOpenState()).append("\n");
+            yaml.append("        sliding-window-size: ").append(r.slidingWindowSize()).append("\n");
             yaml.append("        register-health-indicator: true\n");
         }
         yaml.append("  retry:\n    instances:\n");
         for (String dep : dependencies) {
             String svc = beanTypeToServiceName(dep);
             yaml.append("      ").append(svc).append(":\n");
-            yaml.append("        max-attempts: 3\n");
-            yaml.append("        wait-duration: 100ms\n");
+            yaml.append("        max-attempts: ").append(r.retryMaxAttempts()).append("\n");
+            yaml.append("        wait-duration: ").append(r.retryWaitDuration()).append("\n");
             yaml.append("        exponential-backoff-multiplier: 2\n");
         }
         yaml.append("  timelimiter:\n    instances:\n");
         for (String dep : dependencies) {
             String svc = beanTypeToServiceName(dep);
             yaml.append("      ").append(svc).append(":\n");
-            yaml.append("        timeout-duration: 2s\n");
+            yaml.append("        timeout-duration: ").append(r.timeoutDuration()).append("\n");
         }
 
         Path ymlPath = resourcesPath.resolve("application.yml");

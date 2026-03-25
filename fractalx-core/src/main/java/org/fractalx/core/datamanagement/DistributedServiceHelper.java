@@ -54,9 +54,10 @@ public class DistributedServiceHelper {
      * @param sourceRoot      the monolith source root (for reading original DB config)
      * @param serviceRoot     the generated service root directory
      * @param sagaDefinitions all sagas detected in the monolith (may be empty)
+     * @param basePackage     the generated base package (e.g. "com.acme.generated.orderservice")
      */
     public void upgradeService(FractalModule module, Path sourceRoot, Path serviceRoot,
-                               List<SagaDefinition> sagaDefinitions) throws IOException {
+                               List<SagaDefinition> sagaDefinitions, String basePackage) throws IOException {
         Path srcMainJava      = serviceRoot.resolve("src/main/java");
         Path srcMainResources = serviceRoot.resolve("src/main/resources");
 
@@ -64,7 +65,7 @@ public class DistributedServiceHelper {
 
         // 1. Enforce data isolation (dual-package @EntityScan + @EnableJpaRepositories)
         if (hasJpaContent(module)) {
-            isolationGen.generateIsolationConfig(module, srcMainJava);
+            isolationGen.generateIsolationConfig(module, srcMainJava, basePackage);
         } else {
             log.info("   ⏭ No JPA entities in {} — skipping IsolationConfig", module.getServiceName());
         }
@@ -88,13 +89,13 @@ public class DistributedServiceHelper {
 
         // 5. Generate transactional outbox (for services with cross-module deps or sagas)
         if (hasJpaContent(module) && !module.getDependencies().isEmpty()) {
-            outboxGen.generateOutbox(module, serviceRoot, sagaDefinitions);
+            outboxGen.generateOutbox(module, serviceRoot, sagaDefinitions, basePackage);
         } else if (!module.getDependencies().isEmpty()) {
             log.info("   ⏭ No JPA entities in {} — skipping Outbox (no DB to persist events)", module.getServiceName());
         }
 
         // 6. Generate reference validators for decoupled foreign keys
-        referenceValidatorGen.generateReferenceValidator(module, serviceRoot);
+        referenceValidatorGen.generateReferenceValidator(module, serviceRoot, basePackage);
 
         // 7. Generate DATA_README.md
         dataReadmeGen.generateServiceDataReadme(module, serviceRoot, driverClass, sagaDefinitions);

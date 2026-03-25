@@ -47,10 +47,14 @@ public class SmokeTestGenerator {
      * @return one result per service
      */
     public List<GenerationResult> generate(Path outputDir, List<FractalModule> modules) {
+        return generate(outputDir, modules, "generated");
+    }
+
+    public List<GenerationResult> generate(Path outputDir, List<FractalModule> modules, String basePackage) {
         List<GenerationResult> results = new ArrayList<>();
 
         for (FractalModule module : modules) {
-            results.add(generateForService(outputDir, module));
+            results.add(generateForService(outputDir, module, basePackage));
         }
 
         return results;
@@ -58,7 +62,7 @@ public class SmokeTestGenerator {
 
     // ── Per-service generation ─────────────────────────────────────────────────
 
-    private GenerationResult generateForService(Path outputDir, FractalModule module) {
+    private GenerationResult generateForService(Path outputDir, FractalModule module, String basePackage) {
         Path svcDir = outputDir.resolve(module.getServiceName());
         if (!Files.isDirectory(svcDir)) {
             return new GenerationResult(module.getServiceName(), false,
@@ -66,7 +70,7 @@ public class SmokeTestGenerator {
         }
 
         // Locate the main application class to derive the package
-        String testPackage = deriveTestPackage(svcDir, module);
+        String testPackage = deriveTestPackage(svcDir, module, basePackage);
         Path testDir = svcDir.resolve("src/test/java")
                 .resolve(testPackage.replace(".", "/"));
 
@@ -131,10 +135,10 @@ public class SmokeTestGenerator {
      * (where OtelConfig / ServiceHealthConfig live) if it exists,
      * otherwise falls back to the original module package.
      */
-    private String deriveTestPackage(Path svcDir, FractalModule module) {
+    private String deriveTestPackage(Path svcDir, FractalModule module, String basePackage) {
         // Prefer the generated sub-package as it is always present post-decomposition
         String simpleName = module.getServiceName().replace("-", "").toLowerCase();
-        String candidate = "org.fractalx.generated." + simpleName;
+        String candidate = basePackage + "." + simpleName;
         Path candidatePath = svcDir.resolve("src/main/java")
                 .resolve(candidate.replace(".", "/"));
         if (Files.isDirectory(candidatePath)) return candidate;
@@ -142,6 +146,6 @@ public class SmokeTestGenerator {
         // Fallback to original package
         return module.getPackageName() != null
                 ? module.getPackageName()
-                : "org.fractalx.generated." + simpleName;
+                : basePackage + "." + simpleName;
     }
 }

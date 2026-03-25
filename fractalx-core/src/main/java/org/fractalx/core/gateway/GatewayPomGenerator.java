@@ -1,5 +1,6 @@
 package org.fractalx.core.gateway;
 
+import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,10 +16,10 @@ import java.util.List;
 public class GatewayPomGenerator {
     private static final Logger log = LoggerFactory.getLogger(GatewayPomGenerator.class);
 
-    public void generatePom(Path gatewayRoot, List<FractalModule> modules) throws IOException {
+    public void generatePom(Path gatewayRoot, List<FractalModule> modules, FractalxConfig config) throws IOException {
         log.debug("Generating gateway pom.xml");
 
-        String dependencies = generateServiceDependencies(modules);
+        String dependencies = generateServiceDependencies(modules, config);
 
         String pomContent = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -38,8 +39,8 @@ public class GatewayPomGenerator {
             
                 <properties>
                     <java.version>17</java.version>
-                    <spring-boot.version>3.2.0</spring-boot.version>
-                    <spring-cloud.version>2023.0.0</spring-cloud.version>
+                    <spring-boot.version>__SB_VERSION__</spring-boot.version>
+                    <spring-cloud.version>__SC_VERSION__</spring-cloud.version>
                     <maven.compiler.source>17</maven.compiler.source>
                     <maven.compiler.target>17</maven.compiler.target>
                     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -161,6 +162,9 @@ public class GatewayPomGenerator {
             </project>
             """;
 
+        pomContent = pomContent
+                .replace("__SB_VERSION__", config.springBootVersion())
+                .replace("__SC_VERSION__", config.springCloudVersion());
         Path pomPath = gatewayRoot.resolve("pom.xml");
         Files.writeString(pomPath, pomContent);
         log.info("✓ Generated gateway pom.xml");
@@ -169,18 +173,18 @@ public class GatewayPomGenerator {
     /**
      * Generate dependencies for all services
      */
-    private String generateServiceDependencies(List<FractalModule> modules) {
+    private String generateServiceDependencies(List<FractalModule> modules, FractalxConfig config) {
         StringBuilder deps = new StringBuilder();
 
         for (FractalModule module : modules) {
             deps.append(String.format("""
                     <dependency>
-                        <groupId>org.fractalx.generated</groupId>
+                        <groupId>%s</groupId>
                         <artifactId>%s</artifactId>
                         <version>1.0.0-SNAPSHOT</version>
                         <scope>provided</scope>
                     </dependency>
-                    """, module.getServiceName()));
+                    """, config.effectiveBasePackage(), module.getServiceName()));
         }
 
         return deps.toString();

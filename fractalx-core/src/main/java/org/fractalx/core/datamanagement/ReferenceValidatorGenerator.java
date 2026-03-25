@@ -43,7 +43,8 @@ public class ReferenceValidatorGenerator {
 
     private final JavaParser javaParser = new JavaParser();
 
-    public void generateReferenceValidator(FractalModule module, Path serviceRoot) throws IOException {
+    public void generateReferenceValidator(FractalModule module, Path serviceRoot,
+                                            String basePackage) throws IOException {
         List<String> deps = module.getDependencies();
         if (deps.isEmpty()) {
             log.debug("No cross-module dependencies for {} — ReferenceValidator not generated",
@@ -59,7 +60,7 @@ public class ReferenceValidatorGenerator {
             return;
         }
 
-        String basePackage      = "org.fractalx.generated." + module.getServiceName().replace("-", "");
+        // basePackage is passed in from the caller
         String validationPackage = basePackage + ".validation";
 
         Path validationPath = createPackagePath(serviceRoot.resolve("src/main/java"), validationPackage);
