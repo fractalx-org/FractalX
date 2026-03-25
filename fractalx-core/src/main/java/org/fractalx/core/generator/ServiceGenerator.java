@@ -102,6 +102,12 @@ public class ServiceGenerator {
         this.pipeline = buildPipeline();
     }
 
+    private static List<String> deriveCleanupFiles(org.fractalx.core.model.FractalModule module) {
+        return module.getDependencies().stream()
+                .map(dep -> dep + "Impl.java")
+                .toList();
+    }
+
     private List<ServiceFileGenerator> buildPipeline() {
         ObservabilityInjector injector = this.observabilityInjector;
 
@@ -117,14 +123,14 @@ public class ServiceGenerator {
                         new ImportPreserver(),
                         new ImportCleaner()
                 ),
-                new FileCleanupStep(List.of("PaymentClientImpl.java")),
+                context -> new FileCleanupStep(deriveCleanupFiles(context.getModule())).generate(context),
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
                 new SagaMethodTransformer(),    // replaces cross-service calls with outboxPublisher.publish()
                 context -> distributedServiceHelper.upgradeService(
                         context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
-                        context.getSagaDefinitions()),
+                        context.getSagaDefinitions(), context.servicePackage()),
                 new CorrelationIdGenerator(),    // generates logback-spring.xml with %X{correlationId}
                 new OtelConfigStep(),
                 new HealthMetricsStep(),
@@ -142,7 +148,7 @@ public class ServiceGenerator {
     public void generateServices(List<FractalModule> modules) throws IOException {
         log.debug("Starting code generation for {} modules", modules.size());
         FractalxConfig fractalxConfig = new FractalxConfigReader()
-                .read(sourceRoot.resolve("src/main/resources"));
+                .read(sourceRoot.resolve("src/main/resources"), sourceRoot);
         Files.createDirectories(outputRoot);
 
         // Run repository boundary analysis before generation (warnings only — never fails)
@@ -156,7 +162,7 @@ public class ServiceGenerator {
 
         // Generate the service registry first so it is available for all other generators
         onStepStart.accept("fractalx-registry");
-        registryServiceGenerator.generate(modules, outputRoot);
+        registryServiceGenerator.generate(modules, outputRoot, fractalxConfig);
         onStepComplete.accept("fractalx-registry");
 
         for (FractalModule module : modules) {
@@ -165,7 +171,7 @@ public class ServiceGenerator {
             onStepComplete.accept(module.getServiceName());
         }
 
-        new LoggerServiceGenerator().generate(outputRoot);
+        new LoggerServiceGenerator().generate(outputRoot, fractalxConfig);
 
         if (modules.size() > 1 && generateGateway) {
             onStepStart.accept("fractalx-gateway");
@@ -182,15 +188,15 @@ public class ServiceGenerator {
         boolean hasSagas = !sagaDefinitions.isEmpty();
         if (hasSagas) {
             onStepStart.accept("fractalx-saga-orchestrator");
-            sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
+            sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot, fractalxConfig);
             onStepComplete.accept("fractalx-saga-orchestrator");
         } else {
-            sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot);
+            sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot, fractalxConfig);
         }
 
         if (generateDocker) {
             onStepStart.accept("docker-compose + scripts");
-            dockerComposeGenerator.generate(modules, outputRoot, hasSagas);
+            dockerComposeGenerator.generate(modules, outputRoot, hasSagas, fractalxConfig);
             generateStartScripts(modules, sagaDefinitions);
             onStepComplete.accept("docker-compose + scripts");
         } else {
