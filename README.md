@@ -1,7 +1,7 @@
 # FractalX
 
 [![Build](https://github.com/Project-FractalX/FractalX/actions/workflows/ci.yml/badge.svg)](https://github.com/Project-FractalX/FractalX/actions)
-[![Maven Central](https://img.shields.io/badge/maven--central-0.3.0-SNAPSHOT-blue)](https://central.sonatype.com/artifact/org.fractalx/fractalx-annotations)
+[![Maven Central](https://img.shields.io/badge/maven--central-0.3.1-SNAPSHOT-blue)](https://central.sonatype.com/artifact/org.fractalx/fractalx-annotations)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Java](https://img.shields.io/badge/java-17%2B-orange)](https://adoptium.net/)
 [![Spring Boot](https://img.shields.io/badge/spring--boot-3.2.0-brightgreen)](https://spring.io/projects/spring-boot)
@@ -66,7 +66,7 @@ Manual microservices migrations are slow, error-prone, and expensive — requiri
 <dependency>
     <groupId>org.fractalx</groupId>
     <artifactId>fractalx-annotations</artifactId>
-    <version>0.3.0-SNAPSHOT</version>
+    <version>0.3.1-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -92,7 +92,7 @@ That is the only source change required. No other annotations are needed in your
 <plugin>
     <groupId>org.fractalx</groupId>
     <artifactId>fractalx-maven-plugin</artifactId>
-    <version>0.3.0-SNAPSHOT</version>
+    <version>0.3.1-SNAPSHOT</version>
 </plugin>
 ```
 
@@ -103,7 +103,7 @@ mvn fractalx:decompose
 ```
 
 ```
-[INFO] FractalX 0.3.0-SNAPSHOT -- starting decomposition
+[INFO] FractalX 0.3.1-SNAPSHOT -- starting decomposition
 [INFO] Phase 1: Parsing 22 source files ...
 [INFO] Phase 2: Detected 2 modules, 1 cross-module dependency
 [INFO] Generating order-service   (port 8081) ...
@@ -346,23 +346,32 @@ Applied to a module class. The admin dashboard shows extended metrics and contro
 
 ### Cross-module dependency detection
 
-FractalX detects dependencies two ways -- use either, or both:
+FractalX detects which beans a module imports from other modules in two ways:
 
-**Explicit** (module marker fields):
+**Explicit declaration (recommended)** -- list the cross-module bean types directly in the annotation:
 ```java
-@DecomposableModule(serviceName = "leave-service", port = 8083)
-public class LeaveModule {
-    private EmployeeService employeeService;
-    private DepartmentService departmentService;
-}
+@DecomposableModule(
+    serviceName = "leave-service", port = 8083,
+    dependencies = {EmployeeService.class, DepartmentService.class}
+)
+public class LeaveModule {}
 ```
 
-**Implicit** (import analysis -- FractalX scans all `.java` files in the module's package):
-```java
-// LeaveService.java -- FractalX finds the cross-module imports automatically
-import com.myapp.employee.EmployeeService;
-import com.myapp.department.DepartmentService;
+**Heuristic fallback** -- when `dependencies` is omitted, FractalX scans all `.java` files in the
+module's package and infers cross-module deps from field types whose name ends in `Service` or
+`Client`. A `WARN` is logged for each inferred dependency:
 ```
+[WARN] Module 'leave-service': dependencies inferred by type-suffix heuristic
+       ([EmployeeService, DepartmentService]). Declare them explicitly with
+       @DecomposableModule(dependencies={...}) for reliability.
+```
+
+> **Always use explicit `dependencies=`** for any monolith where cross-module bean names do not
+> follow the `*Service` / `*Client` suffix convention. The heuristic will silently miss beans
+> named `PaymentProcessor`, `OrderFacade`, `InventoryManager`, etc.
+>
+> Explicit declaration also drives the dependency graph in `fractalx:verify` -- without it, all
+> services will show `⚠ ORPHAN` warnings from the graph analyser.
 
 ---
 
@@ -475,6 +484,35 @@ mvn fractalx:verify -Dfractalx.verify.smokeTests=true       # generate Spring co
 | 4 | Dependency graph acyclicity, SQL schema validity, `@Transactional` on GET, secret detection, config coverage |
 | 5 (opt-in) | Compilation -- `mvn compile` on every generated service |
 | 6 (opt-in) | Smoke test generation -- Spring context load test per service |
+
+#### Verifier behaviour notes
+
+**Cross-boundary import checker (Level 3)**
+
+A cross-boundary import is only flagged when the imported class file does **not** exist under the
+consuming service's own `src/main/java`. The generator copies shared model / DTO / enum classes
+(e.g. `Payment`, `Customer`, `PaymentMethod`) from the source monolith into every service that
+needs them. Because those files are physically present under the service tree, they are treated as
+local copies and are not violations. Only genuine cross-service direct references -- a service
+class imported without a local copy -- are flagged.
+
+**Dependency graph / orphan check (Level 4)**
+
+The graph is built by matching the simple class name of each declared dependency (e.g.
+`PaymentService`) against the class names of all other modules. The check requires that the
+framework knows which module a bean belongs to. When `dependencies=` is declared explicitly in
+`@DecomposableModule`, the mapping is exact. When the heuristic fallback is used (types ending in
+`Service` / `Client`), the match still works as long as each service has a unique class name.
+Orphan warnings mean the graph analyser could not build an edge -- most often because explicit
+`dependencies=` are missing (see [Cross-module dependency detection](#cross-module-dependency-detection)).
+
+**Secret scanner (Level 4)**
+
+Values of the form `${ENV_VAR:default}` are Spring EL placeholders and are **never** flagged,
+even when the key name looks sensitive (e.g. `api-key`, `token`). Only plain-text values that
+are not placeholders, not numeric/boolean, and longer than three characters are reported.
+The findings are advisory warnings, not failures -- they indicate dev-only defaults that must
+be rotated before production deployment.
 
 ---
 
@@ -1085,7 +1123,30 @@ mvn fractalx:decompose fractalx:verify \
     -Dfractalx.verify.failBuild=true
 ```
 
-Results are printed with `[PASS]` / `[FAIL]` / `[WARN]` markers. See [Maven Plugin Reference](#7-maven-plugin-reference) for level details.
+Results are printed with `✓` / `✘` / `⚠` markers. `✘` findings are hard failures; `⚠` findings
+are advisory warnings. See [Maven Plugin Reference](#7-maven-plugin-reference) for level details.
+
+### Understanding `[FAIL]` vs `[WARN]`
+
+| Marker | Meaning | Action required |
+|---|---|---|
+| `✘ Cross-boundary import` | A generated service directly imports a class from another service's package and that class was not copied locally | Ensure the dep is declared in `@DecomposableModule(dependencies={...})` and re-decompose |
+| `⚠ ORPHAN` | The dependency graph analyser could not resolve the edge from this service to its declared deps -- usually because explicit `dependencies=` are absent | Add `dependencies=` to the module's `@DecomposableModule` annotation |
+| `⚠ Tx` | A `@Transactional` method calls a NetScope client (remote gRPC call) -- rollback will not propagate across the network | Refactor to use the Saga orchestrator or Outbox pattern |
+| `⚠ Secret` | A YAML/properties key with a sensitive name (password, token, api-key…) has a plain-text value | Rotate the value before production; use `${ENV_VAR}` placeholders instead |
+
+### Why re-decompose is required after framework upgrades
+
+`mvn fractalx:verify` runs verifiers against whatever files are currently in the output directory.
+If that directory was produced by an older version of the plugin, it reflects the older generator's
+behaviour and will show stale failures. Always delete the output directory and re-run
+`mvn fractalx:decompose` after upgrading `<fractalx.version>`:
+
+```bash
+rm -rf microservices/          # or whatever outputDir is configured
+mvn fractalx:decompose
+mvn fractalx:verify
+```
 
 ---
 
