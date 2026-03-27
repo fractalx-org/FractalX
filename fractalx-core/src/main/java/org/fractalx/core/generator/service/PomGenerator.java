@@ -24,7 +24,9 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -68,9 +70,19 @@ public class PomGenerator implements ServiceFileGenerator {
             new PruneRule("h2",         "jakarta.persistence", "org.springframework.data.jpa")
     );
 
-    /** ArtifactId fragments that FractalX always injects — skip from monolith copy to avoid duplicates. */
+    /**
+     * ArtifactId fragments that FractalX always injects — skip from monolith copy to avoid
+     * duplicates or unresolvable version placeholders.
+     *
+     * <p>{@code fractalx-annotations} and {@code fractalx-core} are build-time generator
+     * dependencies of the monolith; generated services contain none of those annotations and
+     * need neither jar at compile or runtime.  Copying them verbatim from the monolith pom
+     * would also carry the unresolved {@code ${fractalx.version}} placeholder into the
+     * generated service's pom, causing Maven to refuse to build the service.
+     */
     private static final Set<String> FRACTALX_MANAGED = Set.of(
             "netscope-server", "netscope-client", "fractalx-runtime",
+            "fractalx-annotations", "fractalx-core",
             "spring-boot-starter-web", "spring-boot-starter-actuator",
             "spring-boot-starter-aop", "resilience4j-spring-boot3",
             "spring-cloud-context"
@@ -233,6 +245,9 @@ public class PomGenerator implements ServiceFileGenerator {
             return "";
         }
 
+        // Read monolith properties once so we can resolve ${placeholder} version refs.
+        Map<String, String> monolithProps = readMonolithProperties(monolithPom);
+
         List<Element> deps = readDependencyElements(monolithPom);
         if (deps.isEmpty()) return "";
 
@@ -247,6 +262,13 @@ public class PomGenerator implements ServiceFileGenerator {
             if (FRACTALX_MANAGED.contains(artifactId)) continue;
 
             if (isDependencyUsed(artifactId, imports)) {
+                // Resolve ${...} version placeholders before copying into the generated pom.
+                // If a placeholder cannot be resolved, skip the dep rather than emit an
+                // invalid version that would break the generated service's build.
+                if (!resolveVersionPlaceholder(dep, artifactId, monolithProps)) {
+                    pruned++;
+                    continue;
+                }
                 sb.append(elementToString(dep));
                 kept++;
             } else {
@@ -319,6 +341,72 @@ public class PomGenerator implements ServiceFileGenerator {
                 if (imp.startsWith(prefix)) return true;
             }
         }
+        return false;
+    }
+
+    // ── Monolith property resolution ─────────────────────────────────────────
+
+    /**
+     * Reads the {@code <properties>} block from the monolith's {@code pom.xml} into a map
+     * so that version placeholders like {@code ${fractalx.version}} can be resolved before
+     * the dependency element is copied into a generated service pom.
+     */
+    private Map<String, String> readMonolithProperties(Path pomPath) {
+        Map<String, String> props = new HashMap<>();
+        try {
+            Document doc = DocumentBuilderFactory.newInstance()
+                    .newDocumentBuilder().parse(pomPath.toFile());
+            doc.getDocumentElement().normalize();
+            NodeList children = doc.getDocumentElement().getChildNodes();
+            for (int i = 0; i < children.getLength(); i++) {
+                Node child = children.item(i);
+                if (child.getNodeType() == Node.ELEMENT_NODE
+                        && "properties".equals(child.getNodeName())) {
+                    NodeList propNodes = child.getChildNodes();
+                    for (int j = 0; j < propNodes.getLength(); j++) {
+                        Node p = propNodes.item(j);
+                        if (p.getNodeType() == Node.ELEMENT_NODE)
+                            props.put(p.getNodeName(), p.getTextContent().trim());
+                    }
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not read <properties> from monolith pom: {}", e.getMessage());
+        }
+        return props;
+    }
+
+    /**
+     * If the {@code <version>} of {@code dep} is a {@code ${key}} placeholder, replaces its
+     * text content with the resolved value from {@code props}.
+     *
+     * @return {@code true} when the version is usable (literal, absent, or successfully
+     *         resolved); {@code false} when the placeholder cannot be resolved — in that case
+     *         the caller should skip this dep to avoid emitting an invalid generated pom.
+     */
+    private boolean resolveVersionPlaceholder(Element dep, String artifactId,
+                                              Map<String, String> props) {
+        NodeList versions = dep.getElementsByTagName("version");
+        if (versions.getLength() == 0) return true;   // no <version> — inherited from BOM, fine
+
+        Node vn = versions.item(0);
+        String ver = vn.getTextContent().trim();
+        if (!ver.startsWith("${") || !ver.endsWith("}")) return true;  // literal version
+
+        String key = ver.substring(2, ver.length() - 1);
+        String resolved = props.get(key);
+        if (resolved != null) {
+            vn.setTextContent(resolved);
+            log.debug("Resolved version placeholder '{}' → '{}' for dep '{}'",
+                    ver, resolved, artifactId);
+            return true;
+        }
+
+        log.warn("Skipping dep '{}' from monolith — version placeholder '{}' is not defined "
+                + "in monolith <properties>. Declare the property in the monolith pom or "
+                + "add the dep manually to fractalx-config.yml.",
+                artifactId, ver);
         return false;
     }
 
