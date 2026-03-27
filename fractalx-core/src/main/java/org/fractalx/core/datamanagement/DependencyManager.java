@@ -129,6 +129,14 @@ public class DependencyManager {
 
             String content = Files.readString(pomPath);
             if (content.contains("annotationProcessorPaths")) return; // already configured
+            if (content.contains("spring-boot-starter-parent")) return; // parent handles annotation processing
+
+            // If Lombok has no explicit <version> in <dependencies> the parent/BOM manages it.
+            // annotationProcessorPaths does NOT inherit versions from <dependencyManagement>,
+            // so injecting a guessed version risks a mismatch (e.g. TypeTag::UNKNOWN on JDK 22).
+            // Skip injection — Maven resolves Lombok from the dependency classpath automatically.
+            String lombokVersion = extractLombokVersionFromDeps(content);
+            if (lombokVersion == null) return;
 
             int compilerIdx = content.indexOf("maven-compiler-plugin");
             if (compilerIdx == -1) return;
@@ -136,8 +144,6 @@ public class DependencyManager {
             // Find </configuration> that closes the compiler plugin's <configuration> block
             int configEnd = content.indexOf("</configuration>", compilerIdx);
             if (configEnd == -1) return;
-
-            String lombokVersion = resolveLombokVersion(content);
 
             String processorBlock = """
 
@@ -162,25 +168,19 @@ public class DependencyManager {
     }
 
     /**
-     * Resolves the Lombok version corresponding to the Spring Boot version declared in the pom.
-     * Falls back to {@code 1.18.30} (Spring Boot 3.2.x) if the version cannot be determined.
+     * Scans the pom content for an already-declared Lombok dependency and returns its
+     * {@code <version>} value, or {@code null} if not found or still an unresolved placeholder.
      */
-    private String resolveLombokVersion(String pomContent) {
-        // Extract spring-boot.version property from the pom
-        String marker = "<spring-boot.version>";
-        int start = pomContent.indexOf(marker);
-        if (start != -1) {
-            int end = pomContent.indexOf("</spring-boot.version>", start);
-            if (end != -1) {
-                String sbVersion = pomContent.substring(start + marker.length(), end).trim();
-                if (sbVersion.startsWith("3.4")) return "1.18.36";
-                if (sbVersion.startsWith("3.3")) return "1.18.32";
-                if (sbVersion.startsWith("3.2")) return "1.18.30";
-                if (sbVersion.startsWith("3.1")) return "1.18.28";
-                if (sbVersion.startsWith("3.0")) return "1.18.24";
-            }
-        }
-        return "1.18.30"; // safe default (Spring Boot 3.2.x)
+    private String extractLombokVersionFromDeps(String pomContent) {
+        int lombokIdx = pomContent.indexOf("<artifactId>lombok</artifactId>");
+        if (lombokIdx == -1) return null;
+        int depEnd   = pomContent.indexOf("</dependency>", lombokIdx);
+        int verStart = pomContent.indexOf("<version>", lombokIdx);
+        if (verStart == -1 || (depEnd != -1 && verStart > depEnd)) return null;
+        int verEnd = pomContent.indexOf("</version>", verStart);
+        if (verEnd == -1) return null;
+        String ver = pomContent.substring(verStart + "<version>".length(), verEnd).trim();
+        return ver.startsWith("${") ? null : ver; // ignore unresolved placeholders
     }
 
     private void injectDependency(FractalModule module, Path serviceRoot, String checkString, String rawXml) {

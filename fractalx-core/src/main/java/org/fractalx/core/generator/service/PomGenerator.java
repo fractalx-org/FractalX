@@ -12,6 +12,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
@@ -20,6 +21,7 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.io.IOException;
+import java.io.StringReader;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,16 +32,18 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Generates pom.xml for a microservice.
- *
- * <p>Strategy:
+ * Generates pom.xml for a microservice by cloning the monolith pom and applying
+ * targeted surgical mutations:
  * <ol>
- *   <li>Read every {@code <dependency>} from the source monolith's {@code pom.xml}.</li>
- *   <li>Remove dependencies whose artifact is clearly unused in this service's source
- *       files (based on imports detected by {@link org.fractalx.core.ModuleAnalyzer}).</li>
- *   <li>Always add the FractalX-required deps (NetScope, runtime, actuator,
- *       resilience4j) that the monolith itself never declares.</li>
+ *   <li>Strip build-time-only FractalX artifacts ({@code fractalx-annotations}, {@code fractalx-core}).</li>
+ *   <li>Prune dependencies whose code was not copied into this service.</li>
+ *   <li>Add FractalX runtime libraries (NetScope, fractalx-runtime, resilience4j, etc.) idempotently.</li>
+ *   <li>Ensure Spring Cloud BOM in {@code <dependencyManagement>} if not already present.</li>
  * </ol>
+ * Everything else — {@code <parent>}, {@code <properties>}, {@code <build><plugins>},
+ * existing dep versions — is preserved verbatim from the monolith.
+ *
+ * <p>Falls back to a hardcoded template when the monolith pom cannot be found or parsed.
  */
 public class PomGenerator implements ServiceFileGenerator {
 
@@ -47,6 +51,7 @@ public class PomGenerator implements ServiceFileGenerator {
 
     private static final String FRACTALX_RUNTIME_VERSION = FractalxVersion.get();
     private static final String NETSCOPE_VERSION         = "1.0.1";
+    private static final String RESILIENCE4J_VERSION     = "2.1.0";
 
     /**
      * ArtifactId fragments of deps we can safely drop when the service's source
@@ -57,8 +62,11 @@ public class PomGenerator implements ServiceFileGenerator {
             new PruneRule("data-jpa",   "jakarta.persistence", "org.springframework.data.jpa", "org.springframework.data.repository"),
             new PruneRule("hibernate",  "jakarta.persistence", "org.hibernate"),
             new PruneRule("flyway",     "jakarta.persistence", "org.flywaydb", "org.springframework.data.jpa"),
-            new PruneRule("mysql",      "com.mysql"),
-            new PruneRule("postgresql", "org.postgresql"),
+            // DB drivers are runtime-only — Spring JPA code never imports com.mysql.* or org.postgresql.*
+            // directly. Keep the driver whenever JPA/persistence imports are present, OR when the
+            // rare driver-level import itself is found (e.g. DataSource configuration).
+            new PruneRule("mysql",      "com.mysql", "jakarta.persistence", "org.springframework.data.jpa"),
+            new PruneRule("postgresql", "org.postgresql", "jakarta.persistence", "org.springframework.data.jpa"),
             new PruneRule("mongodb",    "org.springframework.data.mongodb"),
             new PruneRule("redis",      "org.springframework.data.redis"),
             new PruneRule("kafka",      "org.springframework.kafka"),
@@ -71,21 +79,16 @@ public class PomGenerator implements ServiceFileGenerator {
     );
 
     /**
-     * ArtifactId fragments that FractalX always injects — skip from monolith copy to avoid
-     * duplicates or unresolvable version placeholders.
+     * ArtifactIds that must never be copied from the monolith into a generated service pom.
+     * These are build-time generator dependencies; copying them would also carry the
+     * unresolvable {@code ${fractalx.version}} placeholder into the generated pom.
      *
-     * <p>{@code fractalx-annotations} and {@code fractalx-core} are build-time generator
-     * dependencies of the monolith; generated services contain none of those annotations and
-     * need neither jar at compile or runtime.  Copying them verbatim from the monolith pom
-     * would also carry the unresolved {@code ${fractalx.version}} placeholder into the
-     * generated service's pom, causing Maven to refuse to build the service.
+     * <p>All other FractalX runtime additions (netscope, fractalx-runtime, resilience4j, etc.)
+     * are injected via {@link #addFractalxDeps} which is idempotent — no exclusion needed.
      */
-    private static final Set<String> FRACTALX_MANAGED = Set.of(
-            "netscope-server", "netscope-client", "fractalx-runtime",
-            "fractalx-annotations", "fractalx-core",
-            "spring-boot-starter-web", "spring-boot-starter-actuator",
-            "spring-boot-starter-aop", "resilience4j-spring-boot3",
-            "spring-cloud-context"
+    private static final Set<String> STRIP_FROM_MONOLITH = Set.of(
+            "fractalx-annotations",
+            "fractalx-core"
     );
 
     private final ObservabilityInjector observabilityInjector;
@@ -106,8 +109,43 @@ public class PomGenerator implements ServiceFileGenerator {
     // ── POM assembly ─────────────────────────────────────────────────────────
 
     private String buildPomContent(FractalModule module, Path serviceRoot, FractalxConfig cfg) {
-        String filteredDeps = buildFilteredMonolithDeps(module, serviceRoot);
+        Path monolithPom = serviceRoot.getParent().getParent().resolve("pom.xml");
+        if (!Files.exists(monolithPom)) {
+            log.debug("No monolith pom at {} — generating from scratch", monolithPom);
+            return buildPomFromScratch(module, cfg);
+        }
+        try {
+            Document doc = DocumentBuilderFactory.newInstance()
+                    .newDocumentBuilder().parse(monolithPom.toFile());
+            doc.getDocumentElement().normalize();
 
+            Map<String, String> monolithProps = readPropertiesFromDoc(doc);
+
+            // ── Targeted mutations ────────────────────────────────────────
+            setChildText(doc.getDocumentElement(), "artifactId", module.getServiceName());
+            removePropertyByName(doc, "fractalx.version");
+            removeDependencyByArtifact(doc, "fractalx-annotations");
+            removeDependencyByArtifact(doc, "fractalx-core");
+            removePluginByArtifact(doc, "fractalx-maven-plugin");
+            pruneAndResolveUnusedDeps(doc, module.getDetectedImports(), monolithProps,
+                    module.getServiceName());
+            addFractalxDeps(doc);
+            appendObservabilityDeps(doc);
+            ensureSpringCloudBom(doc, cfg.springCloudVersion());
+            ensureSpringBootPlugin(doc);
+
+            return serializeDoc(doc);
+        } catch (Exception e) {
+            log.warn("Could not parse/patch monolith pom — falling back to scratch: {}", e.getMessage());
+            return buildPomFromScratch(module, cfg);
+        }
+    }
+
+    /**
+     * Fallback: generates a pom entirely from a hardcoded template, used when the
+     * monolith pom cannot be found or parsed.
+     */
+    private String buildPomFromScratch(FractalModule module, FractalxConfig cfg) {
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -179,7 +217,7 @@ public class PomGenerator implements ServiceFileGenerator {
                         <dependency>
                             <groupId>io.github.resilience4j</groupId>
                             <artifactId>resilience4j-spring-boot3</artifactId>
-                            <version>2.1.0</version>
+                            <version>%s</version>
                         </dependency>
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
@@ -190,8 +228,6 @@ public class PomGenerator implements ServiceFileGenerator {
                             <artifactId>spring-cloud-context</artifactId>
                         </dependency>
 
-                        <!-- ── From source monolith pom (unused deps removed) ── -->
-                %s
                         <!-- ── Observability (OTel tracing) ─────────────────── -->
                 %s
                     </dependencies>
@@ -230,91 +266,337 @@ public class PomGenerator implements ServiceFileGenerator {
                 NETSCOPE_VERSION,
                 NETSCOPE_VERSION,
                 FRACTALX_RUNTIME_VERSION,
-                filteredDeps,
+                RESILIENCE4J_VERSION,
                 observabilityInjector.getDependencies()
         );
     }
 
-    // ── Monolith dep reading + filtering ─────────────────────────────────────
+    // ── DOM patch operations ──────────────────────────────────────────────────
 
-    private String buildFilteredMonolithDeps(FractalModule module, Path serviceRoot) {
-        // monolith root = fractalx-output/../  =  serviceRoot/../../
-        Path monolithPom = serviceRoot.getParent().getParent().resolve("pom.xml");
-        if (!Files.exists(monolithPom)) {
-            log.debug("No monolith pom found at {} — skipping dep clone", monolithPom);
-            return "";
-        }
-
-        // Read monolith properties once so we can resolve ${placeholder} version refs.
-        Map<String, String> monolithProps = readMonolithProperties(monolithPom);
-
-        List<Element> deps = readDependencyElements(monolithPom);
-        if (deps.isEmpty()) return "";
-
-        Set<String> imports = module.getDetectedImports();
-        StringBuilder sb = new StringBuilder();
-        int kept = 0, pruned = 0;
-
-        for (Element dep : deps) {
-            String artifactId = text(dep, "artifactId");
-
-            // Skip deps FractalX always manages itself
-            if (FRACTALX_MANAGED.contains(artifactId)) continue;
-
-            if (isDependencyUsed(artifactId, imports)) {
-                // Resolve ${...} version placeholders before copying into the generated pom.
-                // If a placeholder cannot be resolved, skip the dep rather than emit an
-                // invalid version that would break the generated service's build.
-                if (!resolveVersionPlaceholder(dep, artifactId, monolithProps)) {
-                    pruned++;
-                    continue;
-                }
-                sb.append(elementToString(dep));
-                kept++;
-            } else {
-                log.debug("Pruned unused dep '{}' from {}", artifactId, module.getServiceName());
-                pruned++;
+    /**
+     * Sets the text content of a direct child element with the given tag name.
+     * Creates the element if it does not exist as a direct child.
+     */
+    private static void setChildText(Element parent, String tag, String value) {
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node n = children.item(i);
+            if (n.getNodeType() == Node.ELEMENT_NODE && tag.equals(n.getNodeName())) {
+                n.setTextContent(value);
+                return;
             }
         }
-
-        log.info("Dep clone for {}: {} kept, {} pruned", module.getServiceName(), kept, pruned);
-        return sb.toString();
+        Element el = parent.getOwnerDocument().createElement(tag);
+        el.setTextContent(value);
+        parent.appendChild(el);
     }
 
     /**
-     * Reads {@code <dependency>} elements from {@code <project><dependencies>}
-     * (skipping those inside {@code <dependencyManagement>}).
+     * Removes a named property from the monolith's {@code <properties>} block.
+     * No-op if the property or the block does not exist.
      */
-    private List<Element> readDependencyElements(Path pomPath) {
-        try {
-            Document doc = DocumentBuilderFactory.newInstance()
-                    .newDocumentBuilder().parse(pomPath.toFile());
-            doc.getDocumentElement().normalize();
+    private static void removePropertyByName(Document doc, String key) {
+        NodeList children = doc.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && "properties".equals(child.getNodeName())) {
+                NodeList props = child.getChildNodes();
+                for (int j = 0; j < props.getLength(); j++) {
+                    Node p = props.item(j);
+                    if (p.getNodeType() == Node.ELEMENT_NODE && key.equals(p.getNodeName())) {
+                        child.removeChild(p);
+                        return;
+                    }
+                }
+                return;
+            }
+        }
+    }
 
-            // Find the <dependencies> child of <project>, not <dependencyManagement>
-            NodeList children = doc.getDocumentElement().getChildNodes();
-            for (int i = 0; i < children.getLength(); i++) {
-                Node child = children.item(i);
-                if (child.getNodeType() == Node.ELEMENT_NODE
-                        && "dependencies".equals(child.getNodeName())) {
-                    return collectDependencyElements((Element) child);
+    /**
+     * Removes a {@code <dependency>} by artifactId from {@code <project><dependencies>}
+     * (not from {@code <dependencyManagement>}).
+     */
+    private static void removeDependencyByArtifact(Document doc, String artifactId) {
+        NodeList children = doc.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && "dependencies".equals(child.getNodeName())) {
+                removeDepsByArtifact((Element) child, artifactId);
+                return;
+            }
+        }
+    }
+
+    private static void removeDepsByArtifact(Element depsEl, String artifactId) {
+        NodeList deps = depsEl.getElementsByTagName("dependency");
+        List<Node> toRemove = new ArrayList<>();
+        for (int i = 0; i < deps.getLength(); i++) {
+            Element dep = (Element) deps.item(i);
+            if (artifactId.equals(text(dep, "artifactId"))) toRemove.add(dep);
+        }
+        toRemove.forEach(n -> n.getParentNode().removeChild(n));
+    }
+
+    /**
+     * Removes a {@code <plugin>} by artifactId from {@code <build><plugins>} (any depth).
+     */
+    private static void removePluginByArtifact(Document doc, String artifactId) {
+        NodeList plugins = doc.getElementsByTagName("plugin");
+        List<Node> toRemove = new ArrayList<>();
+        for (int i = 0; i < plugins.getLength(); i++) {
+            Node p = plugins.item(i);
+            if (p.getNodeType() == Node.ELEMENT_NODE
+                    && artifactId.equals(text((Element) p, "artifactId"))) {
+                toRemove.add(p);
+            }
+        }
+        toRemove.forEach(n -> n.getParentNode().removeChild(n));
+    }
+
+    /**
+     * Walks {@code <project><dependencies>} and removes or resolves each entry:
+     * <ul>
+     *   <li>Deps in {@link #STRIP_FROM_MONOLITH} are always removed.</li>
+     *   <li>Deps with unresolvable {@code ${placeholder}} versions are removed.</li>
+     *   <li>Deps whose prune rule fires (no matching import) are removed.</li>
+     * </ul>
+     */
+    private void pruneAndResolveUnusedDeps(Document doc, Set<String> imports,
+                                            Map<String, String> monolithProps,
+                                            String serviceName) {
+        NodeList children = doc.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && "dependencies".equals(child.getNodeName())) {
+                pruneFromElement((Element) child, imports, monolithProps, serviceName);
+                return;
+            }
+        }
+    }
+
+    private void pruneFromElement(Element depsEl, Set<String> imports,
+                                   Map<String, String> monolithProps, String serviceName) {
+        NodeList deps = depsEl.getElementsByTagName("dependency");
+        List<Node> toRemove = new ArrayList<>();
+        int kept = 0, pruned = 0;
+
+        for (int i = 0; i < deps.getLength(); i++) {
+            Element dep = (Element) deps.item(i);
+            String artifactId = text(dep, "artifactId");
+
+            if (STRIP_FROM_MONOLITH.contains(artifactId)) {
+                toRemove.add(dep);
+                pruned++;
+                continue;
+            }
+            if (!resolveVersionPlaceholder(dep, artifactId, monolithProps)) {
+                toRemove.add(dep);
+                pruned++;
+                continue;
+            }
+            if (!isDependencyUsed(artifactId, imports)) {
+                log.debug("Pruned unused dep '{}' from {}", artifactId, serviceName);
+                toRemove.add(dep);
+                pruned++;
+            } else {
+                kept++;
+            }
+        }
+
+        toRemove.forEach(n -> n.getParentNode().removeChild(n));
+        log.info("Dep clone for {}: {} kept, {} pruned", serviceName, kept, pruned);
+    }
+
+    /**
+     * Idempotently adds all FractalX-required runtime dependencies.
+     * Each call to {@link #addDepIfAbsent} is a no-op if the dep is already present
+     * (copied from monolith or previously added).
+     */
+    private void addFractalxDeps(Document doc) {
+        Element depsEl = ensureDependenciesElement(doc);
+        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-web",      null,                    null);
+        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-actuator",  null,                    null);
+        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-aop",       null,                    null);
+        addDepIfAbsent(doc, depsEl, "org.springframework.cloud", "spring-cloud-context",          null,                    null);
+        addDepIfAbsent(doc, depsEl, "org.fractalx",              "netscope-server",               NETSCOPE_VERSION,        null);
+        addDepIfAbsent(doc, depsEl, "org.fractalx",              "netscope-client",               NETSCOPE_VERSION,        null);
+        addDepIfAbsent(doc, depsEl, "org.fractalx",              "fractalx-runtime",              FRACTALX_RUNTIME_VERSION, null);
+        addDepIfAbsent(doc, depsEl, "io.github.resilience4j",    "resilience4j-spring-boot3",     RESILIENCE4J_VERSION,    null);
+    }
+
+    /**
+     * Parses the observability dep XML fragment and appends any dep not already present.
+     */
+    private void appendObservabilityDeps(Document doc) {
+        String depsXml = observabilityInjector.getDependencies();
+        if (depsXml == null || depsXml.isBlank()) return;
+        try {
+            Document fragDoc = DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                    .parse(new InputSource(new StringReader("<dependencies>" + depsXml + "</dependencies>")));
+            Element depsEl = ensureDependenciesElement(doc);
+            NodeList depNodes = fragDoc.getDocumentElement().getElementsByTagName("dependency");
+            for (int i = 0; i < depNodes.getLength(); i++) {
+                Element dep = (Element) depNodes.item(i);
+                String artifactId = text(dep, "artifactId");
+                if (!hasDependency(doc, artifactId)) {
+                    depsEl.appendChild(doc.importNode(dep, true));
                 }
             }
         } catch (Exception e) {
-            log.warn("Could not parse monolith pom: {}", e.getMessage());
+            log.warn("Could not parse observability deps fragment: {}", e.getMessage());
         }
-        return List.of();
     }
 
-    private List<Element> collectDependencyElements(Element dependenciesEl) {
-        List<Element> result = new ArrayList<>();
-        NodeList nodes = dependenciesEl.getElementsByTagName("dependency");
-        for (int i = 0; i < nodes.getLength(); i++) {
-            if (nodes.item(i).getNodeType() == Node.ELEMENT_NODE) {
-                result.add((Element) nodes.item(i));
+    /**
+     * Ensures the Spring Cloud BOM is present in {@code <dependencyManagement>}.
+     * Appended only if no entry with artifactId {@code spring-cloud-dependencies} exists.
+     */
+    private static void ensureSpringCloudBom(Document doc, String version) {
+        // Check if already present anywhere in dependencyManagement
+        NodeList dms = doc.getElementsByTagName("dependencyManagement");
+        if (dms.getLength() > 0) {
+            Element dmEl = (Element) dms.item(0);
+            NodeList deps = dmEl.getElementsByTagName("dependency");
+            for (int i = 0; i < deps.getLength(); i++) {
+                if ("spring-cloud-dependencies".equals(text((Element) deps.item(i), "artifactId"))) {
+                    return; // already present
+                }
+            }
+            // Add to existing <dependencyManagement><dependencies>
+            NodeList innerDeps = dmEl.getElementsByTagName("dependencies");
+            Element innerDepsEl;
+            if (innerDeps.getLength() > 0) {
+                innerDepsEl = (Element) innerDeps.item(0);
+            } else {
+                innerDepsEl = doc.createElement("dependencies");
+                dmEl.appendChild(innerDepsEl);
+            }
+            innerDepsEl.appendChild(createSpringCloudBomElement(doc, version));
+        } else {
+            // Create <dependencyManagement> from scratch
+            Element dm = doc.createElement("dependencyManagement");
+            Element innerDeps = doc.createElement("dependencies");
+            innerDeps.appendChild(createSpringCloudBomElement(doc, version));
+            dm.appendChild(innerDeps);
+            doc.getDocumentElement().appendChild(dm);
+        }
+    }
+
+    private static Element createSpringCloudBomElement(Document doc, String version) {
+        Element dep = doc.createElement("dependency");
+        Element g = doc.createElement("groupId");   g.setTextContent("org.springframework.cloud");  dep.appendChild(g);
+        Element a = doc.createElement("artifactId"); a.setTextContent("spring-cloud-dependencies"); dep.appendChild(a);
+        Element v = doc.createElement("version");    v.setTextContent(version);                     dep.appendChild(v);
+        Element t = doc.createElement("type");       t.setTextContent("pom");                       dep.appendChild(t);
+        Element s = doc.createElement("scope");      s.setTextContent("import");                    dep.appendChild(s);
+        return dep;
+    }
+
+    /**
+     * Ensures {@code spring-boot-maven-plugin} with a {@code repackage} execution is present
+     * in {@code <build><plugins>}. Creates {@code <build>} and {@code <plugins>} if absent.
+     */
+    private static void ensureSpringBootPlugin(Document doc) {
+        NodeList plugins = doc.getElementsByTagName("plugin");
+        for (int i = 0; i < plugins.getLength(); i++) {
+            if ("spring-boot-maven-plugin".equals(text((Element) plugins.item(i), "artifactId"))) {
+                return; // already present
             }
         }
-        return result;
+
+        // Find or create <build>
+        NodeList buildNodes = doc.getElementsByTagName("build");
+        Element buildEl;
+        if (buildNodes.getLength() > 0) {
+            buildEl = (Element) buildNodes.item(0);
+        } else {
+            buildEl = doc.createElement("build");
+            doc.getDocumentElement().appendChild(buildEl);
+        }
+
+        // Find or create <plugins>
+        NodeList existingPlugins = buildEl.getElementsByTagName("plugins");
+        Element pluginsEl;
+        if (existingPlugins.getLength() > 0) {
+            pluginsEl = (Element) existingPlugins.item(0);
+        } else {
+            pluginsEl = doc.createElement("plugins");
+            buildEl.appendChild(pluginsEl);
+        }
+
+        // Build the plugin element
+        Element plugin = doc.createElement("plugin");
+        Element g = doc.createElement("groupId");    g.setTextContent("org.springframework.boot"); plugin.appendChild(g);
+        Element a = doc.createElement("artifactId"); a.setTextContent("spring-boot-maven-plugin"); plugin.appendChild(a);
+        Element execs = doc.createElement("executions");
+        Element exec  = doc.createElement("execution");
+        Element goals = doc.createElement("goals");
+        Element goal  = doc.createElement("goal"); goal.setTextContent("repackage");
+        goals.appendChild(goal);
+        exec.appendChild(goals);
+        execs.appendChild(exec);
+        plugin.appendChild(execs);
+        pluginsEl.appendChild(plugin);
+    }
+
+    // ── DOM helpers ───────────────────────────────────────────────────────────
+
+    /**
+     * Returns {@code true} if the given artifactId exists in {@code <project><dependencies>}
+     * (not {@code <dependencyManagement>}).
+     */
+    private static boolean hasDependency(Document doc, String artifactId) {
+        NodeList children = doc.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && "dependencies".equals(child.getNodeName())) {
+                NodeList deps = ((Element) child).getElementsByTagName("dependency");
+                for (int j = 0; j < deps.getLength(); j++) {
+                    if (artifactId.equals(text((Element) deps.item(j), "artifactId"))) return true;
+                }
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Appends a {@code <dependency>} to {@code depsEl} only if no dep with the same
+     * artifactId is already present in {@code <project><dependencies>}.
+     * Omits the {@code <version>} element when {@code version} is {@code null}
+     * (BOM or parent manages it).
+     */
+    private static void addDepIfAbsent(Document doc, Element depsEl,
+                                        String groupId, String artifactId,
+                                        String version, String scope) {
+        if (hasDependency(doc, artifactId)) return;
+        Element dep = doc.createElement("dependency");
+        Element g = doc.createElement("groupId");    g.setTextContent(groupId);    dep.appendChild(g);
+        Element a = doc.createElement("artifactId"); a.setTextContent(artifactId); dep.appendChild(a);
+        if (version != null) {
+            Element v = doc.createElement("version"); v.setTextContent(version); dep.appendChild(v);
+        }
+        if (scope != null) {
+            Element s = doc.createElement("scope"); s.setTextContent(scope); dep.appendChild(s);
+        }
+        depsEl.appendChild(dep);
+    }
+
+    /**
+     * Returns the existing {@code <project><dependencies>} element, creating it if absent.
+     */
+    private static Element ensureDependenciesElement(Document doc) {
+        NodeList children = doc.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && "dependencies".equals(child.getNodeName())) {
+                return (Element) child;
+            }
+        }
+        Element depsEl = doc.createElement("dependencies");
+        doc.getDocumentElement().appendChild(depsEl);
+        return depsEl;
     }
 
     // ── Usage check ───────────────────────────────────────────────────────────
@@ -328,7 +610,6 @@ public class PomGenerator implements ServiceFileGenerator {
         String aid = artifactId.toLowerCase();
         for (PruneRule rule : PRUNE_RULES) {
             if (aid.contains(rule.artifactFragment())) {
-                // Prune only if no matching import found
                 return importsAny(imports, rule.requiredPrefixes());
             }
         }
@@ -344,35 +625,27 @@ public class PomGenerator implements ServiceFileGenerator {
         return false;
     }
 
-    // ── Monolith property resolution ─────────────────────────────────────────
+    // ── Monolith property reading ─────────────────────────────────────────────
 
     /**
-     * Reads the {@code <properties>} block from the monolith's {@code pom.xml} into a map
-     * so that version placeholders like {@code ${fractalx.version}} can be resolved before
-     * the dependency element is copied into a generated service pom.
+     * Reads {@code <properties>} from an already-parsed monolith Document into a map
+     * so that version placeholders like {@code ${lombok.version}} can be resolved
+     * before the dependency element is used in the generated pom.
      */
-    private Map<String, String> readMonolithProperties(Path pomPath) {
+    private static Map<String, String> readPropertiesFromDoc(Document doc) {
         Map<String, String> props = new HashMap<>();
-        try {
-            Document doc = DocumentBuilderFactory.newInstance()
-                    .newDocumentBuilder().parse(pomPath.toFile());
-            doc.getDocumentElement().normalize();
-            NodeList children = doc.getDocumentElement().getChildNodes();
-            for (int i = 0; i < children.getLength(); i++) {
-                Node child = children.item(i);
-                if (child.getNodeType() == Node.ELEMENT_NODE
-                        && "properties".equals(child.getNodeName())) {
-                    NodeList propNodes = child.getChildNodes();
-                    for (int j = 0; j < propNodes.getLength(); j++) {
-                        Node p = propNodes.item(j);
-                        if (p.getNodeType() == Node.ELEMENT_NODE)
-                            props.put(p.getNodeName(), p.getTextContent().trim());
-                    }
-                    break;
+        NodeList children = doc.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && "properties".equals(child.getNodeName())) {
+                NodeList propNodes = child.getChildNodes();
+                for (int j = 0; j < propNodes.getLength(); j++) {
+                    Node p = propNodes.item(j);
+                    if (p.getNodeType() == Node.ELEMENT_NODE)
+                        props.put(p.getNodeName(), p.getTextContent().trim());
                 }
+                break;
             }
-        } catch (Exception e) {
-            log.warn("Could not read <properties> from monolith pom: {}", e.getMessage());
         }
         return props;
     }
@@ -403,38 +676,33 @@ public class PomGenerator implements ServiceFileGenerator {
             return true;
         }
 
-        log.warn("Skipping dep '{}' from monolith — version placeholder '{}' is not defined "
-                + "in monolith <properties>. Declare the property in the monolith pom or "
-                + "add the dep manually to fractalx-config.yml.",
-                artifactId, ver);
-        return false;
+        // The property is not in the monolith's own <properties> — it is resolved by the
+        // parent BOM (e.g. spring-boot-starter-parent) at build time.  Strip the <version>
+        // element so the dep becomes BOM-managed in the generated service pom, which still
+        // inherits the same parent.  Dropping the dep entirely would silently lose it.
+        dep.removeChild(vn);
+        log.debug("Stripped unresolvable version placeholder '{}' from '{}' — relying on parent/BOM",
+                ver, artifactId);
+        return true;
     }
 
-    // ── XML helpers ───────────────────────────────────────────────────────────
+    // ── XML serialization ─────────────────────────────────────────────────────
+
+    private static String serializeDoc(Document doc) throws Exception {
+        Transformer t = TransformerFactory.newInstance().newTransformer();
+        t.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "no");
+        t.setOutputProperty(OutputKeys.INDENT, "yes");
+        t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "4");
+        t.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
+        StringWriter sw = new StringWriter();
+        t.transform(new DOMSource(doc), new StreamResult(sw));
+        return sw.toString();
+    }
 
     private static String text(Element parent, String tag) {
         NodeList nl = parent.getElementsByTagName(tag);
         if (nl.getLength() == 0) return "";
         return nl.item(0).getTextContent().trim();
-    }
-
-    private static String elementToString(Element el) {
-        try {
-            Transformer t = TransformerFactory.newInstance().newTransformer();
-            t.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
-            t.setOutputProperty(OutputKeys.INDENT, "yes");
-            t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "4");
-            StringWriter sw = new StringWriter();
-            t.transform(new DOMSource(el), new StreamResult(sw));
-            // Indent everything by 8 spaces to match generated POM style
-            String raw = sw.toString().trim();
-            return raw.lines()
-                    .map(line -> "        " + line)
-                    .reduce((a, b) -> a + "\n" + b)
-                    .orElse("") + "\n";
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     // ── Prune rule ────────────────────────────────────────────────────────────
