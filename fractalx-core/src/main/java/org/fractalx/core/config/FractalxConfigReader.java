@@ -206,13 +206,37 @@ public class FractalxConfigReader {
 
         Map<String, FractalxConfig.ServiceOverride> overrides = readServiceOverrides(fx);
 
+        // ── Feature flags ─────────────────────────────────────────────────────
+
+        Map<String, Object> featMap = nestedMap(fx, "features");
+        FractalxConfig.FeatureFlags features = new FractalxConfig.FeatureFlags(
+                readBool(featMap, "gateway",          true),
+                readBool(featMap, "admin",            true),
+                readBool(featMap, "registry",         true),
+                readBool(featMap, "logger",           true),
+                readBool(featMap, "saga",             true),
+                readBool(featMap, "docker",           true),
+                readBool(featMap, "observability",    true),
+                readBool(featMap, "resilience",       true),
+                readBool(featMap, "distributed-data", true)
+        );
+        if (!features.gateway())         log.info("[FractalxConfig] Feature DISABLED: gateway");
+        if (!features.admin())           log.info("[FractalxConfig] Feature DISABLED: admin");
+        if (!features.registry())        log.info("[FractalxConfig] Feature DISABLED: registry");
+        if (!features.logger())          log.info("[FractalxConfig] Feature DISABLED: logger");
+        if (!features.saga())            log.info("[FractalxConfig] Feature DISABLED: saga");
+        if (!features.docker())          log.info("[FractalxConfig] Feature DISABLED: docker");
+        if (!features.observability())   log.info("[FractalxConfig] Feature DISABLED: observability");
+        if (!features.resilience())      log.info("[FractalxConfig] Feature DISABLED: resilience");
+        if (!features.distributedData()) log.info("[FractalxConfig] Feature DISABLED: distributed-data");
+
         FractalxConfig cfg = new FractalxConfig(
                 registryUrl, loggerUrl, otelEndpoint,
                 gatewayPort, corsOrigins, jwksUri,
                 adminPort, overrides,
                 basePackage, springBootVersion, springCloudVersion,
                 registryPort, loggerPort, sagaPort,
-                resilience, dockerImages);
+                resilience, dockerImages, features);
 
         log.info("[FractalxConfig] basePackage={} springBoot={} registry-port={} gateway-port={} admin-port={}",
                 cfg.effectiveBasePackage(), springBootVersion, registryPort, gatewayPort, adminPort);
@@ -399,6 +423,19 @@ public class FractalxConfigReader {
                 catch (NumberFormatException ignored) {}
             }
         }
+        return defaultVal;
+    }
+
+    /**
+     * Reads a boolean value from a YAML map by key.
+     * Accepts {@code Boolean} objects and {@code "true"}/{@code "false"} strings.
+     * Returns {@code defaultVal} when the key is absent.
+     */
+    private boolean readBool(Map<String, Object> map, String key, boolean defaultVal) {
+        if (map == null || map.isEmpty()) return defaultVal;
+        Object val = map.get(key);
+        if (val instanceof Boolean b) return b;
+        if (val != null) return !"false".equalsIgnoreCase(val.toString().trim());
         return defaultVal;
     }
 }

@@ -78,7 +78,8 @@ public record FractalxConfig(
         int    loggerPort,
         int    sagaPort,
         ResilienceDefaults resilience,
-        DockerImages dockerImages
+        DockerImages dockerImages,
+        FeatureFlags features
 ) {
 
     // ── Nested records ────────────────────────────────────────────────────────
@@ -104,6 +105,40 @@ public record FractalxConfig(
     ) {
         public static ResilienceDefaults defaults() {
             return new ResilienceDefaults(50, "30s", 5, 10, 3, "100ms", "2s");
+        }
+    }
+
+    /**
+     * Controls which FractalX features are generated. All flags default to {@code true} so that
+     * existing projects with no {@code fractalx.features} section in their config are unaffected.
+     *
+     * <pre>
+     * fractalx:
+     *   features:
+     *     gateway: true          # fractalx-gateway service
+     *     admin: true            # admin-service dashboard
+     *     registry: true         # fractalx-registry service discovery
+     *     logger: true           # logger-service centralised logging
+     *     saga: true             # fractalx-saga-orchestrator + saga code injection
+     *     docker: true           # docker-compose.yml + per-service Dockerfiles
+     *     observability: true    # OTel tracing, health metrics, structured logging
+     *     resilience: true       # Resilience4j circuit-breaker / retry per service
+     *     distributed-data: true # Flyway migrations, transactional outbox, DB isolation
+     * </pre>
+     */
+    public record FeatureFlags(
+            boolean gateway,
+            boolean admin,
+            boolean registry,
+            boolean logger,
+            boolean saga,
+            boolean docker,
+            boolean observability,
+            boolean resilience,
+            boolean distributedData
+    ) {
+        public static FeatureFlags defaults() {
+            return new FeatureFlags(true, true, true, true, true, true, true, true, true);
         }
     }
 
@@ -141,7 +176,8 @@ public record FractalxConfig(
                 9099,
                 8099,
                 ResilienceDefaults.defaults(),
-                DockerImages.defaults()
+                DockerImages.defaults(),
+                FeatureFlags.defaults()
         );
     }
 
@@ -161,7 +197,7 @@ public record FractalxConfig(
         return new FractalxConfig(registryUrl, loggerUrl, otelEndpoint, gatewayPort,
                 corsAllowedOrigins, oauth2JwksUri, adminPort, serviceOverrides,
                 basePackage, springBootVersion, springCloudVersion, registryPort,
-                loggerPort, sagaPort, resilience, dockerImages);
+                loggerPort, sagaPort, resilience, dockerImages, features);
     }
 
     /** Returns the configured port for a service, or {@code defaultPort} if not set. */

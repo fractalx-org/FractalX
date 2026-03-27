@@ -25,6 +25,7 @@ public class DbSummaryStep implements ServiceFileGenerator {
 
     @Override
     public void generate(GenerationContext context) throws IOException {
+        if (!context.getFractalxConfig().features().observability()) return;
         FractalModule module = context.getModule();
         Set<String> imports = module.getDetectedImports();
         boolean hasJpa = imports != null && imports.stream().anyMatch(i ->

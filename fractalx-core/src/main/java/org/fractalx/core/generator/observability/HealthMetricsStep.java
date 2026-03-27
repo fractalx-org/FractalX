@@ -32,6 +32,7 @@ public class HealthMetricsStep implements ServiceFileGenerator {
 
     @Override
     public void generate(GenerationContext context) throws IOException {
+        if (!context.getFractalxConfig().features().observability()) return;
         FractalModule module = context.getModule();
         List<String>  deps   = module.getDependencies();
 

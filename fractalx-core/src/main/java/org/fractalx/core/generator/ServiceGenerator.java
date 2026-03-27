@@ -179,7 +179,11 @@ public class ServiceGenerator {
                 new PomGenerator(injector),
                 new ApplicationGenerator(),
                 new ConfigurationGenerator(),
-                context -> injector.patchConfigurationFile(context.getSrcMainResources()),
+                context -> {
+                    if (context.getFractalxConfig().features().observability()) {
+                        injector.patchConfigurationFile(context.getSrcMainResources());
+                    }
+                },
                 new CodeCopier(),
                 new CodeTransformer(
                         new AnnotationRemover(),
@@ -192,9 +196,13 @@ public class ServiceGenerator {
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
                 new SagaMethodTransformer(),    // replaces cross-service calls with outboxPublisher.publish()
-                context -> distributedServiceHelper.upgradeService(
-                        context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
-                        context.getSagaDefinitions(), context.servicePackage()),
+                context -> {
+                    if (context.getFractalxConfig().features().distributedData()) {
+                        distributedServiceHelper.upgradeService(
+                                context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
+                                context.getSagaDefinitions(), context.servicePackage());
+                    }
+                },
                 new CorrelationIdGenerator(),    // generates logback-spring.xml with %X{correlationId}
                 new OtelConfigStep(),
                 new HealthMetricsStep(),
@@ -228,9 +236,13 @@ public class ServiceGenerator {
         List<SagaDefinition> sagaDefinitions = sagaAnalyzer.analyzeSagas(sourceRoot, modules);
 
         // Generate the service registry first so it is available for all other generators
-        onStepStart.accept("fractalx-registry");
-        registryServiceGenerator.generate(modules, outputRoot, fractalxConfig);
-        onStepComplete.accept("fractalx-registry");
+        if (fractalxConfig.features().registry()) {
+            onStepStart.accept("fractalx-registry");
+            registryServiceGenerator.generate(modules, outputRoot, fractalxConfig);
+            onStepComplete.accept("fractalx-registry");
+        } else {
+            log.info("Feature 'registry' disabled — skipping fractalx-registry generation");
+        }
 
         for (FractalModule module : modules) {
             onStepStart.accept(module.getServiceName());
@@ -238,35 +250,46 @@ public class ServiceGenerator {
             onStepComplete.accept(module.getServiceName());
         }
 
-        new LoggerServiceGenerator().generate(outputRoot, fractalxConfig);
+        if (fractalxConfig.features().logger()) {
+            new LoggerServiceGenerator().generate(outputRoot, fractalxConfig);
+        } else {
+            log.info("Feature 'logger' disabled — skipping logger-service generation");
+        }
 
-        if (modules.size() > 1 && generateGateway) {
+        if (modules.size() > 1 && generateGateway && fractalxConfig.features().gateway()) {
             onStepStart.accept("fractalx-gateway");
             generateApiGateway(modules, fractalxConfig);
             onStepComplete.accept("fractalx-gateway");
+        } else if (!fractalxConfig.features().gateway()) {
+            log.info("Feature 'gateway' disabled — skipping fractalx-gateway generation");
         }
 
-        if (generateAdmin) {
+        if (generateAdmin && fractalxConfig.features().admin()) {
             onStepStart.accept("fractalx-admin");
             adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions);
             onStepComplete.accept("fractalx-admin");
+        } else if (!fractalxConfig.features().admin()) {
+            log.info("Feature 'admin' disabled — skipping admin-service generation");
         }
 
         boolean hasSagas = !sagaDefinitions.isEmpty();
-        if (hasSagas) {
+        if (hasSagas && fractalxConfig.features().saga()) {
             onStepStart.accept("fractalx-saga-orchestrator");
             sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot, fractalxConfig);
             onStepComplete.accept("fractalx-saga-orchestrator");
-        } else {
-            sagaOrchestratorGenerator.generateOrchestratorService(modules, sagaDefinitions, outputRoot, fractalxConfig);
+        } else if (!fractalxConfig.features().saga()) {
+            log.info("Feature 'saga' disabled — skipping fractalx-saga-orchestrator generation");
         }
 
-        if (generateDocker) {
+        if (generateDocker && fractalxConfig.features().docker()) {
             onStepStart.accept("docker-compose + scripts");
             dockerComposeGenerator.generate(modules, outputRoot, hasSagas, fractalxConfig);
             generateStartScripts(modules, sagaDefinitions);
             onStepComplete.accept("docker-compose + scripts");
         } else {
+            if (!fractalxConfig.features().docker()) {
+                log.info("Feature 'docker' disabled — skipping docker-compose generation");
+            }
             onStepStart.accept("start scripts");
             generateStartScripts(modules, sagaDefinitions);
             onStepComplete.accept("start scripts");

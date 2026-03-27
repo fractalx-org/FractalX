@@ -130,7 +130,9 @@ public class PomGenerator implements ServiceFileGenerator {
             pruneAndResolveUnusedDeps(doc, module.getDetectedImports(), monolithProps,
                     module.getServiceName());
             addFractalxDeps(doc);
-            appendObservabilityDeps(doc);
+            if (cfg.features().observability()) {
+                appendObservabilityDeps(doc);
+            }
             ensureSpringCloudBom(doc, cfg.springCloudVersion());
             ensureSpringBootPlugin(doc);
 
@@ -267,7 +269,7 @@ public class PomGenerator implements ServiceFileGenerator {
                 NETSCOPE_VERSION,
                 FRACTALX_RUNTIME_VERSION,
                 RESILIENCE4J_VERSION,
-                observabilityInjector.getDependencies()
+                cfg.features().observability() ? observabilityInjector.getDependencies() : ""
         );
     }
 

@@ -417,6 +417,55 @@ All keys are optional. When absent, FractalX falls back to sensible defaults: re
 
 After generation, the admin portal exposes the baked-in platform config at `GET /api/config/runtime` and allows in-memory overrides (`PUT /api/config/runtime/{key}`) without restarting.
 
+### Feature Flags
+
+Every FractalX-generated artifact can be individually disabled from `fractalx-config.yml`.
+All flags default to `true` — omitting the `features` block leaves all generation behaviour unchanged.
+
+```yaml
+fractalx:
+  features:
+    gateway: true          # fractalx-gateway service
+    admin: true            # admin-service dashboard
+    registry: true         # fractalx-registry service discovery
+    logger: true           # logger-service centralised logging
+    saga: true             # fractalx-saga-orchestrator + saga code injection
+    docker: true           # docker-compose.yml + per-service Dockerfiles
+    observability: true    # OTel tracing, health metrics, structured logging
+    resilience: true       # Resilience4j circuit-breaker / retry config per service
+    distributed-data: true # Flyway migrations, transactional outbox, DB isolation
+```
+
+| Flag | Effect when `false` |
+|---|---|
+| `gateway` | `fractalx-gateway/` not generated |
+| `admin` | `admin-service/` not generated |
+| `registry` | `fractalx-registry/` not generated (⚠ services still try to self-register) |
+| `logger` | `logger-service/` not generated |
+| `saga` | No `fractalx-saga-orchestrator/`; saga code rewrites skipped — no saga code injected into any service |
+| `docker` | No `docker-compose.yml` or per-service `Dockerfile` generated |
+| `observability` | Skips OTel config, health metrics, structured logging; OTel deps omitted from all service poms; OTel properties not patched into `application.yml` |
+| `resilience` | Skips Resilience4j config generation — no circuit-breaker or retry config injected into any service |
+| `distributed-data` | Skips `DistributedServiceHelper` entirely — no Flyway migrations, no transactional outbox, no DB isolation, no reference validators |
+
+**Example — core decomposition only (NetScope wiring, nothing else):**
+
+```yaml
+fractalx:
+  features:
+    gateway: false
+    admin: false
+    registry: false
+    logger: false
+    saga: false
+    docker: false
+    observability: false
+    resilience: false
+    distributed-data: false
+```
+
+This produces one microservice directory per `@DecomposableModule` with NetScope client/server wiring only — a minimal starting point before incrementally enabling features.
+
 ---
 
 ## 7. Maven Plugin Reference

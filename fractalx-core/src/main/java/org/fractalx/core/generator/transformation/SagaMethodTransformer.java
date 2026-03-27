@@ -58,6 +58,7 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
 
     @Override
     public void generate(GenerationContext context) throws IOException {
+        if (!context.getFractalxConfig().features().saga()) return;
         List<SagaDefinition> ownedSagas = context.getSagaDefinitions().stream()
                 .filter(s -> s.getOwnerServiceName().equals(context.getModule().getServiceName()))
                 .toList();
