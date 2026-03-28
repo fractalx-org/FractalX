@@ -56,7 +56,8 @@ Manual microservices migrations are slow, error-prone, and expensive — requiri
 21. [Troubleshooting](#21-troubleshooting)
 22. [Contributing](#22-contributing)
 23. [Security Architecture](#23-security-architecture)
-24. [License](#24-license)
+24. [Known Limitations](#24-known-limitations)
+25. [License](#25-license)
 
 ---
 
@@ -1724,6 +1725,170 @@ for patterns that require attention:
 
 ---
 
-## 24. License
+## 24. Known Limitations
+
+FractalX is a **static decomposition tool**. It produces a solid starting point for microservice
+extraction, but there are inherent constraints in what static AST analysis can achieve. The
+following are known limitations to be aware of before and after running a decomposition.
+
+---
+
+### Analysis & detection
+
+**Static analysis only — no runtime coupling detection**
+FractalX scans source code with JavaParser. Patterns that only manifest at runtime — such as
+`ApplicationContext.getBean(X.class)`, dynamic proxies, reflection-based service location, or
+beans registered programmatically — are not detected. Cross-module calls made through these
+mechanisms are silently absent from the generated NetScope clients.
+
+**Field injection assumed for dependency detection**
+`ModuleAnalyzer` identifies cross-module dependencies from `@Autowired` / `@Inject` fields and
+Lombok `@RequiredArgsConstructor` / `@AllArgsConstructor` constructor injection. Method-level
+injection (`@Autowired` on a setter), bean factory methods, or constructor injection without
+Lombok annotations may be missed. Always review the generated `*Client` interfaces against your
+actual dependency graph.
+
+**Wildcard and static imports not resolved by `SharedCodeCopier`**
+`SharedCodeCopier` resolves shared classes by tracing explicit single-type imports
+(`import com.example.Foo`). Wildcard imports (`import com.example.*`) and static imports
+(`import static com.example.Foo.bar`) are skipped. Shared classes reachable only through wildcard
+imports must be copied manually to the generated service.
+
+**Circular cross-module dependencies**
+If Module A depends on Module B and Module B depends on Module A, FractalX generates both modules
+as NetScope clients of each other. This compiles and runs, but the circular gRPC dependency is an
+architectural smell that FractalX does not resolve — it mirrors whatever coupling existed in the
+monolith. Refactor the circular dependency into a shared event-driven model before decomposing.
+
+**Complex `@PreAuthorize` SpEL not migrated to gateway**
+`SecurityAnalyzer` skips `@PreAuthorize` expressions that contain parameter references
+(e.g., `#id == principal.id`). These rules are not carried over to the gateway's route security
+config. They survive on service methods and work via the generated `GatewayAuthHeaderFilter`, but
+equivalent gateway-level enforcement must be added manually if needed.
+
+---
+
+### Framework & stack constraints
+
+**Spring Boot only**
+FractalX is built around Spring Boot, Spring Data JPA, and Spring Security idioms. Monoliths using
+Jakarta EE, Micronaut, Quarkus, Ktor, or plain Spring (without Boot) are not supported. Key
+annotations like `@SpringBootApplication`, `@Component`, `@Service`, `@Repository`, `@Entity` are
+assumed throughout.
+
+**Single-module Maven source**
+The framework expects a single Maven module as the monolith source (one `pom.xml`, one `src/`
+tree). Multi-module Maven projects where domain code is spread across multiple submodules are not
+supported without first flattening them into a single source root.
+
+**JPA / Spring Data assumed for data layer**
+`DataIsolationGenerator` enforces data boundaries by generating `@EnableJpaRepositories` +
+`@EntityScan`. Monoliths that use MyBatis, jOOQ, plain JDBC, or Hibernate without Spring Data
+will not have their data layer correctly isolated — you must configure data access manually.
+
+**Servlet-based security (not reactive / WebFlux)**
+The generated `GatewayAuthHeaderFilter` extends `OncePerRequestFilter` (servlet stack). If a
+decomposed module uses Spring WebFlux / reactive programming, this filter does not apply. Reactive
+services need a `WebFilter` implementation instead; adapt the generated filter accordingly.
+
+**gRPC (NetScope) only for inter-service communication**
+All cross-service calls are tunnelled through NetScope's gRPC infrastructure. HTTP/REST
+inter-service calls (e.g., Feign clients already in the monolith) are not preserved — they are
+detected as dependencies and replaced with gRPC client interfaces. If external consumers call
+those endpoints directly, ensure the gateway exposes the same REST paths.
+
+---
+
+### Generated code completeness
+
+**Saga orchestrator client stubs require manual completion**
+`SagaOrchestratorGenerator` generates `*Client` interfaces for each NetScope dependency of the
+saga, but method signatures inside those interfaces are stubs that need to be completed manually
+to match the actual service's exposed methods.
+
+**Flyway migration scaffold only**
+`FlywayMigrationGenerator` writes a `V1__init.sql` placeholder. It does not reverse-engineer the
+monolith's existing database schema. The actual DDL for each service's tables must be written
+manually (or extracted from the monolith's `ddl-auto: create` output and split by module).
+
+**No unit/integration tests generated for infrastructure**
+Tests for the module's business logic are copied from the monolith if they reside within the
+module's package. Infrastructure classes generated by FractalX (sagas, outbox, correlation
+filter, registry bridge, etc.) do not come with tests — these must be written by the developer.
+
+**Output is a starting point, not production-ready**
+The generated services compile and pass health checks. They are designed to be the starting
+structure, not the final artefact. Review all `TODO` and `FRACTALX-WARNING` comments, resolve
+all `DECOMPOSITION_HINTS.md` gaps, configure proper datasource URLs, replace placeholder
+secrets, and add production-grade monitoring before deploying.
+
+---
+
+### Security constraints
+
+**No auth-service / login endpoint generated**
+FractalX generates the token-validation side of security (`GatewayAuthHeaderFilter`,
+`ServiceSecurityConfig`, Internal Call Token minting in the gateway). It does not generate a
+user registration, login, or JWT-issuance service. An external IdP (Keycloak, Auth0, Okta) or
+a custom auth service must be provided separately.
+
+**Internal Call Token has a 30-second TTL**
+The signed JWT forwarded from the gateway to downstream services expires in 30 seconds. Long-running
+synchronous request chains (deep NetScope call stacks, saga compensation flows) may encounter token
+expiry mid-flight. In those cases the receiving service returns 401 and the saga must retry or
+compensate. The TTL can be tuned by modifying the generated `JwtBearerFilter` minting code in the
+gateway.
+
+**Service perimeter trust is assumed**
+`GatewayAuthHeaderFilter` validates the `X-Internal-Token` signature but does not enforce network
+perimeter controls (firewall rules, mTLS). If a service is reachable directly (bypassing the
+gateway), a caller that knows the internal JWT secret can forge valid tokens. In production,
+combine the signed-token model with network-level controls (VPC, service mesh, Kubernetes
+`NetworkPolicy`) to prevent direct service access.
+
+---
+
+### Operational constraints
+
+**`fractalx-test-app` module not included**
+The original `fractalx-test-app` Maven module was removed from the repository. The parent POM
+still references it. This causes a warning during multi-module builds but does not affect
+decomposition of other monoliths.
+
+**Hard-coded defaults in generated config**
+The `dev` profile uses hard-coded `localhost` addresses. The `docker` profile substitutes env
+vars. Neither profile auto-discovers actual production hostnames — these must be configured
+explicitly for staging and production deployments.
+
+**No incremental decomposition**
+FractalX is designed to be run on a clean `outputDir`. Re-running `mvn fractalx:decompose`
+overwrites the entire output directory. Incremental updates (e.g., adding a new `@DecomposableModule`
+after partial decomposition) require a full re-run. Any manual changes made to generated files
+since the last run will be lost — keep your customisations in a separate overlay directory or
+commit them and use diff tooling to re-apply them after a regeneration.
+
+---
+
+### Summary table
+
+| Limitation | Impact | Workaround |
+|------------|--------|------------|
+| Static analysis only | Runtime-registered beans missed | Review generated clients; add missing deps manually |
+| Field injection assumed | Constructor/setter injection missed | Use `@Autowired` field injection or Lombok in monolith |
+| Wildcard imports not traced | Shared classes via `*` imports not copied | Add explicit imports or copy files manually |
+| Circular module dependencies | Architectural smell preserved | Refactor to events before decomposing |
+| Spring Boot / servlet stack only | WebFlux, Quarkus, etc. unsupported | N/A — framework is Spring Boot specific |
+| Single Maven module source | Multi-module monoliths unsupported | Flatten source before decomposing |
+| JPA/Spring Data assumed | MyBatis/jOOQ data layer not isolated | Configure data access manually |
+| Complex SpEL `@PreAuthorize` skipped | Gateway doesn't carry those rules | Add route rules to gateway security config manually |
+| Saga client stubs incomplete | gRPC method signatures need filling | Complete stub interfaces manually |
+| Flyway scaffold only | No auto-extracted schema DDL | Write V1__init.sql from monolith schema |
+| No auth service generated | No login/JWT issuance | Provide external IdP or write auth service |
+| 30s internal token TTL | Deep call chains may 401 | Tune TTL in generated `JwtBearerFilter`; add retry |
+| Full re-run required | Manual edits overwritten | Commit before re-running; use diff to re-apply |
+
+---
+
+## 25. License
 
 Licensed under the [Apache License 2.0](LICENSE).
