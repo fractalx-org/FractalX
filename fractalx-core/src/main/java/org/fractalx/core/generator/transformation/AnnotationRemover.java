@@ -29,7 +29,8 @@ public class AnnotationRemover {
     private static final List<String> FRACTALX_ANNOTATIONS = List.of(
             "DecomposableModule",
             "ServiceBoundary",
-            "DistributedSaga"
+            "DistributedSaga",
+            "AdminEnabled"
     );
 
     private static final List<String> FRACTALX_IMPORT_PREFIXES = List.of(

@@ -13,8 +13,11 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -189,13 +192,28 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
      * Copies model class files (non-JDK, non-Spring, non-FractalX) referenced in
      * {@code requiredImports} from the monolith source root into the consuming
      * service's {@code src/main/java}, preserving the original package structure.
+     *
+     * <p>Performs a <em>transitive closure</em> copy: after copying each class, the method
+     * also enqueues:
+     * <ul>
+     *   <li>Classes referenced via explicit imports in the copied file.</li>
+     *   <li>Value-type "sibling" files in the same package directory (e.g. {@code @Embeddable}
+     *       classes such as {@code CustomerAddress} that are used as fields inside an entity but
+     *       never appear in import statements because they are in the same package).</li>
+     * </ul>
+     * Infrastructure-naming suffixes (Service, Repository, Controller, Module, Config,
+     * Configuration) are excluded from the transitive expansion to avoid pulling in
+     * entire module implementations.
      */
     private void copyRequiredModelClasses(Set<String> requiredImports, Path sourceRoot,
                                           Path destSrcMain) {
-        for (String fqn : requiredImports) {
+        Deque<String> queue   = new ArrayDeque<>(requiredImports);
+        Set<String>   visited = new HashSet<>(requiredImports);
+
+        while (!queue.isEmpty()) {
+            String fqn = queue.poll();
+
             // Skip JDK, Jakarta EE, Spring, and FractalX framework packages.
-            // The Files.exists() check below is the real gate — framework classes
-            // won't be present in the monolith's src/main/java and are silently skipped.
             if (fqn.startsWith("java.")
                     || fqn.startsWith("javax.")
                     || fqn.startsWith("jakarta.")
@@ -203,7 +221,11 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
                     || fqn.startsWith("org.fractalx.")) {
                 continue;
             }
-            // Derive relative path, e.g. com.fractalx.testapp.inventory.Product → .../Product.java
+            // Skip infrastructure class names (service, repo, controller, etc.)
+            String simpleName = fqn.substring(fqn.lastIndexOf('.') + 1);
+            if (isInfrastructureClass(simpleName)) continue;
+
+            // Derive relative path, e.g. com.acme.customer.Customer → .../Customer.java
             String relativePath = fqn.replace('.', '/') + ".java";
             Path src = sourceRoot.resolve(relativePath);
             if (!Files.exists(src)) continue;
@@ -215,10 +237,58 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
                     Files.copy(src, dest);
                     log.info("Copied model class {} → {}", fqn, dest);
                 }
+
+                // ── Transitive expansion ───────────────────────────────────────
+                String packagePrefix = fqn.contains(".")
+                        ? fqn.substring(0, fqn.lastIndexOf('.') + 1) : "";
+
+                // 1. Explicit imports in the copied file
+                new JavaParser().parse(src).getResult().ifPresent(cu ->
+                    cu.getImports().forEach(imp -> {
+                        if (!imp.isAsterisk() && !imp.isStatic()) {
+                            String depFqn = imp.getNameAsString();
+                            if (visited.add(depFqn)) queue.add(depFqn);
+                        }
+                    })
+                );
+
+                // 2. Same-package siblings — catches @Embeddable, enums, and inner value types
+                //    that are used as field types without explicit imports.
+                Path srcDir = src.getParent();
+                if (Files.isDirectory(srcDir)) {
+                    try (var siblings = Files.list(srcDir)) {
+                        siblings.filter(f -> f.toString().endsWith(".java"))
+                                .forEach(sibling -> {
+                                    String sibName = sibling.getFileName().toString()
+                                            .replace(".java", "");
+                                    if (!isInfrastructureClass(sibName)) {
+                                        String sibFqn = packagePrefix + sibName;
+                                        if (visited.add(sibFqn)) queue.add(sibFqn);
+                                    }
+                                });
+                    } catch (IOException e) {
+                        log.debug("Could not list siblings of {}: {}", srcDir, e.getMessage());
+                    }
+                }
+
             } catch (IOException e) {
                 log.warn("Could not copy model class {}: {}", fqn, e.getMessage());
             }
         }
+    }
+
+    /**
+     * Returns {@code true} for class names that follow infrastructure-naming conventions
+     * and should never be transitively copied into a consuming service.
+     */
+    private static boolean isInfrastructureClass(String simpleName) {
+        return simpleName.endsWith("Service")
+                || simpleName.endsWith("Repository")
+                || simpleName.endsWith("Controller")
+                || simpleName.endsWith("Module")
+                || simpleName.endsWith("Config")
+                || simpleName.endsWith("Configuration")
+                || simpleName.endsWith("Application");
     }
 
     // -------------------------------------------------------------------------

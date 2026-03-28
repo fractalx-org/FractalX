@@ -4,6 +4,7 @@ import org.fractalx.core.model.FractalModule;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.ArrayInitializerExpr;
@@ -68,7 +69,7 @@ public class ModuleAnalyzer {
                     String pkgName = cu.getPackageDeclaration()
                             .map(pd -> pd.getNameAsString()).orElse("");
                     Set<String> imports = collectImportsForPackage(pkgName, parsedFiles);
-                    FractalModule module = extractModuleDescriptor(classDecl, annotation, cu, imports);
+                    FractalModule module = extractModuleDescriptor(classDecl, annotation, cu, imports, sourceRoot);
                     modules.add(module);
                     log.info("Found decomposable module: {}  ({} imports detected)",
                             module.getServiceName(), module.getDetectedImports().size());
@@ -116,11 +117,14 @@ public class ModuleAnalyzer {
     private FractalModule extractModuleDescriptor(ClassOrInterfaceDeclaration classDecl,
                                                    AnnotationExpr annotation,
                                                    CompilationUnit cu,
-                                                   Set<String> detectedImports) {
+                                                   Set<String> detectedImports,
+                                                   Path sourceRoot) {
         FractalModule.Builder builder = FractalModule.builder();
         builder.className(classDecl.getFullyQualifiedName().orElse(classDecl.getNameAsString()));
 
-        cu.getPackageDeclaration().ifPresent(pd -> builder.packageName(pd.getNameAsString()));
+        String packageName = cu.getPackageDeclaration()
+                .map(pd -> pd.getNameAsString()).orElse("");
+        if (!packageName.isEmpty()) builder.packageName(packageName);
 
         List<String> explicitDeps = new ArrayList<>();
 
@@ -150,7 +154,7 @@ public class ModuleAnalyzer {
             dependencies = explicitDeps;
             log.info("Explicit dependencies declared for {}: {}", builder.build().getServiceName(), dependencies);
         } else {
-            dependencies = findDependencies(classDecl);
+            dependencies = findDependencies(classDecl, packageName, sourceRoot);
             if (!dependencies.isEmpty()) {
                 log.warn("Module '{}': dependencies inferred by type-suffix heuristic ({}). " +
                          "Declare them explicitly with @DecomposableModule(dependencies={{...}}) " +
@@ -182,31 +186,97 @@ public class ModuleAnalyzer {
     }
 
     /**
-     * Finds cross-module dependencies by inspecting injected fields and constructor parameters.
-     * Types ending with "Client" or "Service" are treated as potential cross-module calls.
+     * Finds cross-module dependencies by scanning <em>all</em> {@code .java} files in the
+     * module's package directory tree (not just the {@code @DecomposableModule} class).
+     *
+     * <p>Algorithm:
+     * <ol>
+     *   <li>Walk every {@code .java} file under {@code sourceRoot/<packagePath>}.</li>
+     *   <li>Collect the simple names of every class/interface declared in those files
+     *       (these are "local" types that live inside this module).</li>
+     *   <li>Collect every field type and constructor-parameter type that ends with
+     *       {@code "Service"} or {@code "Client"}.</li>
+     *   <li>Subtract local types — what remains are genuine cross-module references.</li>
+     * </ol>
+     *
+     * <p>Falls back to scanning just {@code classDecl} when the package directory cannot be
+     * resolved (e.g. running from a single-file test fixture).
      */
-    private List<String> findDependencies(ClassOrInterfaceDeclaration classDecl) {
+    private List<String> findDependencies(ClassOrInterfaceDeclaration classDecl,
+                                           String packageName, Path sourceRoot) {
         Set<String> dependencies = new HashSet<>();
+        Set<String> localTypes   = new HashSet<>();
 
+        Path packageDir = sourceRoot.resolve(packageName.replace('.', '/'));
+        if (Files.isDirectory(packageDir)) {
+            try (var stream = Files.walk(packageDir)) {
+                stream.filter(p -> p.toString().endsWith(".java"))
+                      .forEach(javaFile -> {
+                          try {
+                              CompilationUnit cu = new JavaParser().parse(javaFile)
+                                      .getResult().orElse(null);
+                              if (cu == null) return;
+
+                              // Track all locally-defined type names (classes + interfaces)
+                              cu.findAll(ClassOrInterfaceDeclaration.class)
+                                .forEach(c -> localTypes.add(c.getNameAsString()));
+
+                              // Collect *Service / *Client field types
+                              cu.findAll(FieldDeclaration.class).forEach(field -> {
+                                  String t = field.getCommonType().asString();
+                                  if (t.endsWith("Service") || t.endsWith("Client")) {
+                                      dependencies.add(t);
+                                      log.debug("Found candidate dependency: {} in {}", t, javaFile.getFileName());
+                                  }
+                              });
+
+                              // Collect *Service / *Client constructor-parameter types
+                              cu.findAll(ConstructorDeclaration.class).forEach(ctor ->
+                                  ctor.getParameters().forEach(param -> {
+                                      String t = param.getTypeAsString();
+                                      if (t.endsWith("Service") || t.endsWith("Client")) {
+                                          dependencies.add(t);
+                                          log.debug("Found candidate dependency: {} in {} constructor", t, javaFile.getFileName());
+                                      }
+                                  }));
+                          } catch (IOException e) {
+                              log.warn("Could not parse {} during dependency scan", javaFile, e);
+                          }
+                      });
+            } catch (IOException e) {
+                log.warn("Could not walk package directory {} — falling back to single-class scan", packageDir, e);
+                fallbackScan(classDecl, dependencies);
+            }
+        } else {
+            // Package directory not found on disk (test fixture / non-standard layout) — fall back
+            log.debug("Package directory not found: {} — using single-class fallback scan", packageDir);
+            fallbackScan(classDecl, dependencies);
+        }
+
+        // Remove types that are defined within this module — they are not cross-module
+        dependencies.removeAll(localTypes);
+        log.debug("Local types in package '{}': {}", packageName, localTypes);
+        return new ArrayList<>(dependencies);
+    }
+
+    /** Original single-class scan used as a fallback when the package directory is unavailable. */
+    private void fallbackScan(ClassOrInterfaceDeclaration classDecl, Set<String> dependencies) {
         classDecl.findAll(FieldDeclaration.class).forEach(field -> {
-            String fieldType = field.getCommonType().asString();
-            if (fieldType.endsWith("Client") || fieldType.endsWith("Service")) {
-                dependencies.add(fieldType);
-                log.debug("Found dependency: {} in field declaration", fieldType);
+            String t = field.getCommonType().asString();
+            if (t.endsWith("Service") || t.endsWith("Client")) {
+                dependencies.add(t);
+                log.debug("Fallback: found dependency {} in field declaration", t);
             }
         });
-
-        classDecl.getConstructors().forEach(constructor ->
-                constructor.getParameters().forEach(param -> {
-                    String paramType = param.getType().asString();
-                    if (paramType.endsWith("Client") || paramType.endsWith("Service")) {
-                        dependencies.add(paramType);
-                        log.debug("Found dependency: {} in constructor parameter", paramType);
-                    }
-                })
+        classDecl.getConstructors().forEach(ctor ->
+            ctor.getParameters().forEach(param -> {
+                String t = param.getType().asString();
+                if (t.endsWith("Service") || t.endsWith("Client")) {
+                    dependencies.add(t);
+                    log.debug("Fallback: found dependency {} in constructor parameter", t);
+                }
+            })
         );
-
-        return new ArrayList<>(dependencies);
     }
 
     /**

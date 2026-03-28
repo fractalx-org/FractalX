@@ -101,7 +101,7 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
                                 log.warn("Registry lookup for {} failed (attempt {}/5): {}",
                                         serviceName, attempt, e.getMessage());
                             }
-                            try { Thread.sleep(2000L * attempt); }
+                            try { Thread.sleep(300L * attempt); }
                             catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
                         }
                         log.warn("Could not resolve {} from registry — using static YAML fallback", serviceName);

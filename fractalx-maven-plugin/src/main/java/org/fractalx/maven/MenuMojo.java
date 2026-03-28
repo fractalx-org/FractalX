@@ -46,12 +46,13 @@ public class MenuMojo extends FractalxBaseMojo {
     // ── Menu options (Exit rendered separately as the last item) ──────────────
 
     private static final String[] NAMES = {
-        "decompose", "verify", "start", "stop", "restart", "ps", "services"
+        "decompose", "verify", "smoke-test", "start", "stop", "restart", "ps", "services"
     };
 
     private static final String[] DESCS = {
         "Decompose monolith into microservices",
         "Verify decomposition output",
+        "Build + start + health-check all services",
         "Start generated services",
         "Stop running services",
         "Restart services",
@@ -511,13 +512,14 @@ public class MenuMojo extends FractalxBaseMojo {
 
     private void invokeCommand(String name, String service) throws MojoExecutionException {
         FractalxBaseMojo mojo = switch (name) {
-            case "decompose" -> new DecomposeMojo();
-            case "verify"    -> new VerifyMojo();
-            case "start"     -> new StartMojo();
-            case "stop"      -> new StopMojo();
-            case "restart"   -> new RestartMojo();
-            case "ps"        -> new PsMojo();
-            case "services"  -> new ServicesMojo();
+            case "decompose"   -> new DecomposeMojo();
+            case "verify"      -> new VerifyMojo();
+            case "smoke-test"  -> new SmokeTestMojo();
+            case "start"       -> new StartMojo();
+            case "stop"        -> new StopMojo();
+            case "restart"     -> new RestartMojo();
+            case "ps"          -> new PsMojo();
+            case "services"    -> new ServicesMojo();
             default -> throw new MojoExecutionException("Unknown command: " + name);
         };
 

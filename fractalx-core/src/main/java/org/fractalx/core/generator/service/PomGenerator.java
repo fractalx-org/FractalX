@@ -417,9 +417,10 @@ public class PomGenerator implements ServiceFileGenerator {
      */
     private void addFractalxDeps(Document doc) {
         Element depsEl = ensureDependenciesElement(doc);
-        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-web",      null,                    null);
-        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-actuator",  null,                    null);
-        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-aop",       null,                    null);
+        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-web",        null,                    null);
+        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-validation", null,                    null);
+        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-actuator",   null,                    null);
+        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-aop",        null,                    null);
         addDepIfAbsent(doc, depsEl, "org.springframework.cloud", "spring-cloud-context",          null,                    null);
         addDepIfAbsent(doc, depsEl, "org.fractalx",              "netscope-server",               NETSCOPE_VERSION,        null);
         addDepIfAbsent(doc, depsEl, "org.fractalx",              "netscope-client",               NETSCOPE_VERSION,        null);
