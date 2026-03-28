@@ -4,6 +4,7 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.MethodCallExpr;
+import org.fractalx.core.datamanagement.RepositoryAnalyzer;
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.FractalModule;
@@ -75,6 +76,7 @@ public class DecompositionHintsStep implements ServiceFileGenerator {
         findings.put("aspect_scope",                new ArrayList<>());
         findings.put("scheduled_cross_service",     new ArrayList<>());
         findings.put("security_patterns",           new ArrayList<>());
+        findings.put("jpa_patterns",                new ArrayList<>());
 
         try (Stream<Path> paths = Files.walk(context.getSrcMainJava())) {
             paths.filter(p -> p.toString().endsWith(".java")).forEach(javaFile -> {
@@ -84,6 +86,21 @@ public class DecompositionHintsStep implements ServiceFileGenerator {
                     log.debug("DecompositionHintsStep: could not analyse {}", javaFile);
                 }
             });
+        }
+
+        // Gap 9f — cross-boundary repository violations (RepositoryAnalyzer)
+        try {
+            RepositoryAnalyzer repoAnalyzer = new RepositoryAnalyzer();
+            RepositoryAnalyzer.RepositoryReport report = repoAnalyzer.analyze(
+                    context.getSrcMainJava(), context.getAllModules());
+            for (RepositoryAnalyzer.Violation v : report.violations) {
+                findings.get("jpa_patterns").add(
+                        "Cross-boundary repository usage: `" + v.repositoryName
+                        + "` (owned by module `" + v.ownerModule + "`) injected in `"
+                        + v.usedInClass + "` — replace with a NetScope client call instead.");
+            }
+        } catch (Exception e) {
+            log.debug("DecompositionHintsStep: RepositoryAnalyzer scan skipped: {}", e.getMessage());
         }
 
         boolean hasFindings = findings.values().stream().anyMatch(l -> !l.isEmpty());
@@ -288,6 +305,84 @@ public class DecompositionHintsStep implements ServiceFileGenerator {
                         "they trust the `X-Internal-Token` minted by the gateway instead.");
             }
         }
+
+        // ── Gap 9a: @Embedded / @Embeddable ───────────────────────────────────
+        cu.findAll(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class).forEach(cls -> {
+            if (cls.getAnnotationByName("Embeddable").isPresent()) {
+                findings.get("jpa_patterns").add(
+                        "`" + shortName + "`: `" + cls.getNameAsString() + "` is `@Embeddable` — " +
+                        "FractalX inlines its fields into the parent entity's table with a " +
+                        "`fieldName_` prefix. Verify the generated DDL in `V1__init.sql` and " +
+                        "use `@AttributeOverride` if you need different column names.");
+            }
+        });
+        cu.findAll(com.github.javaparser.ast.body.FieldDeclaration.class).forEach(field -> {
+            if (field.getAnnotationByName("Embedded").isPresent()) {
+                String typeName = field.getElementType().asString();
+                findings.get("jpa_patterns").add(
+                        "`" + shortName + "` has `@Embedded " + typeName + "` field — columns " +
+                        "are inlined into the parent table DDL. If the `@Embeddable` source was " +
+                        "not found during generation, a placeholder column is emitted and must be " +
+                        "expanded manually in `V1__init.sql`.");
+            }
+        });
+
+        // ── Gap 9b: @MappedSuperclass ─────────────────────────────────────────
+        cu.findAll(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class).forEach(cls -> {
+            if (cls.getAnnotationByName("MappedSuperclass").isPresent()) {
+                findings.get("jpa_patterns").add(
+                        "`" + shortName + "`: `" + cls.getNameAsString() + "` is `@MappedSuperclass` — " +
+                        "FractalX attempts to resolve inherited fields and include them in the " +
+                        "child entity's DDL. Verify the generated `V1__init.sql` includes all " +
+                        "superclass columns (e.g., `created_at`, `updated_at`).");
+            }
+        });
+
+        // ── Gap 9c: @Query annotations (may reference removed remote entity types) ──
+        cu.findAll(com.github.javaparser.ast.body.MethodDeclaration.class).forEach(method -> {
+            method.getAnnotationByName("Query").ifPresent(ann -> {
+                String queryStr = ann.toString();
+                // Heuristic: look for FROM / JOIN patterns referencing entity names
+                if (queryStr.contains(" FROM ") || queryStr.contains(" from ")
+                        || queryStr.contains(" JOIN ") || queryStr.contains(" join ")) {
+                    findings.get("jpa_patterns").add(
+                            "`" + shortName + "` → `" + method.getNameAsString() + "()` has a " +
+                            "`@Query` with JPQL/SQL. If it references entity types or tables from " +
+                            "other services, rewrite it using the decoupled String ID field " +
+                            "(e.g., `WHERE o.customerId = :customerId` instead of " +
+                            "`WHERE o.customer.id = :customerId`).");
+                }
+            });
+        });
+
+        // ── Gap 9d: TODO comments from RelationshipDecoupler @OneToMany removal ─
+        try {
+            String fileContent = Files.readString(javaFile);
+            if (fileContent.contains("TODO [FractalX Gap 9d]")) {
+                long removedCount = fileContent.lines()
+                        .filter(l -> l.contains("TODO [FractalX Gap 9d]")).count();
+                findings.get("jpa_patterns").add(
+                        "`" + shortName + "`: " + removedCount + " `@OneToMany` collection(s) " +
+                        "referencing remote entities were removed during decomposition. " +
+                        "Access this data via a NetScope client `findBy*Id()` call on the remote " +
+                        "service. See the TODO comments in the file for the specific field names.");
+            }
+        } catch (Exception ignored) {}
+
+        // ── Gap 9e: @NamedQuery / @NamedNativeQuery ────────────────────────────
+        cu.findAll(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class).forEach(cls -> {
+            boolean hasNamed = cls.getAnnotationByName("NamedQuery").isPresent()
+                    || cls.getAnnotationByName("NamedQueries").isPresent()
+                    || cls.getAnnotationByName("NamedNativeQuery").isPresent()
+                    || cls.getAnnotationByName("NamedNativeQueries").isPresent();
+            if (hasNamed) {
+                findings.get("jpa_patterns").add(
+                        "`" + shortName + "` has `@NamedQuery` / `@NamedNativeQuery` annotations — " +
+                        "these are **not rewritten** by FractalX and may reference entity types or " +
+                        "tables that no longer exist in this service's schema. Verify and update " +
+                        "each named query in `V1__init.sql` and the entity class.");
+            }
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -370,6 +465,51 @@ public class DecompositionHintsStep implements ServiceFileGenerator {
                   runtime, not cached locally.
                 - If the job orchestrates multiple services, consider moving it to the
                   saga-orchestrator service or using a dedicated scheduler service.
+                """);
+
+        appendSection(md, findings.get("jpa_patterns"),
+                "## Gap 9 — JPA entity relationship and data layer patterns",
+                """
+                JPA annotations that worked in the monolith may need manual review after decomposition.
+                FractalX automates the most common transformations but several patterns require
+                developer attention.
+
+                **@Embedded / @Embeddable (Gap 9a):**
+                FractalX inlines `@Embeddable` fields into the parent entity's table using a
+                `fieldName_columnName` column naming convention. If the `@Embeddable` class was
+                not found in the scanned sources (e.g., it's in a shared library), a placeholder
+                column is emitted. Use `@AttributeOverride` to customise column names.
+
+                **@MappedSuperclass (Gap 9b):**
+                FractalX detects `@MappedSuperclass` hierarchies and prepends the superclass
+                columns to child entity DDL. Verify the generated `V1__init.sql` includes all
+                inherited columns (typically `created_at`, `updated_at`, `created_by`).
+
+                **@Query annotations (Gap 9c):**
+                JPQL `@Query` annotations containing `FROM` / `JOIN` clauses are **not rewritten**.
+                If they reference entity types from other modules (now in separate services), update
+                the query to use the decoupled String ID field instead of the entity object.
+
+                **@OneToMany → removed (Gap 9d):**
+                Cross-service `@OneToMany` collection fields are removed by FractalX because the
+                target entity lives in a different service's database. TODO comments in the entity
+                file explain how to replace the collection with a NetScope client call.
+
+                **@NamedQuery / @NamedNativeQuery (Gap 9e):**
+                Named queries are **not rewritten** and may reference cross-service entity types.
+                Review each one and update the JPQL/SQL to match the decomposed schema.
+
+                **Cross-boundary repository injection (Gap 9f):**
+                Injecting a `*Repository` from another module's entity directly into a service
+                violates the data ownership boundary. Replace direct repository calls with
+                NetScope client interfaces generated by FractalX.
+
+                **Fix options summary:**
+                - Review `V1__init.sql` — it is a scaffold, not a production migration.
+                - Update `@Query` JPQL to use `*Id` fields instead of entity object navigation.
+                - Replace removed `@OneToMany` collection access with NetScope client calls.
+                - Remove named queries referencing cross-service entities.
+                - Replace cross-boundary `@Repository` injections with `*ExistsClient` / NetScope.
                 """);
 
         appendSection(md, findings.get("security_patterns"),

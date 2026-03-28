@@ -251,19 +251,22 @@ public class ReferenceValidatorGenerator {
             sb.append("    }\n\n");
         }
 
-        // Collection validate methods — names via ValidationNaming (shared with RelationshipDecoupler)
+        // Collection validate methods — use existsAll() batch call to avoid N+1 gRPC calls
         for (String type : collectionTypes) {
-            String param = lc(type) + "Ids";
+            String param       = lc(type) + "Ids";
+            String clientField = lc(type) + "ExistsClient";
             sb.append("    /**\n");
             sb.append("     * Verifies that every ").append(type).append(" ID in the list exists in the remote service.\n");
-            sb.append("     * Delegates to {@link #").append(ValidationNaming.singleValidateMethod(type)).append("}.\n");
+            sb.append("     * Uses a single batch {@code existsAll()} call to avoid N+1 gRPC requests.\n");
             sb.append("     * @throws IllegalArgumentException if any ID cannot be resolved\n");
             sb.append("     */\n");
             sb.append("    public void ").append(ValidationNaming.collectionValidateMethod(type))
               .append("(List<String> ").append(param).append(") {\n");
-            sb.append("        if (").append(param).append(" == null) return;\n");
-            sb.append("        for (String id : ").append(param).append(") {\n");
-            sb.append("            ").append(ValidationNaming.singleValidateMethod(type)).append("(id);\n");
+            sb.append("        if (").append(param).append(" == null || ").append(param).append(".isEmpty()) return;\n");
+            sb.append("        List<String> missing = ").append(clientField).append(".existsAll(").append(param).append(");\n");
+            sb.append("        if (!missing.isEmpty()) {\n");
+            sb.append("            throw new IllegalArgumentException(\"").append(type)
+              .append(" IDs not found: \" + missing);\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
         }
@@ -285,19 +288,27 @@ public class ReferenceValidatorGenerator {
                 package %s;
 
                 import org.fractalx.netscope.client.annotation.NetScopeClient;
+                import java.util.List;
 
                 /**
                  * NetScope existence-check client for %s.
                  * Used by ReferenceValidator to enforce cross-service referential integrity.
                  *
-                 * IMPORTANT: The remote service (%s) must expose an {@code exists(String id)}
-                 * method annotated with {@code @NetworkPublic} on its %s bean.
-                 * Add this to the remote service if not already present:
+                 * IMPORTANT: The remote service (%s) must expose the following methods
+                 * annotated with {@code @NetworkPublic} on its %s bean:
                  *
                  * <pre>
                  * {@code @NetworkPublic}
                  * public boolean exists(String id) {
                  *     return repository.existsById(id);
+                 * }
+                 *
+                 * {@code @NetworkPublic}
+                 * public List<String> existsAll(List<String> ids) {
+                 *     // Return the subset of IDs that do NOT exist
+                 *     return ids.stream()
+                 *         .filter(id -> !repository.existsById(id))
+                 *         .collect(java.util.stream.Collectors.toList());
                  * }
                  * </pre>
                  *
@@ -310,6 +321,13 @@ public class ReferenceValidatorGenerator {
                      * Returns true if an entity with this ID exists in %s.
                      */
                     boolean exists(String id);
+
+                    /**
+                     * Batch existence check — returns the subset of the given IDs that do NOT
+                     * exist in %s. An empty list means all IDs are valid.
+                     * Used by ReferenceValidator to avoid N+1 gRPC calls for collection fields.
+                     */
+                    List<String> existsAll(List<String> ids);
                 }
                 """.formatted(
                 pkg,
@@ -318,6 +336,7 @@ public class ReferenceValidatorGenerator {
                 module.getServiceName(),
                 targetService, remoteType,
                 clientName,
+                remoteType,
                 remoteType
         );
     }

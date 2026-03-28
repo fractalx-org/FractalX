@@ -187,10 +187,11 @@ class RelationshipDecouplerSpec extends Specification {
         when:
         decoupler.transform(serviceRoot, module, "org.fractalx.test.order")
 
-        then: "the @OneToMany List<Product> field is removed"
+        then: "the @OneToMany List<Product> field declaration is removed (guidance comment may reference type)"
         def result = read("OrderItem.java")
-        !result.contains("List<Product>")
-        !result.contains("@OneToMany")
+        !result.contains("private List<Product>")  // field declaration removed
+        !result.contains("@OneToMany")              // annotation removed
+        result.contains("TODO [FractalX Gap 9d]")  // guidance comment injected
     }
 
     def "local entity relationships are NOT modified"() {

@@ -671,9 +671,22 @@ public class RelationshipDecoupler {
         for (VariableDeclarator var : field.getVariables()) {
             Optional<String> generic = extractGenericTypeName(var.getType());
             if (generic.isPresent() && remoteEntities.contains(generic.get())) {
+                String remoteType   = generic.get();
+                String fieldName    = var.getNameAsString();
+                String clientMethod = "findBy" + Character.toUpperCase(entityClass.getNameAsString().charAt(0))
+                        + entityClass.getNameAsString().substring(1) + "Id";
                 field.remove();
-                entityClass.addOrphanComment(
-                        new LineComment(" Removed remote relationship list: " + generic.get()));
+                // Inject multi-line guidance comment so developers know how to access this data
+                entityClass.addOrphanComment(new LineComment(
+                        " TODO [FractalX Gap 9d]: '" + fieldName + "' (OneToMany → " + remoteType + ") removed — cross-service relationship decoupled."));
+                entityClass.addOrphanComment(new LineComment(
+                        "   To retrieve these records, call the remote service via a NetScope client:"));
+                entityClass.addOrphanComment(new LineComment(
+                        "   " + remoteType + "Client." + clientMethod + "(this.id) — the remote service must expose"));
+                entityClass.addOrphanComment(new LineComment(
+                        "   @NetworkPublic List<" + remoteType + "> " + clientMethod + "(String parentId)"));
+                entityClass.addOrphanComment(new LineComment(
+                        "   See DECOMPOSITION_HINTS.md Gap 9d for details."));
                 modified = true;
             }
         }
