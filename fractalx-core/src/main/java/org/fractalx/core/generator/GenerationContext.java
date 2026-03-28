@@ -1,6 +1,7 @@
 package org.fractalx.core.generator;
 
 import org.fractalx.core.config.FractalxConfig;
+import org.fractalx.core.gateway.SecurityProfile;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.SagaDefinition;
 
@@ -19,19 +20,33 @@ public final class GenerationContext {
     private final List<FractalModule> allModules;
     private final FractalxConfig fractalxConfig;
     private final List<SagaDefinition> sagaDefinitions;
+    private final SecurityProfile securityProfile;  // nullable — null means no security detected
 
+    /** Full constructor. */
     public GenerationContext(FractalModule module,
                              Path sourceRoot,
                              Path serviceRoot,
                              List<FractalModule> allModules,
                              FractalxConfig fractalxConfig,
-                             List<SagaDefinition> sagaDefinitions) {
+                             List<SagaDefinition> sagaDefinitions,
+                             SecurityProfile securityProfile) {
         this.module = module;
         this.sourceRoot = sourceRoot;
         this.serviceRoot = serviceRoot;
         this.allModules = List.copyOf(allModules);
         this.fractalxConfig = fractalxConfig;
         this.sagaDefinitions = List.copyOf(sagaDefinitions);
+        this.securityProfile = securityProfile;
+    }
+
+    /** Backward-compatible 6-arg constructor (for tests). Passes null for securityProfile. */
+    public GenerationContext(FractalModule module,
+                             Path sourceRoot,
+                             Path serviceRoot,
+                             List<FractalModule> allModules,
+                             FractalxConfig fractalxConfig,
+                             List<SagaDefinition> sagaDefinitions) {
+        this(module, sourceRoot, serviceRoot, allModules, fractalxConfig, sagaDefinitions, null);
     }
 
     public FractalModule getModule()                   { return module; }
@@ -40,6 +55,16 @@ public final class GenerationContext {
     public List<FractalModule> getAllModules()          { return allModules; }
     public FractalxConfig getFractalxConfig()          { return fractalxConfig; }
     public List<SagaDefinition> getSagaDefinitions()   { return sagaDefinitions; }
+    public SecurityProfile getSecurityProfile()        { return securityProfile; }
+
+    /**
+     * Returns {@code true} if the monolith had Spring Security enabled
+     * (i.e. a non-NONE auth type was detected by {@link org.fractalx.core.gateway.SecurityAnalyzer}).
+     */
+    public boolean isSecurityEnabled() {
+        return securityProfile != null
+                && securityProfile.authType() != SecurityProfile.AuthType.NONE;
+    }
 
     /** Resolves {@code src/main/java} under the service root. */
     public Path getSrcMainJava()      { return serviceRoot.resolve("src/main/java"); }

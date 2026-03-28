@@ -28,6 +28,10 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
     private static final Metadata.Key<String> CORRELATION_METADATA_KEY =
             Metadata.Key.of("x-correlation-id", Metadata.ASCII_STRING_MARSHALLER);
 
+    // Internal Call Token — signed JWT minted by the gateway; carries user identity securely
+    private static final Metadata.Key<String> INTERNAL_TOKEN_KEY =
+            Metadata.Key.of("x-internal-token", Metadata.ASCII_STRING_MARSHALLER);
+
     @Autowired(required = false)
     private Tracer tracer;
 
@@ -42,10 +46,24 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
         return new ForwardingClientCall.SimpleForwardingClientCall<>(next.newCall(method, callOptions)) {
             @Override
             public void start(Listener<RespT> responseListener, Metadata headers) {
+                // Propagate correlation ID
                 String correlationId = MDC.get(CORRELATION_ID_KEY);
                 if (correlationId != null) {
                     headers.put(CORRELATION_METADATA_KEY, correlationId);
                     log.debug("NetScope: injected correlationId={} into outgoing gRPC metadata", correlationId);
+                }
+                // Propagate Internal Call Token (signed JWT) for secured inter-service identity
+                try {
+                    org.springframework.security.core.Authentication auth =
+                            org.springframework.security.core.context.SecurityContextHolder
+                                    .getContext().getAuthentication();
+                    if (auth != null && auth.getCredentials() instanceof String token
+                            && !((String) auth.getCredentials()).isBlank()) {
+                        headers.put(INTERNAL_TOKEN_KEY, (String) auth.getCredentials());
+                        log.debug("NetScope: injected x-internal-token into outgoing gRPC metadata");
+                    }
+                } catch (NoClassDefFoundError ignored) {
+                    // Spring Security not on classpath — skip identity propagation
                 }
                 super.start(responseListener, headers);
             }
@@ -96,9 +114,45 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
             public void onHalfClose() {
                 MDC.put(CORRELATION_ID_KEY, cid);
                 tagCurrentSpan(cid);
+                // Reconstruct Spring Authentication from x-internal-token gRPC metadata (if present)
+                String internalToken = headers.get(INTERNAL_TOKEN_KEY);
+                if (internalToken != null && !internalToken.isBlank()) {
+                    try {
+                        String secret = resolveInternalJwtSecret();
+                        io.jsonwebtoken.Claims claims = io.jsonwebtoken.Jwts.parserBuilder()
+                                .setSigningKey(io.jsonwebtoken.security.Keys.hmacShaKeyFor(
+                                        secret.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                                .build()
+                                .parseClaimsJws(internalToken)
+                                .getBody();
+                        String userId   = claims.getSubject();
+                        String rolesStr = claims.get("roles", String.class);
+                        java.util.List<org.springframework.security.core.authority.SimpleGrantedAuthority> auths =
+                                (rolesStr == null || rolesStr.isBlank())
+                                        ? java.util.List.of()
+                                        : java.util.Arrays.stream(rolesStr.split(","))
+                                                .map(String::trim)
+                                                .filter(r -> !r.isBlank())
+                                                .map(r -> new org.springframework.security.core.authority
+                                                        .SimpleGrantedAuthority("ROLE_" + r))
+                                                .collect(java.util.stream.Collectors.toList());
+                        org.springframework.security.core.context.SecurityContextHolder
+                                .getContext()
+                                .setAuthentication(
+                                        new org.springframework.security.authentication
+                                                .UsernamePasswordAuthenticationToken(userId, internalToken, auths));
+                        log.debug("NetScope: established Authentication for user={} from x-internal-token", userId);
+                    } catch (Exception e) {
+                        log.debug("NetScope: x-internal-token validation failed — {}", e.getMessage());
+                    }
+                }
                 try {
                     super.onHalfClose();
                 } finally {
+                    // Clear security context after gRPC call to prevent thread-local leakage
+                    try {
+                        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                    } catch (NoClassDefFoundError ignored) { }
                     MDC.remove(CORRELATION_ID_KEY);
                 }
             }
@@ -115,5 +169,19 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
                 super.onCancel();
             }
         };
+    }
+
+    /**
+     * Resolves the internal JWT secret used to validate cross-service call tokens.
+     * Checks (in order): system property, env var, then a safe fallback default.
+     * In production set {@code FRACTALX_INTERNAL_JWT_SECRET} as an env var —
+     * must be identical across the gateway and all generated services.
+     */
+    private static String resolveInternalJwtSecret() {
+        String sysProp = System.getProperty("fractalx.security.internal-jwt-secret");
+        if (sysProp != null && !sysProp.isBlank()) return sysProp;
+        String envVar = System.getenv("FRACTALX_INTERNAL_JWT_SECRET");
+        if (envVar != null && !envVar.isBlank()) return envVar;
+        return "fractalx-internal-secret-change-in-prod-!!";
     }
 }

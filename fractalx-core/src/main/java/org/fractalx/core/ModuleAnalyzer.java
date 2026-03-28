@@ -221,13 +221,35 @@ public class ModuleAnalyzer {
                               cu.findAll(ClassOrInterfaceDeclaration.class)
                                 .forEach(c -> localTypes.add(c.getNameAsString()));
 
-                              // Collect *Service / *Client field types
+                              // Collect *Service / *Client field types (all injection styles)
                               cu.findAll(FieldDeclaration.class).forEach(field -> {
                                   String t = field.getCommonType().asString();
                                   if (t.endsWith("Service") || t.endsWith("Client")) {
                                       dependencies.add(t);
                                       log.debug("Found candidate dependency: {} in {}", t, javaFile.getFileName());
                                   }
+                              });
+
+                              // Lombok @RequiredArgsConstructor / @AllArgsConstructor:
+                              // the constructor is synthesized from private final fields,
+                              // so also scan those fields broadly — suffix heuristic alone
+                              // misses types like NotificationGateway or PaymentFacade.
+                              // localTypes subtraction and downstream findModule() filter
+                              // out JDK / library types automatically.
+                              cu.findAll(ClassOrInterfaceDeclaration.class).forEach(cls -> {
+                                  boolean hasLombokCtor =
+                                      cls.getAnnotationByName("RequiredArgsConstructor").isPresent()
+                                      || cls.getAnnotationByName("AllArgsConstructor").isPresent();
+                                  if (!hasLombokCtor) return;
+                                  cls.getFields().stream()
+                                      .filter(f -> f.isFinal() && !f.isStatic())
+                                      .forEach(f -> {
+                                          String t = f.getCommonType().asString();
+                                          if (!isWellKnownType(t)) {
+                                              dependencies.add(t);
+                                              log.debug("Lombok ctor field dep: {} in {}", t, javaFile.getFileName());
+                                          }
+                                      });
                               });
 
                               // Collect *Service / *Client constructor-parameter types
@@ -268,6 +290,22 @@ public class ModuleAnalyzer {
                 log.debug("Fallback: found dependency {} in field declaration", t);
             }
         });
+
+        // Lombok fallback: scan private final fields broadly when Lombok ctor annotation present
+        boolean hasLombokCtor = classDecl.getAnnotationByName("RequiredArgsConstructor").isPresent()
+                || classDecl.getAnnotationByName("AllArgsConstructor").isPresent();
+        if (hasLombokCtor) {
+            classDecl.getFields().stream()
+                .filter(f -> f.isFinal() && !f.isStatic())
+                .forEach(f -> {
+                    String t = f.getCommonType().asString();
+                    if (!isWellKnownType(t)) {
+                        dependencies.add(t);
+                        log.debug("Fallback Lombok ctor field dep: {}", t);
+                    }
+                });
+        }
+
         classDecl.getConstructors().forEach(ctor ->
             ctor.getParameters().forEach(param -> {
                 String t = param.getType().asString();
@@ -277,6 +315,31 @@ public class ModuleAnalyzer {
                 }
             })
         );
+    }
+
+    /**
+     * Returns true for well-known JDK, Spring, or primitive types that should
+     * never be treated as cross-module dependencies.
+     */
+    private static boolean isWellKnownType(String typeName) {
+        if (typeName == null || typeName.isEmpty()) return true;
+        // strip generic type params e.g. List<String> → List
+        String raw = typeName.contains("<") ? typeName.substring(0, typeName.indexOf('<')) : typeName;
+        return switch (raw) {
+            case "String", "Integer", "Long", "Double", "Float", "Boolean",
+                 "Byte", "Short", "Character", "Object", "Number",
+                 "int", "long", "double", "float", "boolean", "byte", "short", "char", "void",
+                 "List", "Map", "Set", "Collection", "Iterable", "Optional",
+                 "Stream", "Flux", "Mono",
+                 "BigDecimal", "BigInteger", "UUID",
+                 "LocalDate", "LocalDateTime", "LocalTime", "Instant", "Duration",
+                 "Path", "File", "InputStream", "OutputStream",
+                 "Logger", "ObjectMapper", "RestTemplate", "WebClient",
+                 "ApplicationEventPublisher", "Environment", "MessageSource" -> true;
+            default -> raw.startsWith("java.") || raw.startsWith("jakarta.")
+                    || raw.startsWith("org.springframework.")
+                    || raw.startsWith("io.") || raw.startsWith("com.fasterxml.");
+        };
     }
 
     /**
