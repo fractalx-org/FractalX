@@ -4,6 +4,7 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
+import com.github.javaparser.ast.body.EnumDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.MethodCallExpr;
@@ -81,7 +82,7 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
 
         // Generate a SagaCompletionController for each owned saga so the saga orchestrator
         // can call POST /internal/saga-complete/{correlationId} after all steps complete.
-        generateSagaCompletionController(srcMainJava, basePackage, ownedSagas,
+        generateSagaCompletionController(srcMainJava, context.getSourceRoot(), basePackage, ownedSagas,
                 context.getModule().getServiceName(), context.getModule().getPackageName());
     }
 
@@ -96,7 +97,8 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
      * @param modulePackage original package of the owner service's source classes
      *                      (used to derive the repository FQN)
      */
-    private void generateSagaCompletionController(Path srcMainJava, String basePackage,
+    private void generateSagaCompletionController(Path srcMainJava, Path monolithSourceRoot,
+                                                   String basePackage,
                                                    List<SagaDefinition> sagas,
                                                    String serviceName,
                                                    String modulePackage) throws IOException {
@@ -132,6 +134,95 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
         for (String part : pkg.split("\\.")) pkgPath = pkgPath.resolve(part);
         Files.createDirectories(pkgPath);
 
+        // Detect the type of the entity's 'status' field so we can emit the right syntax.
+        // If it's a String  → use literal "CONFIRMED" / "CANCELLED".
+        // If it's an enum   → use OrderStatus.CONFIRMED / OrderStatus.CANCELLED.
+        // We check the generated service copy first; fall back to the monolith source root.
+        String confirmedValue = "\"CONFIRMED\"";
+        String cancelledValue = "\"CANCELLED\"";
+        String statusImport   = "";
+        String entityRelPath  = modulePackage.replace('.', '/') + "/" + aggregateName + ".java";
+
+        // Candidate locations: generated service first, then monolith (source of truth)
+        List<Path> entityCandidates = new ArrayList<>();
+        entityCandidates.add(srcMainJava.resolve(entityRelPath));
+        if (monolithSourceRoot != null) {
+            entityCandidates.add(monolithSourceRoot.resolve(entityRelPath));
+        }
+
+        outer:
+        for (Path entityFile : entityCandidates) {
+            if (!Files.exists(entityFile)) continue;
+            try {
+                CompilationUnit entityCu = new JavaParser().parse(entityFile).getResult().orElse(null);
+                if (entityCu == null) continue;
+                for (ClassOrInterfaceDeclaration cls : entityCu.findAll(ClassOrInterfaceDeclaration.class)) {
+                    if (!cls.getNameAsString().equals(aggregateName)) continue;
+                    for (FieldDeclaration field : cls.getFields()) {
+                        boolean isStatus = field.getVariables().stream()
+                                .anyMatch(v -> "status".equals(v.getNameAsString()));
+                        if (!isStatus) continue;
+                        String statusTypeName = field.getCommonType().asString();
+                        if (!"String".equals(statusTypeName) && !statusTypeName.startsWith("java.lang.")) {
+                            // Resolve FQN: check explicit imports first, fall back to same package
+                            String statusFqn = modulePackage + "." + statusTypeName;
+                            for (var imp : entityCu.getImports()) {
+                                if (imp.getNameAsString().endsWith("." + statusTypeName)) {
+                                    statusFqn = imp.getNameAsString();
+                                    break;
+                                }
+                            }
+                            // Resolve the enum constants to use for CONFIRMED and CANCELLED.
+                            // Priority: exact match → best-fit alternatives → first/last constant.
+                            String enumRelPath2 = statusFqn.replace('.', '/') + ".java";
+                            Set<String> enumConstants = new HashSet<>();
+                            for (Path enumFile : entityCandidates) {
+                                Path enumCandidate = enumFile.getParent()
+                                        .resolve(statusTypeName + ".java");
+                                if (enumCandidate == null || !Files.exists(enumCandidate)) {
+                                    enumCandidate = monolithSourceRoot != null
+                                            ? monolithSourceRoot.resolve(enumRelPath2) : null;
+                                }
+                                if (enumCandidate == null || !Files.exists(enumCandidate)) continue;
+                                try {
+                                    CompilationUnit enumCu = new JavaParser()
+                                            .parse(enumCandidate).getResult().orElse(null);
+                                    if (enumCu == null) continue;
+                                    for (EnumDeclaration ed : enumCu.findAll(EnumDeclaration.class)) {
+                                        if (!ed.getNameAsString().equals(statusTypeName)) continue;
+                                        ed.getEntries().forEach(e -> enumConstants.add(e.getNameAsString()));
+                                        break;
+                                    }
+                                } catch (Exception ignored) {}
+                                break;
+                            }
+                            // Pick best-fit "success" constant: CONFIRMED → COMPLETED → DONE → ACTIVE → first
+                            String resolvedConfirmed = pickConstant(enumConstants,
+                                    "CONFIRMED", "COMPLETED", "DONE", "ACTIVE", "APPROVED", "FINISHED");
+                            // Pick best-fit "failure" constant: CANCELLED → FAILED → REJECTED → REVERTED → last
+                            String resolvedCancelled = pickConstant(enumConstants,
+                                    "CANCELLED", "FAILED", "REJECTED", "REFUNDED", "REVERTED", "ERROR");
+                            if (resolvedConfirmed != null && resolvedCancelled != null) {
+                                confirmedValue = statusTypeName + "." + resolvedConfirmed;
+                                cancelledValue = statusTypeName + "." + resolvedCancelled;
+                                statusImport   = "import " + statusFqn + ";\n";
+                                log.debug("SagaMethodTransformer: mapped enum '{}': confirmed={}, cancelled={} for {}",
+                                        statusTypeName, resolvedConfirmed, resolvedCancelled, aggregateName);
+                            } else {
+                                // Empty enum or unresolvable — leave String literals (developer must fix)
+                                log.warn("SagaMethodTransformer: could not resolve status enum constants for {} — leaving String literals",
+                                        aggregateName);
+                            }
+                        }
+                        break outer;
+                    }
+                    break;
+                }
+            } catch (Exception e) {
+                log.debug("Status-type detection failed for {} in {}: {}", aggregateName, entityFile, e.getMessage());
+            }
+        }
+
         // Build the CONFIRMED update block
         String confirmBlock;
         String cancelBlock;
@@ -141,7 +232,7 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
                 + "            if (idRaw != null) {\n"
                 + "                Long id = ((Number) idRaw).longValue();\n"
                 + "                " + repoField + ".findById(id).ifPresentOrElse(entity -> {\n"
-                + "                    entity.setStatus(\"CONFIRMED\");\n"
+                + "                    entity.setStatus(" + confirmedValue + ");\n"
                 + "                    " + repoField + ".save(entity);\n"
                 + "                    log.info(\"" + aggregateName + " {} marked CONFIRMED (saga correlationId={})\", id, cid);\n"
                 + "                }, () -> log.warn(\"onSagaComplete: " + aggregateName.toLowerCase() + " {} not found\", id));\n"
@@ -151,7 +242,7 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
                 + "            if (idRaw != null) {\n"
                 + "                Long id = ((Number) idRaw).longValue();\n"
                 + "                " + repoField + ".findById(id).ifPresentOrElse(entity -> {\n"
-                + "                    entity.setStatus(\"CANCELLED\");\n"
+                + "                    entity.setStatus(" + cancelledValue + ");\n"
                 + "                    " + repoField + ".save(entity);\n"
                 + "                    log.warn(\"" + aggregateName + " {} marked CANCELLED — saga failed: {} (correlationId={})\", id, errorMessage, cid);\n"
                 + "                }, () -> log.warn(\"onSagaFailed: " + aggregateName.toLowerCase() + " {} not found\", id));\n"
@@ -173,6 +264,7 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
 
         String content = "package " + pkg + ";\n\n"
                 + repoImport
+                + statusImport
                 + "import com.fasterxml.jackson.core.type.TypeReference;\n"
                 + "import com.fasterxml.jackson.databind.ObjectMapper;\n"
                 + "import org.slf4j.Logger;\n"
@@ -252,10 +344,10 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
                 + "}\n";
 
         Path file = pkgPath.resolve("SagaCompletionController.java");
-        if (!Files.exists(file)) {
-            Files.writeString(file, content);
-            log.info("SagaMethodTransformer: generated SagaCompletionController for {}", serviceName);
-        }
+        // Always (re)write the controller — it is fully generated and must stay in sync
+        // with the detected status enum type on every decompose run.
+        Files.writeString(file, content);
+        log.info("SagaMethodTransformer: generated SagaCompletionController for {}", serviceName);
     }
 
     // -------------------------------------------------------------------------
@@ -365,6 +457,21 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
         // and fix return-statement references to removed cross-service variables.
         stripOrphanStatementsAfterPublish(body, publishStmts.size(), removedVarNames,
                 method.getTypeAsString());
+
+        // Ensure non-void saga methods always have a return statement.
+        // After removing cross-service calls, the original return may have been stripped;
+        // a bare "return null" keeps the method compilable (the return value is ignored
+        // by callers that trigger the saga via the outbox).
+        String returnType = method.getTypeAsString();
+        if (!"void".equals(returnType)) {
+            boolean hasReturn = body.getStatements().stream().anyMatch(Statement::isReturnStmt);
+            if (!hasReturn) {
+                body.addStatement(new com.github.javaparser.ast.stmt.ReturnStmt(
+                        new com.github.javaparser.ast.expr.NullLiteralExpr()));
+                log.debug("SagaMethodTransformer: added 'return null' to non-void saga method {}.{}",
+                        saga.getOwnerClassName(), saga.getMethodName());
+            }
+        }
 
         // Add OutboxPublisher field + constructor injection (idempotent)
         if (!hasField(cls, "outboxPublisher")) {
@@ -644,6 +751,13 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
                                 ret.setExpression(new NameExpr(substitute));
                                 log.debug("SagaMethodTransformer: replaced 'return {}' with 'return {}'",
                                         retExpr, substitute);
+                            } else {
+                                // No suitable local variable — fall back to null to keep the code compilable.
+                                // The saga method is now delegated to the orchestrator; the return value
+                                // is not used by callers that trigger the saga via the outbox.
+                                ret.setExpression(new com.github.javaparser.ast.expr.NullLiteralExpr());
+                                log.debug("SagaMethodTransformer: replaced dangling 'return {}' with 'return null'",
+                                        retExpr);
                             }
                         }
                     });
@@ -685,6 +799,17 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
             }
         }
         return result;
+    }
+
+    /**
+     * Returns the first constant from {@code candidates} that exists in {@code available},
+     * or {@code null} if none match.
+     */
+    private static String pickConstant(Set<String> available, String... candidates) {
+        for (String candidate : candidates) {
+            if (available.contains(candidate)) return candidate;
+        }
+        return null;
     }
 
     /**

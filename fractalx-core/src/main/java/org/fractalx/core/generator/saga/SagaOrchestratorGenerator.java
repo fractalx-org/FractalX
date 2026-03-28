@@ -954,18 +954,76 @@ public class SagaOrchestratorGenerator {
                     .map(p -> "p." + p.getName() + "()")
                     .collect(java.util.stream.Collectors.joining(", "));
         }
-        // Map each captured arg expression: if it's a known param name, use p.name(), else emit as-is
-        return callArgs.stream()
-                .map(arg -> paramTypeMap.containsKey(arg) ? "p." + arg + "()" : arg)
-                .collect(java.util.stream.Collectors.joining(", "));
+        // Map each captured arg expression to a payload accessor or a resolved form:
+        //   "orderId"          → p.orderId()           (direct saga param)
+        //   "order.getId()"    → p.orderId()           (entity.getId() → entityId param)
+        //   "order.getCustomer().getId()" → p.customerId() (chained — best effort)
+        //   anything else      → kept as-is (caller must handle)
+        List<String> resolvedArgs = new ArrayList<>();
+        for (String arg : callArgs) {
+            if (paramTypeMap.containsKey(arg)) {
+                resolvedArgs.add("p." + arg + "()");
+            } else if (arg.endsWith(".getId()")) {
+                // Strip ".getId()" to get the variable name, e.g. "order" from "order.getId()"
+                String varPart = arg.substring(0, arg.length() - ".getId()".length());
+                // Handle nested chain like "order.getCustomer()" → "customer"
+                if (varPart.contains(".get")) {
+                    // e.g. "order.getCustomer()" → last getter → "Customer" → "customer"
+                    int lastGet = varPart.lastIndexOf(".get");
+                    String getterPart = varPart.substring(lastGet + 4); // after ".get"
+                    getterPart = getterPart.replace("()", ""); // remove ()
+                    String nestedVar = Character.toLowerCase(getterPart.charAt(0)) + getterPart.substring(1);
+                    // Try "customerId" as a param
+                    String idParam = nestedVar + "Id";
+                    if (paramTypeMap.containsKey(idParam)) {
+                        resolvedArgs.add("p." + idParam + "()");
+                        continue;
+                    }
+                    // Fall back: keep nestedVar + ".getId()" won't work; emit TODO
+                    resolvedArgs.add("/* TODO: resolve " + arg + " */ null");
+                } else {
+                    // Simple: "order.getId()" → orderId
+                    String entityVarName = varPart;
+                    String idParam = entityVarName + "Id";
+                    if (paramTypeMap.containsKey(idParam)) {
+                        resolvedArgs.add("p." + idParam + "()");
+                    } else if (paramTypeMap.containsKey(entityVarName)) {
+                        // param is "order" itself (less common)
+                        resolvedArgs.add("p." + entityVarName + "()");
+                    } else {
+                        // No match — emit a TODO comment so code at least compiles as a String stub
+                        resolvedArgs.add("/* TODO: resolve " + arg + " */ null");
+                    }
+                }
+            } else if (isNumericLiteral(arg) || "true".equals(arg) || "false".equals(arg) || "null".equals(arg)) {
+                // Primitive/null literals — safe to emit as-is
+                resolvedArgs.add(arg);
+            } else {
+                // Unknown expression — cannot be resolved in the orchestrator's scope.
+                // Replace with null and leave a TODO comment for the developer.
+                resolvedArgs.add("/* TODO: was '" + arg.replace("*/", "* /") + "' */ null");
+            }
+        }
+        return String.join(", ", resolvedArgs);
     }
 
     /**
      * Returns the fully-qualified import for a simple Java type name, or null
      * if the type doesn't need an explicit import (primitive wrappers, String, etc.).
+     *
+     * <p>Generic type parameters (e.g. {@code "List<Long>"}, {@code "Map<String, Long>"}) are
+     * handled by stripping everything from the first {@code '<'} before the switch lookup, so
+     * that {@code "List<Long>"} correctly resolves to {@code "java.util.List"}.  Imports for
+     * generic type arguments (e.g. {@code Long}, {@code BigDecimal}) are emitted separately by
+     * callers that tokenise the full type string.
      */
     private String javaImportFor(String simpleType) {
-        return switch (simpleType) {
+        if (simpleType == null) return null;
+        // Strip generic type parameters: "List<Long>" → "List", "Map<String,Long>" → "Map"
+        String rawType = simpleType.contains("<")
+                ? simpleType.substring(0, simpleType.indexOf('<')).trim()
+                : simpleType.trim();
+        return switch (rawType) {
             case "BigDecimal"     -> "java.math.BigDecimal";
             case "LocalDate"      -> "java.time.LocalDate";
             case "LocalDateTime"  -> "java.time.LocalDateTime";
@@ -973,6 +1031,7 @@ public class SagaOrchestratorGenerator {
             case "UUID"           -> "java.util.UUID";
             case "List"           -> "java.util.List";
             case "Map"            -> "java.util.Map";
+            case "Set"            -> "java.util.Set";
             default               -> null; // String, Long, Integer, Double, Boolean — no import needed
         };
     }
@@ -1075,11 +1134,42 @@ public class SagaOrchestratorGenerator {
                     .collect(java.util.stream.Collectors.joining(", "));
         }
         List<String> parts = new ArrayList<>();
+        int syntheticIdx = 0;
         for (String arg : argNames) {
-            String type = paramTypeMap.getOrDefault(arg, "Object /* unknown type */");
-            parts.add(type + " " + arg);
+            String type = paramTypeMap.getOrDefault(arg, "Object");
+            // Sanitize the argument name: it must be a valid Java identifier.
+            // Call-site args like "order.getId()", "1", or "product.getId()" are not valid.
+            String paramName = arg;
+            if (!isValidJavaIdentifier(arg)) {
+                // Fall back to a positional synthetic name: arg0, arg1, ...
+                paramName = "arg" + syntheticIdx;
+            }
+            syntheticIdx++;
+            parts.add(type + " " + paramName);
         }
         return String.join(", ", parts);
+    }
+
+    /** Returns {@code true} if {@code s} looks like a numeric literal (integer or decimal). */
+    private static boolean isNumericLiteral(String s) {
+        if (s == null || s.isEmpty()) return false;
+        try { Long.parseLong(s); return true; } catch (NumberFormatException ignored) {}
+        try { Double.parseDouble(s); return true; } catch (NumberFormatException ignored) {}
+        return false;
+    }
+
+    /**
+     * Returns {@code true} when {@code s} is a valid Java simple identifier
+     * (starts with a letter or underscore/dollar, all chars are letter/digit/underscore/dollar,
+     * and not a numeric literal).
+     */
+    private static boolean isValidJavaIdentifier(String s) {
+        if (s == null || s.isEmpty()) return false;
+        if (!Character.isJavaIdentifierStart(s.charAt(0))) return false;
+        for (int i = 1; i < s.length(); i++) {
+            if (!Character.isJavaIdentifierPart(s.charAt(i))) return false;
+        }
+        return true;
     }
 
     // =========================================================================

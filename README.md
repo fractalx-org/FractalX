@@ -565,10 +565,43 @@ be rotated before production deployment.
 
 ---
 
+### `fractalx:smoke-test` -- Build and start verification
+
+Compiles every generated service, starts it, confirms that Spring Boot's HTTP port opened and
+that the Actuator health endpoint responded, then shuts it down. Services are tested one at a
+time so there are no port conflicts. Unlike `fractalx:verify`, this goal actually runs the code.
+
+```bash
+mvn fractalx:smoke-test                                                      # build + start + health all
+mvn fractalx:smoke-test -Dfractalx.smoketest.build=false                     # skip build, start-only
+mvn fractalx:smoke-test -Dfractalx.smoketest.service=order-service           # single service
+mvn fractalx:smoke-test -Dfractalx.smoketest.timeout=180                     # longer startup window
+mvn fractalx:smoke-test -Dfractalx.smoketest.failBuild=true                  # fail Maven if any service fails
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `fractalx.smoketest.build` | `true` | Run `mvn package -DskipTests` before starting |
+| `fractalx.smoketest.timeout` | `120` | Seconds to wait for the HTTP port to open |
+| `fractalx.smoketest.health` | `/actuator/health` | Actuator path polled after port opens |
+| `fractalx.smoketest.service` | *(blank = all)* | Test a single named service |
+| `fractalx.smoketest.failBuild` | `false` | Throw a build failure if any service fails |
+| `fractalx.smoketest.skip` | `false` | Skip this goal entirely |
+
+**What "health passed" means:** any HTTP response from `/actuator/health` (even `503 DOWN` due to
+a peer service being offline) counts as a pass — it proves that the Spring context loaded and the
+embedded server started. A connection refused after the port opened means the context crashed.
+
+Build logs are written to `<service>/logs/smoketest-build.log` and start logs to
+`<service>/logs/smoketest-run.log`. The last 20 lines are printed to the console for any failure.
+
+---
+
 ### Service lifecycle goals
 
 | Goal | Description |
 |---|---|
+| `fractalx:smoke-test` | Build, start, and health-check every generated service |
 | `fractalx:services` | List generated services with ports and Docker status |
 | `fractalx:ps` | Port-based check of which services are currently running |
 | `fractalx:start [-Dfractalx.service=<name>]` | Start all or a named service |

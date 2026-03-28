@@ -84,6 +84,13 @@ public class RelationshipDecoupler {
 
             RequestInfoIndex requestIndex = buildRequestIndex(serviceRoot);
 
+            // Rename repository derived-query methods and update their parameters FIRST,
+            // so that stripRemoteEntityMethodParams (inside transformFile) does not strip the
+            // original entity parameter before we get a chance to re-type it.
+            // e.g. findByCustomer(Customer c) → findByCustomerId(String customerId) must happen
+            // before the Customer parameter is removed.
+            renameRepositoryQueryMethods(serviceRoot, entityRemoteIdFields);
+
             try (Stream<Path> paths = Files.walk(serviceRoot)) {
                 paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                     try {
@@ -97,6 +104,144 @@ public class RelationshipDecoupler {
 
         } catch (IOException e) {
             log.error("❌ [Data] Relationship decoupling failed during file traversal", e);
+        }
+    }
+
+    // =========================================================================
+    // Repository query method renaming
+    // =========================================================================
+
+    /**
+     * Scans all JPA Repository interfaces in the service source tree and renames derived
+     * query methods whose names embed a field name that was renamed during entity decoupling.
+     *
+     * <p>Example: if {@code FraudRecord.payment} was renamed to {@code FraudRecord.paymentId},
+     * then {@code FraudRecordRepository.findByPayment()} is renamed to
+     * {@code FraudRecordRepository.findByPaymentId()}.
+     *
+     * <p>The rename applies to all repository interfaces regardless of whether they are
+     * {@code JpaRepository}, {@code CrudRepository}, or {@code PagingAndSortingRepository}.
+     *
+     * <p>Also rewrites JPQL {@code @Query} annotation strings that reference the old field name
+     * with a simple {@code String.replace} (best-effort; covers {@code o.payment = } style).
+     */
+    private void renameRepositoryQueryMethods(Path serviceRoot,
+                                               Map<String, RemoteFieldInfo> entityRemoteIdFields) {
+        // Build a flat old → new field-name map from all entity infos
+        Map<String, String> allRenames = new LinkedHashMap<>();
+        // Build a type-simple-name → new-id-field-name map (e.g. "Customer" → "customerId")
+        // so repository parameter types can be updated alongside method names.
+        Map<String, String> typeToIdFieldName = new LinkedHashMap<>();
+        for (RemoteFieldInfo info : entityRemoteIdFields.values()) {
+            allRenames.putAll(info.singleOldToNewField);
+            allRenames.putAll(info.collectionOldToNewField);
+            // singleTypeToIdField: entityType → newIdFieldName  e.g. "Customer" → "customerId"
+            typeToIdFieldName.putAll(info.singleTypeToIdField);
+        }
+        if (allRenames.isEmpty()) return;
+
+        try (Stream<Path> paths = Files.walk(serviceRoot)) {
+            paths.filter(p -> p.toString().endsWith(".java")).forEach(javaFile -> {
+                try {
+                    renameQueryMethodsInFile(javaFile, allRenames, typeToIdFieldName);
+                } catch (IOException e) {
+                    log.warn("⚠️ [Data] Could not rename repository methods in {}: {}", javaFile.getFileName(), e.getMessage());
+                }
+            });
+        } catch (IOException e) {
+            log.warn("⚠️ [Data] Could not walk service root for repository method renaming", e);
+        }
+    }
+
+    private void renameQueryMethodsInFile(Path javaFile, Map<String, String> fieldRenames) throws IOException {
+        renameQueryMethodsInFile(javaFile, fieldRenames, Map.of());
+    }
+
+    /**
+     * Renames repository query methods and updates their parameters.
+     *
+     * @param fieldRenames      old field name → new field name (e.g. {@code payment → paymentId})
+     * @param typeToIdFieldName entity type simple name → new id-field name (e.g. {@code Customer → customerId})
+     *                          used to update parameter declarations from {@code Customer customer} → {@code String customerId}
+     */
+    private void renameQueryMethodsInFile(Path javaFile, Map<String, String> fieldRenames,
+                                           Map<String, String> typeToIdFieldName) throws IOException {
+        Optional<CompilationUnit> cuOpt = javaParser.parse(javaFile).getResult();
+        if (cuOpt.isEmpty()) return;
+        CompilationUnit cu = cuOpt.get();
+
+        boolean modified = false;
+
+        for (ClassOrInterfaceDeclaration decl : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (!decl.isInterface()) continue;
+
+            // Check if this interface extends a known Spring Data repository interface
+            boolean isRepository = decl.getExtendedTypes().stream()
+                    .map(t -> t.getNameAsString())
+                    .anyMatch(n -> n.contains("Repository") || n.contains("CrudRepository")
+                            || n.contains("JpaRepository") || n.contains("PagingAndSortingRepository"));
+            if (!isRepository) continue;
+
+            for (MethodDeclaration method : decl.getMethods()) {
+                String originalName = method.getNameAsString();
+                String renamedName  = originalName;
+
+                for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
+                    String oldSegment = upperFirst(entry.getKey());   // e.g. "Payment"
+                    String newSegment = upperFirst(entry.getValue()); // e.g. "PaymentId"
+                    renamedName = renamedName.replace(oldSegment, newSegment);
+                }
+
+                if (!renamedName.equals(originalName)) {
+                    method.setName(renamedName);
+                    log.info("🔧 [Data] Renamed repository method: {} → {} in {}",
+                            originalName, renamedName, javaFile.getFileName());
+                    modified = true;
+                }
+
+                // Also update parameters: Customer customer → String customerId
+                // This prevents stripRemoteEntityMethodParams from dropping the param entirely.
+                if (!typeToIdFieldName.isEmpty()) {
+                    for (Parameter param : new ArrayList<>(method.getParameters())) {
+                        String paramTypeName = param.getTypeAsString();
+                        String newIdField = typeToIdFieldName.get(paramTypeName);
+                        if (newIdField != null) {
+                            param.setType(new ClassOrInterfaceType(null, "String"));
+                            param.setName(newIdField);
+                            modified = true;
+                            log.debug("🔧 [Data] Updated repository param {} {} → String {} in {}",
+                                    paramTypeName, param.getNameAsString(), newIdField, javaFile.getFileName());
+                        }
+                    }
+                }
+
+                // Best-effort: rewrite @Query annotation JPQL strings (e.g. "o.payment = :payment")
+                method.getAnnotationByName("Query").ifPresent(ann -> {
+                    String annStr = ann.toString();
+                    String updated = annStr;
+                    for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
+                        updated = updated.replace("." + entry.getKey() + " ",  "." + entry.getValue() + " ")
+                                         .replace("." + entry.getKey() + "=",  "." + entry.getValue() + "=")
+                                         .replace("." + entry.getKey() + ")",  "." + entry.getValue() + ")")
+                                         .replace(":" + entry.getKey() + ")",  ":" + entry.getValue() + ")")
+                                         .replace(":" + entry.getKey() + " ",  ":" + entry.getValue() + " ");
+                    }
+                    if (!updated.equals(annStr)) {
+                        // Replace the annotation by removing + re-parsing it
+                        ann.remove();
+                        try {
+                            new JavaParser().parseAnnotation(updated).getResult()
+                                    .ifPresent(newAnn -> method.addAnnotation(newAnn));
+                        } catch (Exception ignored) {
+                            log.debug("Could not re-parse @Query annotation after rename in {}", javaFile.getFileName());
+                        }
+                    }
+                });
+            }
+        }
+
+        if (modified) {
+            Files.writeString(javaFile, cu.toString());
         }
     }
 
@@ -115,6 +260,9 @@ public class RelationshipDecoupler {
         final Map<String, String> collectionTypeToIdsField = new LinkedHashMap<>();
         /** Old field name → new field name for collection renames (e.g. {@code "courses" → "courseIds"}) */
         final Map<String, String> collectionOldToNewField  = new LinkedHashMap<>();
+        /** Old field name → new field name for singular renames (e.g. {@code "payment" → "paymentId"}).
+         *  Used to rename JPA Repository derived query methods after entity transformation. */
+        final Map<String, String> singleOldToNewField      = new LinkedHashMap<>();
 
         boolean isEmpty() {
             return singleTypeToIdField.isEmpty() && collectionTypeToIdsField.isEmpty();
@@ -181,6 +329,9 @@ public class RelationshipDecoupler {
                                         String old     = var.getNameAsString();
                                         String newName = old.endsWith("Id") ? old : old + "Id";
                                         info.singleTypeToIdField.put(typeName, newName);
+                                        if (!old.equals(newName)) {
+                                            info.singleOldToNewField.put(old, newName);
+                                        }
                                     }
                                 }
                             }
@@ -425,7 +576,13 @@ public class RelationshipDecoupler {
             }
         }
 
-        modified |= transformServiceLogic(cu, remoteEntities, requestIndex, collectionGetterRenames);
+        // Build a flat oldFieldName → newFieldName map for service-layer call-site rewriting
+        Map<String, String> allFieldRenames = new LinkedHashMap<>();
+        for (RemoteFieldInfo info : entityRemoteIdFields.values()) {
+            allFieldRenames.putAll(info.singleOldToNewField);
+            allFieldRenames.putAll(info.collectionOldToNewField);
+        }
+        modified |= transformServiceLogic(cu, remoteEntities, requestIndex, collectionGetterRenames, allFieldRenames);
         modified |= injectReferenceValidatorUsage(cu, entityRemoteIdFields, module, basePackage);
 
         // Remove imports for remote entity types that are no longer referenced.
@@ -699,7 +856,8 @@ public class RelationshipDecoupler {
     private boolean transformServiceLogic(CompilationUnit cu,
                                           Set<String> remoteEntities,
                                           RequestInfoIndex requestIndex,
-                                          Map<String, String> collectionGetterRenames) {
+                                          Map<String, String> collectionGetterRenames,
+                                          Map<String, String> fieldRenames) {
         boolean modified = false;
 
         for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
@@ -847,6 +1005,116 @@ public class RelationshipDecoupler {
                 }
 
                 modified |= step4Modified[0];
+            }
+
+            // Step 5: Rewrite builder and findBy/countBy/existsBy calls that pass a remote entity
+            //         variable (obtained from a service call) where the entity field was renamed.
+            //
+            //   Order.builder().customer(customer)          → .customerId(String.valueOf(customer.getId()))
+            //   orderRepo.findByCustomer(customer)          → findByCustomerId(String.valueOf(customer.getId()))
+            //
+            // This covers patterns missed by Step 3 (which only handles set* prefixes).
+            if (!fieldRenames.isEmpty() && !remoteEntityServiceVars.isEmpty()) {
+                for (MethodCallExpr call : new ArrayList<>(method.findAll(MethodCallExpr.class))) {
+                    if (call.getArguments().size() != 1) continue;
+                    Expression arg = call.getArgument(0);
+                    if (!arg.isNameExpr()) continue;
+                    String argName = arg.asNameExpr().getNameAsString();
+                    if (!remoteEntityServiceVars.contains(argName)) continue;
+
+                    String methodName = call.getNameAsString();
+
+                    // Exact match: builder method name = old field name (e.g., customer(customer))
+                    if (fieldRenames.containsKey(methodName)) {
+                        String newFieldName = fieldRenames.get(methodName);
+                        call.setName(newFieldName);
+                        call.setArgument(0, new MethodCallExpr(
+                                new NameExpr("String"), "valueOf",
+                                new NodeList<>(new MethodCallExpr(new NameExpr(argName), "getId"))));
+                        modified = true;
+                        log.debug("Step5: renamed builder call .{}({}) → .{}(String.valueOf({}.getId()))",
+                                methodName, argName, newFieldName, argName);
+                        continue;
+                    }
+
+                    // Prefix match: findBy/countBy/existsBy/deleteBy + UpperFirst(oldFieldName)
+                    for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
+                        String oldSeg = upperFirst(entry.getKey());   // e.g. "Customer"
+                        String newSeg = upperFirst(entry.getValue()); // e.g. "CustomerId"
+                        for (String prefix : new String[]{"findBy", "countBy", "existsBy", "deleteBy",
+                                "findAllBy", "findFirstBy", "findTopBy"}) {
+                            if (methodName.startsWith(prefix + oldSeg)) {
+                                String renamedMethod = methodName.replace(prefix + oldSeg, prefix + newSeg);
+                                call.setName(renamedMethod);
+                                call.setArgument(0, new MethodCallExpr(
+                                        new NameExpr("String"), "valueOf",
+                                        new NodeList<>(new MethodCallExpr(new NameExpr(argName), "getId"))));
+                                modified = true;
+                                log.debug("Step5: renamed repo call {}({}) → {}(String.valueOf({}.getId()))",
+                                        methodName, argName, renamedMethod, argName);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Step 6: Rename singular-field getters in service/lambda code.
+            //
+            //   p.getOrder()           → p.getOrderId()
+            //   p.getOrder().getId()   → p.getOrderId()   (chain collapsed to String)
+            //
+            // Build getter rename map from fieldRenames: "order" → "orderId"
+            // translates to getOrder → getOrderId.
+            if (!fieldRenames.isEmpty()) {
+                Map<String, String> singularGetterRenames = new LinkedHashMap<>();
+                for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
+                    singularGetterRenames.put(
+                            "get" + upperFirst(entry.getKey()),
+                            "get" + upperFirst(entry.getValue()));
+                }
+
+                // Collect all matching getter call nodes (copy list to avoid CME)
+                List<MethodCallExpr> getterCalls = new ArrayList<>(
+                        method.findAll(MethodCallExpr.class, call ->
+                                singularGetterRenames.containsKey(call.getNameAsString())));
+
+                for (MethodCallExpr getterCall : getterCalls) {
+                    String newGetterName = singularGetterRenames.get(getterCall.getNameAsString());
+
+                    // Check whether this getter is the scope of a chained .getId() call
+                    // e.g. p.getOrder().getId() — parent call is "getId" with getterCall as scope
+                    boolean chainedWithGetId = getterCall.getParentNode()
+                            .filter(parent -> parent instanceof MethodCallExpr outerCall
+                                    && "getId".equals(outerCall.getNameAsString())
+                                    && outerCall.getArguments().isEmpty()
+                                    && outerCall.getScope().map(s -> s == getterCall).orElse(false))
+                            .isPresent();
+
+                    if (chainedWithGetId) {
+                        // Replace the outer p.getOrder().getId() with p.getOrderId()
+                        MethodCallExpr outerCall = (MethodCallExpr) getterCall.getParentNode().get();
+                        MethodCallExpr replacement = new MethodCallExpr(
+                                getterCall.getScope().orElse(null), newGetterName);
+                        outerCall.replace(replacement);
+                        modified = true;
+                        log.debug("Step6: collapsed chain {}.getId() → {}",
+                                getterCall.getNameAsString(), newGetterName);
+                    } else if (getterCall.findAncestor(MethodCallExpr.class)
+                            .map(p -> !singularGetterRenames.containsKey(p.getNameAsString()))
+                            .orElse(true)) {
+                        // Standalone getter: just rename getOrder() → getOrderId()
+                        // (only if this node is still in the AST — it might have been
+                        //  replaced above as part of a chain)
+                        try {
+                            getterCall.setName(newGetterName);
+                            modified = true;
+                            log.debug("Step6: renamed getter {} → {}", getterCall.getNameAsString(), newGetterName);
+                        } catch (Exception ignored) {
+                            // node may have been detached during chain replacement
+                        }
+                    }
+                }
             }
         }
 
