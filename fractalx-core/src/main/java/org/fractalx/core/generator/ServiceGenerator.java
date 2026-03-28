@@ -23,6 +23,7 @@ import org.fractalx.core.generator.service.ServiceRegistrationStep;
 import org.fractalx.core.generator.transformation.AnnotationRemover;
 import org.fractalx.core.generator.transformation.CodeCopier;
 import org.fractalx.core.generator.transformation.CodeTransformer;
+import org.fractalx.core.generator.transformation.SharedCodeCopier;
 import org.fractalx.core.generator.transformation.FileCleanupStep;
 import org.fractalx.core.generator.transformation.ImportCleaner;
 import org.fractalx.core.generator.transformation.ImportPreserver;
@@ -185,6 +186,7 @@ public class ServiceGenerator {
                     }
                 },
                 new CodeCopier(),
+                new SharedCodeCopier(),
                 new CodeTransformer(
                         new AnnotationRemover(),
                         new org.fractalx.core.datamanagement.RelationshipDecoupler(),
