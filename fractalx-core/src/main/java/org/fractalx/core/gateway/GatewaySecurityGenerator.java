@@ -150,6 +150,17 @@ public class GatewaySecurityGenerator {
                         public List<String> getValidKeys() { return validKeys; }
                         public void setValidKeys(List<String> keys) { this.validKeys = keys; }
                     }
+
+                    /**
+                     * Shared secret used to sign the Internal Call Token forwarded to downstream
+                     * services via {@code X-Internal-Token}. Bound from
+                     * {@code fractalx.gateway.security.internal-jwt-secret}.
+                     * Must match {@code fractalx.security.internal-jwt-secret} in every service.
+                     * In production set via env var {@code FRACTALX_INTERNAL_JWT_SECRET}.
+                     */
+                    private String internalJwtSecret = "fractalx-internal-secret-change-in-prod-!!";
+                    public String getInternalJwtSecret() { return internalJwtSecret; }
+                    public void setInternalJwtSecret(String s) { this.internalJwtSecret = s; }
                 }
                 """.formatted(
                         profile.securityEnabled(),
@@ -296,6 +307,7 @@ public class GatewaySecurityGenerator {
                 import io.jsonwebtoken.Claims;
                 import io.jsonwebtoken.JwtException;
                 import io.jsonwebtoken.Jwts;
+                import io.jsonwebtoken.SignatureAlgorithm;
                 import io.jsonwebtoken.security.Keys;
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
@@ -310,6 +322,7 @@ public class GatewaySecurityGenerator {
 
                 import javax.crypto.SecretKey;
                 import java.nio.charset.StandardCharsets;
+                import java.util.Date;
 
                 /**
                  * Validates Bearer JWT tokens signed with HMAC-SHA256.
@@ -349,11 +362,25 @@ public class GatewaySecurityGenerator {
                                     .setSigningKey(key).build()
                                     .parseClaimsJws(token).getBody();
                             String roles = claims.get("roles", String.class);
+                            // Mint a short-lived Internal Call Token for downstream services.
+                            // Services validate this token (not the original user JWT) to establish
+                            // Authentication — prevents raw Bearer tokens from reaching internal services.
+                            SecretKey internalKey = Keys.hmacShaKeyFor(
+                                    props.getInternalJwtSecret().getBytes(StandardCharsets.UTF_8));
+                            String internalToken = Jwts.builder()
+                                    .setSubject(claims.getSubject())
+                                    .claim("roles", roles != null ? roles : "")
+                                    .setIssuer("fractalx-gateway")
+                                    .setIssuedAt(new Date())
+                                    .setExpiration(new Date(System.currentTimeMillis() + 30_000L))
+                                    .signWith(internalKey, SignatureAlgorithm.HS256)
+                                    .compact();
                             ServerWebExchange mutated = exchange.mutate()
                                     .request(r -> r.headers(h -> {
-                                        h.set("X-User-Id",    claims.getSubject());
-                                        h.set("X-User-Roles", roles != null ? roles : "");
-                                        h.set("X-Auth-Method", "bearer-jwt");
+                                        h.set("X-User-Id",        claims.getSubject());
+                                        h.set("X-User-Roles",     roles != null ? roles : "");
+                                        h.set("X-Auth-Method",    "bearer-jwt");
+                                        h.set("X-Internal-Token", internalToken);
                                     }))
                                     .build();
                             return chain.filter(mutated);

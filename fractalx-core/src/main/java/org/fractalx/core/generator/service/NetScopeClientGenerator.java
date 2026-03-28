@@ -336,10 +336,14 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
     /**
      * Derives the target service name from a bean type name using convention.
      * <p>Examples: {@code PaymentService → payment-service},
-     * {@code OrderClient → order-service}.
+     * {@code OrderClient → order-service},
+     * {@code LmsClientV2 → lms-service} (version suffix stripped first).
      */
     public static String beanTypeToServiceName(String beanType) {
-        String stripped = beanType.replaceAll("(Service|Client)$", "");
+        // Strip trailing version suffix (e.g. V2, V3) before stripping Service/Client
+        // so LmsClientV2 → LmsClient → lms-service, not lms-client-v2-service
+        String versionStripped = beanType.replaceAll("V\\d+$", "");
+        String stripped = versionStripped.replaceAll("(Service|Client)$", "");
         return stripped.replaceAll("([A-Z])", "-$1").toLowerCase().replaceFirst("^-", "") + "-service";
     }
 

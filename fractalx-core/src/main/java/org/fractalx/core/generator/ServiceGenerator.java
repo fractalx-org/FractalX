@@ -24,6 +24,11 @@ import org.fractalx.core.generator.transformation.AnnotationRemover;
 import org.fractalx.core.generator.transformation.CodeCopier;
 import org.fractalx.core.generator.transformation.CodeTransformer;
 import org.fractalx.core.generator.transformation.SharedCodeCopier;
+import org.fractalx.core.generator.transformation.ServiceSecurityStep;
+import org.fractalx.core.generator.transformation.ValuePropertyDistributorStep;
+import org.fractalx.core.generator.transformation.DecompositionHintsStep;
+import org.fractalx.core.gateway.SecurityAnalyzer;
+import org.fractalx.core.gateway.SecurityProfile;
 import org.fractalx.core.generator.transformation.FileCleanupStep;
 import org.fractalx.core.generator.transformation.ImportCleaner;
 import org.fractalx.core.generator.transformation.ImportPreserver;
@@ -187,6 +192,8 @@ public class ServiceGenerator {
                 },
                 new CodeCopier(),
                 new SharedCodeCopier(),
+                new ServiceSecurityStep(),           // Phase 2.5: generate per-service security config
+                new ValuePropertyDistributorStep(),  // distribute @Value/${} props from monolith config
                 new CodeTransformer(
                         new AnnotationRemover(),
                         new org.fractalx.core.datamanagement.RelationshipDecoupler(),
@@ -197,6 +204,7 @@ public class ServiceGenerator {
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
+                new DecompositionHintsStep(),        // detect @Transactional/cache/event/aspect/scheduler patterns
                 new SagaMethodTransformer(),    // replaces cross-service calls with outboxPublisher.publish()
                 context -> {
                     if (context.getFractalxConfig().features().distributedData()) {
@@ -237,6 +245,16 @@ public class ServiceGenerator {
         // Detect @DistributedSaga definitions across all modules
         List<SagaDefinition> sagaDefinitions = sagaAnalyzer.analyzeSagas(sourceRoot, modules);
 
+        // Detect monolith Spring Security configuration (used by ServiceSecurityStep + DecompositionHintsStep)
+        SecurityProfile securityProfile = SecurityProfile.none();
+        try {
+            securityProfile = new SecurityAnalyzer().analyze(
+                    sourceRoot, sourceRoot.getParent().resolve("resources"));
+            log.info("Monolith security profile detected: authType={}", securityProfile.authType());
+        } catch (Exception e) {
+            log.debug("SecurityAnalyzer could not scan monolith — treating as no-security: {}", e.getMessage());
+        }
+
         // Generate the service registry first so it is available for all other generators
         if (fractalxConfig.features().registry()) {
             onStepStart.accept("fractalx-registry");
@@ -248,7 +266,7 @@ public class ServiceGenerator {
 
         for (FractalModule module : modules) {
             onStepStart.accept(module.getServiceName());
-            generateService(module, modules, fractalxConfig, sagaDefinitions);
+            generateService(module, modules, fractalxConfig, sagaDefinitions, securityProfile);
             onStepComplete.accept(module.getServiceName());
         }
 
@@ -306,7 +324,8 @@ public class ServiceGenerator {
 
     private void generateService(FractalModule module, List<FractalModule> allModules,
                                   FractalxConfig fractalxConfig,
-                                  List<SagaDefinition> sagaDefinitions) throws IOException {
+                                  List<SagaDefinition> sagaDefinitions,
+                                  SecurityProfile securityProfile) throws IOException {
         log.debug("Generating service: {}", module.getServiceName());
 
         Path serviceRoot = outputRoot.resolve(module.getServiceName());
@@ -315,7 +334,8 @@ public class ServiceGenerator {
         Files.createDirectories(serviceRoot.resolve("src/test/java"));
 
         GenerationContext context = new GenerationContext(
-                module, sourceRoot, serviceRoot, allModules, fractalxConfig, sagaDefinitions);
+                module, sourceRoot, serviceRoot, allModules, fractalxConfig, sagaDefinitions,
+                securityProfile);
 
         for (ServiceFileGenerator step : pipeline) {
             step.generate(context);

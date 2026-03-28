@@ -127,6 +127,10 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("        enabled: ${GATEWAY_APIKEY_ENABLED:false}\n");
         ymlBuilder.append("        valid-keys:\n");
         ymlBuilder.append("          - ${GATEWAY_API_KEY_1:dev-key-replace-me}\n");
+        // Internal Call Token secret — must match fractalx.security.internal-jwt-secret in all services
+        ymlBuilder.append("      # Internal Call Token: short-lived signed JWT forwarded to downstream services.\n");
+        ymlBuilder.append("      # Set FRACTALX_INTERNAL_JWT_SECRET to the same value on all services + gateway.\n");
+        ymlBuilder.append("      internal-jwt-secret: ${FRACTALX_INTERNAL_JWT_SECRET:fractalx-internal-secret-change-in-prod-!!}\n");
         ymlBuilder.append("    cors:\n");
         ymlBuilder.append("      allowed-origins: ${CORS_ORIGINS:").append(cfg.corsAllowedOrigins()).append("}\n");
         ymlBuilder.append("      allowed-methods: GET,POST,PUT,DELETE,PATCH,OPTIONS\n");

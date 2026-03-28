@@ -50,11 +50,13 @@ Manual microservices migrations are slow, error-prone, and expensive — requiri
 16. [Observability & Monitoring](#16-observability--monitoring)
 17. [Admin Dashboard](#17-admin-dashboard)
 18. [Static Verification](#18-static-verification)
+    - [Decomposition Hints](#decomposition-hints)
 19. [Test Endpoints](#19-test-endpoints)
 20. [Configuration Reference](#20-configuration-reference)
 21. [Troubleshooting](#21-troubleshooting)
 22. [Contributing](#22-contributing)
-23. [License](#23-license)
+23. [Security Architecture](#23-security-architecture)
+24. [License](#24-license)
 
 ---
 
@@ -151,20 +153,24 @@ Cross-module dependencies are detected **automatically** from Spring field injec
 ### Generation pipeline (per service)
 
 ```
-PomGenerator                 -> pom.xml (netscope-server, netscope-client, resilience4j)
-ApplicationGenerator         -> Main class (@EnableNetScopeServer, @EnableNetScopeClient)
-ConfigurationGenerator       -> application.yml + application-dev.yml + application-docker.yml
-CodeCopier                   -> copy source files into the new project
-CodeTransformer              -> AST rewrites (package, imports, cross-boundary FK decoupling)
-FileCleanupStep              -> remove cross-boundary types from each service
-NetScopeServerAnnotationStep -> @NetworkPublic on methods called by other modules
-NetScopeClientGenerator      -> @NetScopeClient interfaces for each dependency
-DistributedServiceHelper     -> DB isolation, Flyway scaffold, outbox, saga support
-OtelConfigStep               -> OtelConfig.java (OTLP/gRPC -> Jaeger)
-HealthMetricsStep            -> ServiceHealthConfig.java (TCP HealthIndicator per dep)
-ServiceRegistrationStep      -> self-registration with fractalx-registry
-NetScopeRegistryBridgeStep   -> dynamic gRPC host resolution from registry
-ResilienceConfigStep         -> Resilience4j CircuitBreaker + Retry + TimeLimiter per dep
+PomGenerator                  -> pom.xml (netscope-server, netscope-client, resilience4j)
+ApplicationGenerator          -> Main class (@EnableNetScopeServer, @EnableNetScopeClient)
+ConfigurationGenerator        -> application.yml + application-dev.yml + application-docker.yml
+CodeCopier                    -> copy source files into the new project
+SharedCodeCopier              -> copy shared utilities / DTOs referenced by module code
+ValuePropertyDistributorStep  -> migrate @Value("${...}") keys from monolith application.yml
+CodeTransformer               -> AST rewrites (package, imports, cross-boundary FK decoupling)
+FileCleanupStep               -> remove cross-boundary types from each service
+NetScopeServerAnnotationStep  -> @NetworkPublic on methods called by other modules
+NetScopeClientGenerator       -> @NetScopeClient interfaces for each dependency
+NetScopeClientWiringStep      -> rewire service fields to generated *Client interfaces
+DecompositionHintsStep        -> detect @Transactional/cache/event/aspect patterns -> DECOMPOSITION_HINTS.md
+DistributedServiceHelper      -> DB isolation, Flyway scaffold, outbox, saga support
+OtelConfigStep                -> OtelConfig.java (OTLP/gRPC -> Jaeger)
+HealthMetricsStep             -> ServiceHealthConfig.java (TCP HealthIndicator per dep)
+ServiceRegistrationStep       -> self-registration with fractalx-registry
+NetScopeRegistryBridgeStep    -> dynamic gRPC host resolution from registry
+ResilienceConfigStep          -> Resilience4j CircuitBreaker + Retry + TimeLimiter per dep
 ```
 
 Then, after all services are generated:
@@ -366,9 +372,16 @@ module's package and infers cross-module deps from field types whose name ends i
        @DecomposableModule(dependencies={...}) for reliability.
 ```
 
+**Lombok `@RequiredArgsConstructor` / `@AllArgsConstructor`** -- when a class carries one of these
+Lombok annotations, FractalX also scans all `private final` fields as potential cross-module
+dependencies (not just those ending in `Service` / `Client`). This covers non-standard naming
+conventions like `NotificationGateway`, `PaymentFacade`, or `AuditSink`. JDK and Spring types
+(`String`, `RestTemplate`, `ApplicationEventPublisher`, etc.) are filtered out automatically.
+
 > **Always use explicit `dependencies=`** for any monolith where cross-module bean names do not
 > follow the `*Service` / `*Client` suffix convention. The heuristic will silently miss beans
-> named `PaymentProcessor`, `OrderFacade`, `InventoryManager`, etc.
+> named `PaymentProcessor`, `OrderFacade`, `InventoryManager`, etc. (unless Lombok constructors
+> are in use -- see above).
 >
 > Explicit declaration also drives the dependency graph in `fractalx:verify` -- without it, all
 > services will show `⚠ ORPHAN` warnings from the graph analyser.
@@ -414,6 +427,27 @@ fractalx:
 ```
 
 All keys are optional. When absent, FractalX falls back to sensible defaults: registry `http://localhost:8761`, logger `http://localhost:9099`, Jaeger `http://localhost:4317`. The source monolith's `application.yml` and `application.properties` are also consulted as a secondary fallback.
+
+### `@Value` property migration
+
+FractalX automatically migrates property values from the monolith's `application.yml` / `application.properties` into each generated service's `application-dev.yml`. For every `@Value("${my.property.key}")` and `@ConfigurationProperties(prefix = "my.prefix")` found in the module's source files, the generator looks up the corresponding value in the monolith config and appends it:
+
+```yaml
+# application-dev.yml (auto-appended section)
+# ---------------------------------------------------------------------------
+# Properties migrated from monolith application.yml by FractalX
+# ---------------------------------------------------------------------------
+payment.gateway.url: https://sandbox.payment-provider.com
+payment.gateway.timeout: 5000
+
+# ---------------------------------------------------------------------------
+# FRACTALX-WARNING: the following keys were referenced but not found in
+# the monolith's application.yml. Add their values manually:
+# payment.gateway.api-key: <REQUIRED>
+# ---------------------------------------------------------------------------
+```
+
+Keys that are present in the monolith config are written as resolved values. Keys that are missing are listed as comments with `<REQUIRED>` so nothing is silently omitted.
 
 After generation, the admin portal exposes the baked-in platform config at `GET /api/config/runtime` and allows in-memory overrides (`PUT /api/config/runtime/{key}`) without restarting.
 
@@ -632,15 +666,17 @@ fractalx-output/
 +-- order-service/
 |   +-- pom.xml                     # netscope-server, netscope-client, resilience4j deps
 |   +-- Dockerfile                  # Multi-stage build
+|   +-- DECOMPOSITION_HINTS.md      # (generated when issues detected -- see below)
 |   +-- src/main/
 |       +-- java/
 |       |   +-- com/example/order/  # Copied + AST-transformed source
+|       |   +-- com/example/shared/ # Shared utilities copied from monolith (SharedCodeCopier)
 |       |   +-- org/fractalx/generated/orderservice/
 |       |       +-- OtelConfig.java              # OTLP/gRPC -> Jaeger
 |       |       +-- ServiceHealthConfig.java     # TCP HealthIndicator per gRPC dep
 |       +-- resources/
 |           +-- application.yml         # Base config
-|           +-- application-dev.yml     # Localhost defaults, H2 DB
+|           +-- application-dev.yml     # Localhost defaults + @Value properties from monolith
 |           +-- application-docker.yml  # Full env-var substitution
 +-- payment-service/
 |   +-- src/main/java/com/example/payment/
@@ -665,8 +701,9 @@ fractalx-output/
 | `pom.xml` | Spring Boot 3.2, netscope-server, netscope-client, Resilience4j, Flyway, Actuator, Micrometer |
 | Main class | `@EnableNetScopeServer` + `@EnableNetScopeClient` |
 | `application.yml` | Registry URL, gRPC port, OTEL endpoint, logger URL (with env-var overrides) |
-| `application-dev.yml` | Localhost defaults, H2 in-memory DB |
+| `application-dev.yml` | Localhost defaults, H2 DB + `@Value` properties migrated from monolith |
 | `application-docker.yml` | Full Docker DNS hostnames via env vars |
+| Shared utility classes | Non-module classes referenced by module code (e.g. `shared/`, `common/`) copied by `SharedCodeCopier` |
 | `OtelConfig.java` | OpenTelemetry SDK -- OTLP/gRPC to Jaeger, W3C traceparent propagation |
 | `ServiceHealthConfig.java` | One Spring `HealthIndicator` + Micrometer gauge per gRPC dependency |
 | `ServiceRegistrationAutoConfig` | Self-register on startup; heartbeat every 30s; deregister on shutdown |
@@ -674,6 +711,7 @@ fractalx-output/
 | Resilience4j YAML | CircuitBreaker + Retry + TimeLimiter per dependency |
 | `Dockerfile` | Multi-stage (build + runtime), non-root user |
 | `@NetScopeClient` interfaces | One per outgoing gRPC dependency |
+| `DECOMPOSITION_HINTS.md` | (present only when issues detected) — see [Decomposition Hints](#decomposition-hints) |
 
 ---
 
@@ -914,6 +952,7 @@ FractalX generates a complete data isolation and consistency stack for each serv
 | Transactional outbox | `OutboxEvent`, `OutboxRepository`, `OutboxPublisher`, `OutboxPoller` |
 | Cross-service FK validation | `ReferenceValidator` -- uses NetScope `exists()` calls instead of DB joins |
 | Relationship decoupling | `RelationshipDecoupler` -- AST rewrites `@ManyToOne ForeignEntity` to `String foreignEntityId` |
+| Multi-schema detection | `DataIsolationGenerator` scans entity classes for `@Table(schema = "...")` -- if multiple schemas are found a `FRACTALX-WARNING` block is emitted in `IsolationConfig.java` listing the affected schemas and remediation options |
 
 ### Configuring production databases
 
@@ -1217,6 +1256,28 @@ are advisory warnings. See [Maven Plugin Reference](#7-maven-plugin-reference) f
 | `⚠ Tx` | A `@Transactional` method calls a NetScope client (remote gRPC call) -- rollback will not propagate across the network | Refactor to use the Saga orchestrator or Outbox pattern |
 | `⚠ Secret` | A YAML/properties key with a sensitive name (password, token, api-key…) has a plain-text value | Rotate the value before production; use `${ENV_VAR}` placeholders instead |
 
+### Decomposition Hints
+
+After `NetScopeClientWiringStep` completes, FractalX analyses every generated service for patterns
+that **silently break** when code moves from a single JVM to separate processes. When any are
+found, a `DECOMPOSITION_HINTS.md` file is written to the service root.
+
+```bash
+cat microservices/order-service/DECOMPOSITION_HINTS.md
+```
+
+| Gap | What is detected | Why it matters |
+|---|---|---|
+| **@Transactional crossing service boundary** | `@Transactional` methods that call `*Client` (remote gRPC) methods | The monolith's single DB transaction no longer covers the remote call; a local rollback after a successful remote call leaves inconsistent state |
+| **Shared in-memory cache** | `@Cacheable`, `@CacheEvict`, `@CachePut` annotations | Caffeine/EhCache is per-JVM; a cache eviction in Service A is invisible to Service B's copy |
+| **Spring events across services** | `publishEvent()` calls and `@EventListener` / `@TransactionalEventListener` methods | Spring events are in-JVM only; cross-service listeners never fire after decomposition |
+| **AOP aspect scope** | `@Aspect` classes | Pointcuts only intercept calls within the same JVM; the aspect stops firing for classes moved to other services |
+| **@Scheduled jobs calling cross-service clients** | `@Scheduled` methods that invoke `*Client` interfaces | The job runs locally but the data it operates on may have moved to another service's database |
+
+Each detected occurrence includes the file name, method name, and specific fix recommendations (e.g. "convert to `@DistributedSaga`", "use the outbox pattern", "migrate cache to Redis").
+
+`DECOMPOSITION_HINTS.md` is only created when at least one issue is found. Services with no detectable issues produce no file.
+
 ### Why re-decompose is required after framework upgrades
 
 `mvn fractalx:verify` runs verifiers against whatever files are currently in the output directory.
@@ -1447,6 +1508,26 @@ fractalx:
 
 The circuit breaker has opened. Check `/actuator/health` on the target service. The circuit resets after 30 seconds by default (configurable via `resilience4j.circuitbreaker.instances.<name>.wait-duration-in-open-state`).
 
+### Versioned service beans (`LmsClientV2`, `PaymentServiceV3`) not wiring correctly
+
+FractalX strips a trailing `V<number>` suffix before mapping a bean type to its service name, so `LmsClientV2` and `LmsClient` both resolve to `lms-service`. If a service still fails to wire, declare the dependency explicitly:
+
+```java
+@DecomposableModule(
+    serviceName = "order-service", port = 8081,
+    dependencies = {LmsClientV2.class, PaymentService.class}
+)
+public class OrderModule {}
+```
+
+### Shared utility class not found after decomposition
+
+If a `cannot find symbol` error references a class that lives outside any `@DecomposableModule` package (e.g. `com.myapp.shared.MoneyUtils`), FractalX's `SharedCodeCopier` should have copied it automatically. If it did not:
+
+1. Verify the class is imported with an explicit (non-wildcard) `import` statement in the module's source files.
+2. Verify the class is not in another module's package — cross-module classes are handled by NetScope, not copied.
+3. Re-run `mvn fractalx:decompose` after correcting the import.
+
 ### H2 startup error -- `SET FOREIGN_KEY_CHECKS`
 
 Generated schema contains MySQL-specific syntax. Either switch to MySQL in `application-dev.yml`, or disable SQL init:
@@ -1478,6 +1559,171 @@ Please keep changes focused. Each PR should address a single concern.
 
 ---
 
-## 23. License
+## 23. Security Architecture
+
+FractalX implements a **three-layer security model** for decomposed microservices. Security is
+enforced once at the API Gateway and propagated cryptographically to all downstream services —
+including cross-service gRPC calls via NetScope.
+
+### Architecture overview
+
+```
+[External Client]
+  │  Authorization: Bearer <user-jwt>        (or OAuth2 / Basic / API Key)
+  ▼
+[API Gateway]  ── validates credential ──────────────────────────────────────────────────────────────────┐
+  │  mints short-lived Internal Call Token                                                               │
+  │  X-Internal-Token: <jwt>  (sub=userId, roles=..., iss=fractalx-gateway, exp=+30s)                   │
+  ▼                                                                                                      │
+[Service A  (HTTP)]                                                                          fractalx.gateway.security
+  │  GatewayAuthHeaderFilter validates X-Internal-Token signature                                        │
+  │  SecurityContextHolder.setAuthentication(UsernamePasswordAuthenticationToken)                        │
+  │  @PreAuthorize("hasRole('ADMIN')") ✓ enforced                                                        │
+  │                                                                                                      │
+  │  makes gRPC call to Service B via NetScope                                                           │
+  │  x-internal-token gRPC metadata = same signed token (forwarded by NetScopeContextInterceptor)        │
+  ▼
+[Service B  (gRPC)]
+    NetScopeContextInterceptor validates x-internal-token signature (server side)
+    SecurityContextHolder.setAuthentication(...)  ← same principal
+    @PreAuthorize ✓ enforced
+```
+
+### Layer 1 — API Gateway authentication
+
+The gateway validates the external user's credential (Bearer JWT, OAuth2, Basic Auth, API Key)
+and converts it into a short-lived **Internal Call Token** — a HMAC-SHA256 signed JWT minted
+by the gateway:
+
+```json
+{
+  "sub": "user-123",
+  "roles": "ADMIN,USER",
+  "iss": "fractalx-gateway",
+  "iat": 1711300000,
+  "exp": 1711300030
+}
+```
+
+The token is forwarded downstream as the `X-Internal-Token` HTTP header. Raw credentials (Bearer
+tokens, passwords) are **never** forwarded to downstream services.
+
+Enable gateway authentication via `fractalx.gateway.security.*`:
+
+```yaml
+fractalx:
+  gateway:
+    security:
+      enabled: true
+      bearer:
+        enabled: true        # HMAC-SHA256 Bearer JWT
+        jwt-secret: ${JWT_SECRET:change-me}
+      oauth2:
+        enabled: false       # JWK Set URI (Keycloak / Auth0)
+      basic:
+        enabled: false
+      api-key:
+        enabled: false
+      # Internal Call Token secret — must match fractalx.security.internal-jwt-secret
+      # on ALL generated services. Set via env var FRACTALX_INTERNAL_JWT_SECRET.
+      internal-jwt-secret: ${FRACTALX_INTERNAL_JWT_SECRET:fractalx-internal-secret-change-in-prod-!!}
+```
+
+### Layer 2 — Per-service HTTP security (generated)
+
+When FractalX detects Spring Security in the monolith, it auto-generates two classes per service
+under `<basePackage>.<serviceName>`:
+
+| Generated class | Purpose |
+|-----------------|---------|
+| `GatewayAuthHeaderFilter` | Validates `X-Internal-Token` signature; populates `SecurityContextHolder` |
+| `ServiceSecurityConfig` | `@EnableWebSecurity` + `@EnableMethodSecurity`; all HTTP endpoints `permitAll()` at the filter chain level (gateway is the auth perimeter); method-level authorization via `@PreAuthorize` |
+
+The service's `application-dev.yml` receives:
+
+```yaml
+fractalx:
+  security:
+    internal-jwt-secret: ${FRACTALX_INTERNAL_JWT_SECRET:fractalx-internal-secret-change-in-prod-!!}
+```
+
+### Layer 3 — Secured inter-service gRPC communication
+
+`fractalx-runtime`'s `NetScopeContextInterceptor` automatically:
+
+- **Client side**: reads the `x-internal-token` from `Authentication.getCredentials()` (set by
+  `GatewayAuthHeaderFilter`) and injects it into outgoing gRPC metadata
+- **Server side**: validates the token from incoming gRPC metadata and restores the `Authentication`
+  in `SecurityContextHolder` for the duration of the method call
+
+This means `@PreAuthorize` works identically on HTTP-invoked and gRPC-invoked service methods:
+
+```java
+// Works on HTTP (X-Internal-Token from gateway) AND gRPC (x-internal-token metadata)
+@PreAuthorize("hasRole('ADMIN')")
+public Order cancelOrder(Long orderId) { ... }
+```
+
+### User principal flow
+
+```
+External JWT claims:   { "sub": "user-123", "roles": "ADMIN" }
+         ↓ gateway validates + mints internal token (30s TTL)
+X-Internal-Token:      signed JWT { sub, roles, iss=fractalx-gateway, exp }
+         ↓ GatewayAuthHeaderFilter validates signature
+SecurityContextHolder: UsernamePasswordAuthenticationToken
+                       │  principal   = "user-123"
+                       │  credentials = <raw internal token> (forwarded via gRPC)
+                       │  authorities = [ROLE_ADMIN]
+         ↓ @PreAuthorize("hasRole('ADMIN')") → passes
+         ↓ service calls another service via NetScope gRPC
+x-internal-token:      same signed token in gRPC metadata
+         ↓ NetScopeContextInterceptor validates on receiving service
+SecurityContextHolder: same Authentication { principal="user-123", ROLE_ADMIN }
+         ↓ @PreAuthorize on the gRPC-invoked method → passes
+```
+
+### Configuring the shared secret
+
+The Internal Call Token secret **must be identical** across the API Gateway and all generated
+services. In production, set the `FRACTALX_INTERNAL_JWT_SECRET` environment variable on all
+containers:
+
+```bash
+# docker-compose.yml  (or Kubernetes Secret)
+environment:
+  FRACTALX_INTERNAL_JWT_SECRET: "your-256-bit-production-secret-here"
+```
+
+The default value (`fractalx-internal-secret-change-in-prod-!!`) is intentionally weak and must
+be replaced before going to production.
+
+### What FractalX does NOT generate (requires manual work)
+
+- **Login / token-issuance endpoint**: FractalX generates the _consumer_ side (validation).
+  You need a dedicated auth service or external IdP (Keycloak, Auth0, Okta) that issues the
+  external JWT that the gateway validates.
+- **User storage**: `UserDetailsService` and `AuthenticationProvider` beans belong only to the
+  service that owns the users table. Move them to your auth service; other services receive
+  identity via `X-Internal-Token`.
+- **mTLS**: For environments requiring cryptographic service-to-service identity beyond signed
+  tokens, configure TLS on the NetScope gRPC channels at the infrastructure level (Istio, Linkerd,
+  or manual gRPC TLS configuration).
+
+### Decomposition Hints — Gap 8
+
+If the monolith had Spring Security, `DECOMPOSITION_HINTS.md` is generated with **Gap 8** warnings
+for patterns that require attention:
+
+| Sub-gap | Pattern | Action |
+|---------|---------|--------|
+| 8a | `@EnableWebSecurity` class | Superseded by generated `ServiceSecurityConfig`; review original access rules |
+| 8b | `@PreAuthorize` / `@Secured` / `@RolesAllowed` | Preserved; works via generated filter + gRPC propagation |
+| 8c | Custom `OncePerRequestFilter` (JWT filter) | Remove; gateway consumed the token; service receives `X-Internal-Token` instead |
+| 8d | `UserDetailsService` / `AuthenticationProvider` bean | Move to auth service only; other services trust the signed token |
+
+---
+
+## 24. License
 
 Licensed under the [Apache License 2.0](LICENSE).
