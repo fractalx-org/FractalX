@@ -72,6 +72,8 @@ public class DistributedServiceHelper {
 
         // 2. Detect & apply database configuration (fractalx-config.yml → application.yml)
         String driverClass = dbConfigGen.generateDbConfig(module, sourceRoot, srcMainResources);
+        // Patch docker profile to use ddl-auto=validate (production-safe)
+        dbConfigGen.applyDockerProductionOverride(srcMainResources);
 
         // 3. Provision database driver dependency in pom.xml
         if (driverClass != null) {

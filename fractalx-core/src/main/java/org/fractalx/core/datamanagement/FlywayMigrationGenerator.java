@@ -15,7 +15,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -60,24 +63,32 @@ public class FlywayMigrationGenerator {
         List<EntityInfo> entities = new ArrayList<>();
         if (!Files.exists(srcMainJava)) return entities;
 
+        // Pass 1: collect all @Embeddable class definitions (class name → column list)
+        Map<String, List<ColumnInfo>> embeddableTypes = new LinkedHashMap<>();
+        // Pass 2: collect all @MappedSuperclass definitions (class name → column list)
+        Map<String, List<ColumnInfo>> mappedSuperclasses = new LinkedHashMap<>();
+
+        List<CompilationUnit> allUnits = new ArrayList<>();
+
         try (Stream<Path> paths = Files.walk(srcMainJava)) {
             paths.filter(p -> p.toString().endsWith(".java")).forEach(path -> {
                 try {
                     CompilationUnit cu = javaParser.parse(path).getResult().orElse(null);
                     if (cu == null) return;
+                    allUnits.add(cu);
 
-                    // Only include entities that belong to this module's package.
-                    // Copied model classes from other modules (e.g. Payment, Product copied
-                    // for compilation) have a different package and must be excluded so that
-                    // the migration does not create empty foreign tables in this service's DB.
                     String filePkg = cu.getPackageDeclaration()
                             .map(pd -> pd.getNameAsString())
                             .orElse("");
                     if (!filePkg.startsWith(modulePackage)) return;
 
                     for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
-                        if (hasAnnotation(cls, "Entity")) {
-                            entities.add(extractEntityInfo(cls));
+                        if (hasAnnotation(cls, "Embeddable")) {
+                            List<ColumnInfo> cols = extractSimpleColumns(cls);
+                            embeddableTypes.put(cls.getNameAsString(), cols);
+                        } else if (hasAnnotation(cls, "MappedSuperclass")) {
+                            List<ColumnInfo> cols = extractSimpleColumns(cls);
+                            mappedSuperclasses.put(cls.getNameAsString(), cols);
                         }
                     }
                 } catch (Exception ignored) {
@@ -86,13 +97,70 @@ public class FlywayMigrationGenerator {
         } catch (IOException e) {
             log.warn("Could not scan entities: {}", e.getMessage());
         }
+
+        // Pass 3: collect local entity names for FK resolution
+        for (CompilationUnit cu : allUnits) {
+            String filePkg = cu.getPackageDeclaration()
+                    .map(pd -> pd.getNameAsString()).orElse("");
+            if (!filePkg.startsWith(modulePackage)) continue;
+            for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                if (hasAnnotation(cls, "Entity")) {
+                    EntityInfo info = extractEntityInfo(cls, embeddableTypes, mappedSuperclasses);
+                    entities.add(info);
+                }
+            }
+        }
+
+        // Resolve FK toTable references using detected entity class→table mapping
+        Map<String, String> classToTable = new HashMap<>();
+        for (EntityInfo e : entities) classToTable.put(e.className, e.tableName);
+        for (EntityInfo e : entities) {
+            for (FkInfo fk : e.pendingFks) {
+                String toTable = classToTable.get(fk.toEntityClass);
+                if (toTable != null) {
+                    e.fkConstraints.add(new FkConstraint(e.tableName, fk.fromColumn, toTable));
+                }
+                // If toEntityClass not in local entities, it's cross-service — leave as comment handled in buildMigrationScript
+            }
+        }
+
         return entities;
     }
 
-    private EntityInfo extractEntityInfo(ClassOrInterfaceDeclaration cls) {
+    /**
+     * Extracts simple column definitions from a class (used for @Embeddable and @MappedSuperclass).
+     * Does not handle relationships — only plain field types.
+     */
+    private List<ColumnInfo> extractSimpleColumns(ClassOrInterfaceDeclaration cls) {
+        List<ColumnInfo> cols = new ArrayList<>();
+        for (FieldDeclaration field : cls.getFields()) {
+            if (hasAnnotation(field, "Transient") || hasAnnotation(field, "Id")) continue;
+            if (hasAnnotation(field, "OneToMany") || hasAnnotation(field, "ManyToOne")
+                    || hasAnnotation(field, "OneToOne") || hasAnnotation(field, "ManyToMany")) continue;
+            String javaType = field.getElementType().asString();
+            String colName  = toSnakeCase(field.getVariable(0).getNameAsString());
+            cols.add(new ColumnInfo(colName, toSqlType(javaType), false));
+        }
+        return cols;
+    }
+
+    private EntityInfo extractEntityInfo(ClassOrInterfaceDeclaration cls,
+                                          Map<String, List<ColumnInfo>> embeddableTypes,
+                                          Map<String, List<ColumnInfo>> mappedSuperclasses) {
         EntityInfo info = new EntityInfo();
         info.className = cls.getNameAsString();
         info.tableName = resolveTableName(cls);
+
+        // Inherit fields from @MappedSuperclass (superclass hierarchy)
+        cls.getExtendedTypes().forEach(superType -> {
+            String superName = superType.getNameAsString();
+            List<ColumnInfo> superCols = mappedSuperclasses.get(superName);
+            if (superCols != null) {
+                info.fields.addAll(superCols);
+                log.debug("Inherited {} column(s) from @MappedSuperclass {} into {}",
+                        superCols.size(), superName, info.className);
+            }
+        });
 
         for (FieldDeclaration field : cls.getFields()) {
             if (hasAnnotation(field, "Id")) {
@@ -103,8 +171,32 @@ public class FlywayMigrationGenerator {
                 ));
             } else if (hasAnnotation(field, "ManyToOne") || hasAnnotation(field, "OneToOne")) {
                 // Emit FK column: prefer @JoinColumn(name="..."), fall back to fieldName_id
-                String colName = resolveJoinColumnName(field);
+                String colName     = resolveJoinColumnName(field);
+                String targetClass = field.getElementType().asString();
                 info.fields.add(new ColumnInfo(colName, "BIGINT", false));
+                // Track potential FK constraint — resolved to table name after all entities are scanned
+                info.pendingFks.add(new FkInfo(colName, targetClass));
+            } else if (hasAnnotation(field, "Embedded")) {
+                // Inline @Embedded fields from the @Embeddable class
+                String embeddedTypeName = field.getElementType().asString();
+                String fieldPrefix      = toSnakeCase(field.getVariable(0).getNameAsString()) + "_";
+                List<ColumnInfo> embCols = embeddableTypes.get(embeddedTypeName);
+                if (embCols != null && !embCols.isEmpty()) {
+                    // Apply @AttributeOverride if present, otherwise prefix with field name
+                    Map<String, String> overrides = resolveAttributeOverrides(field);
+                    for (ColumnInfo embCol : embCols) {
+                        String finalColName = overrides.getOrDefault(embCol.columnName,
+                                fieldPrefix + embCol.columnName);
+                        info.fields.add(new ColumnInfo(finalColName, embCol.sqlType, false));
+                    }
+                } else {
+                    // Embeddable class not found in scanned sources — emit a placeholder comment
+                    info.embeddedNotFound.add(embeddedTypeName);
+                    info.fields.add(new ColumnInfo(
+                            toSnakeCase(field.getVariable(0).getNameAsString()) + "_TODO",
+                            "VARCHAR(255) /* @Embedded: expand " + embeddedTypeName + " fields manually */",
+                            false));
+                }
             } else if (hasAnnotation(field, "ManyToMany")) {
                 // Local @ManyToMany (same-service) → emit a join table.
                 // Remote @ManyToMany fields are decoupled to @ElementCollection by
@@ -197,8 +289,39 @@ public class FlywayMigrationGenerator {
             }
         }
 
+        // Within-service FK constraints (cross-service FKs are replaced by ReferenceValidator)
+        boolean hasFks = entities.stream().anyMatch(e -> !e.fkConstraints.isEmpty());
+        if (hasFks) {
+            sb.append("-- ─── Within-service FK constraints ───────────────────────────────────────\n");
+            sb.append("-- Cross-service FKs are NOT enforced by the DB — ReferenceValidator handles\n");
+            sb.append("-- referential integrity for remote IDs via NetScope client calls instead.\n");
+            for (EntityInfo entity : entities) {
+                for (FkConstraint fk : entity.fkConstraints) {
+                    String constraintName = "fk_" + fk.fromTable + "_" + fk.fromColumn;
+                    sb.append("ALTER TABLE ").append(fk.fromTable)
+                      .append(" ADD CONSTRAINT ").append(constraintName).append("\n");
+                    sb.append("    FOREIGN KEY (").append(fk.fromColumn)
+                      .append(") REFERENCES ").append(fk.toTable).append("(id);\n\n");
+                }
+            }
+        }
+
+        // Warn about @Embedded types that could not be inlined (embeddable not in scanned sources)
+        boolean hasEmbeddedNotFound = entities.stream().anyMatch(e -> !e.embeddedNotFound.isEmpty());
+        if (hasEmbeddedNotFound) {
+            sb.append("-- ─── @Embedded types not inlined automatically ──────────────────────────\n");
+            for (EntityInfo entity : entities) {
+                for (String missing : entity.embeddedNotFound) {
+                    sb.append("-- TODO: Expand ").append(missing).append(" fields in table ")
+                      .append(entity.tableName).append(" manually.\n");
+                    sb.append("-- The @Embeddable class was not found in the scanned sources.\n");
+                }
+            }
+            sb.append("\n");
+        }
+
         // Outbox table — always generated for saga/event support
-        sb.append("-- Transactional outbox table (FractalX event publishing)\n");
+        sb.append("-- ─── Transactional outbox (FractalX event publishing) ─────────────────────\n");
         sb.append("CREATE TABLE IF NOT EXISTS fractalx_outbox (\n");
         sb.append("    id          BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n");
         sb.append("    event_type  VARCHAR(255) NOT NULL,\n");
@@ -207,10 +330,25 @@ public class FlywayMigrationGenerator {
         sb.append("    published   BOOLEAN NOT NULL DEFAULT FALSE,\n");
         sb.append("    retry_count INT NOT NULL DEFAULT 0,\n");
         sb.append("    created_at  TIMESTAMP NOT NULL,\n");
-        sb.append("    published_at TIMESTAMP\n");
+        sb.append("    published_at TIMESTAMP,\n");
+        sb.append("    correlation_id VARCHAR(255),\n");
+        sb.append("    traceparent    VARCHAR(55)\n");
         sb.append(");\n\n");
 
-        sb.append("CREATE INDEX IF NOT EXISTS idx_outbox_unpublished ON fractalx_outbox (published, created_at);\n");
+        sb.append("CREATE INDEX IF NOT EXISTS idx_outbox_unpublished ON fractalx_outbox (published, created_at);\n\n");
+
+        // Dead-letter queue for permanently-failed outbox events (retryCount >= MAX_RETRIES)
+        sb.append("-- ─── Outbox dead-letter queue — monitor for saga failures ─────────────────\n");
+        sb.append("CREATE TABLE IF NOT EXISTS fractalx_outbox_dlq (\n");
+        sb.append("    id                BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n");
+        sb.append("    original_event_id BIGINT,\n");
+        sb.append("    event_type        VARCHAR(255),\n");
+        sb.append("    aggregate_id      VARCHAR(255),\n");
+        sb.append("    payload           TEXT,\n");
+        sb.append("    correlation_id    VARCHAR(255),\n");
+        sb.append("    failed_reason     VARCHAR(500),\n");
+        sb.append("    failed_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n");
+        sb.append(");\n");
 
         return sb.toString();
     }
@@ -218,6 +356,39 @@ public class FlywayMigrationGenerator {
     // -------------------------------------------------------------------------
     // Utilities
     // -------------------------------------------------------------------------
+
+    /**
+     * Reads {@code @AttributeOverride(name="...", column=@Column(name="..."))} annotations
+     * on an {@code @Embedded} field and returns a map of original column name → overridden name.
+     */
+    private Map<String, String> resolveAttributeOverrides(FieldDeclaration field) {
+        Map<String, String> overrides = new HashMap<>();
+        // @AttributeOverrides({ @AttributeOverride(...), ... })
+        field.getAnnotationByName("AttributeOverrides").ifPresent(ann -> {
+            if (ann.isSingleMemberAnnotationExpr()) {
+                // value is an array or single @AttributeOverride — parse text heuristically
+                String txt = ann.asSingleMemberAnnotationExpr().getMemberValue().toString();
+                extractAttributeOverrideEntries(txt, overrides);
+            }
+        });
+        // @AttributeOverride(name="...", column=@Column(name="..."))
+        field.getAnnotationByName("AttributeOverride").ifPresent(ann -> {
+            if (ann.isNormalAnnotationExpr()) {
+                extractAttributeOverrideEntries(ann.toString(), overrides);
+            }
+        });
+        return overrides;
+    }
+
+    private void extractAttributeOverrideEntries(String text, Map<String, String> out) {
+        // Heuristic string extraction — handles both single and multiple @AttributeOverride
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("name\\s*=\\s*\"([^\"]+)\".*?column\\s*=\\s*@Column\\s*\\(\\s*name\\s*=\\s*\"([^\"]+)\"")
+                .matcher(text);
+        while (m.find()) {
+            out.put(toSnakeCase(m.group(1)), m.group(2));
+        }
+    }
 
     /**
      * Resolves the FK column name for a {@code @ManyToOne} or {@code @OneToOne} field.
@@ -294,9 +465,15 @@ public class FlywayMigrationGenerator {
     private static class EntityInfo {
         String className;
         String tableName;
-        final List<ColumnInfo> fields        = new ArrayList<>();
+        final List<ColumnInfo>   fields          = new ArrayList<>();
         /** DDL for join tables (@ManyToMany) and element-collection tables (@ElementCollection). */
-        final List<String>     extraTableDdl = new ArrayList<>();
+        final List<String>       extraTableDdl   = new ArrayList<>();
+        /** Pending FK infos to resolve once all entity class→table mappings are known. */
+        final List<FkInfo>       pendingFks      = new ArrayList<>();
+        /** Resolved FK constraints (populated after all entities are scanned). */
+        final List<FkConstraint> fkConstraints   = new ArrayList<>();
+        /** @Embedded types that were not found in the scanned sources. */
+        final List<String>       embeddedNotFound = new ArrayList<>();
     }
 
     private static class ColumnInfo {
@@ -308,6 +485,30 @@ public class FlywayMigrationGenerator {
             this.columnName = columnName;
             this.sqlType = sqlType;
             this.isPrimaryKey = isPrimaryKey;
+        }
+    }
+
+    /** Tracks a potential FK relationship (target entity class not yet resolved to a table name). */
+    private static class FkInfo {
+        final String fromColumn;
+        final String toEntityClass;
+
+        FkInfo(String fromColumn, String toEntityClass) {
+            this.fromColumn    = fromColumn;
+            this.toEntityClass = toEntityClass;
+        }
+    }
+
+    /** Resolved FK constraint ready for ALTER TABLE DDL emission. */
+    private static class FkConstraint {
+        final String fromTable;
+        final String fromColumn;
+        final String toTable;
+
+        FkConstraint(String fromTable, String fromColumn, String toTable) {
+            this.fromTable  = fromTable;
+            this.fromColumn = fromColumn;
+            this.toTable    = toTable;
         }
     }
 }
