@@ -4,6 +4,9 @@ import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.ModuleAnalyzer;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.generator.ServiceGenerator;
+import org.fractalx.core.validation.DecompositionValidator;
+import org.fractalx.core.validation.ValidationIssue;
+import org.fractalx.core.validation.ValidationReport;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
@@ -110,6 +113,32 @@ public class DecomposeMojo extends FractalxBaseMojo {
                         + a(DIM) + "  :" + m.getPort() + a(RST) + deps);
             }
             out.println();
+
+            // ── Pre-generation validation ─────────────────────────────────────
+            ValidationReport validationReport =
+                    new DecompositionValidator().validate(modules, sourcePath);
+            for (ValidationIssue w : validationReport.warnings()) {
+                warn("[" + w.ruleId() + "] " + w.moduleName() + ": " + w.message());
+                warn("    Fix: " + w.fix());
+            }
+            if (validationReport.hasErrors()) {
+                String sep = "\u2500".repeat(58);
+                out.println();
+                error(sep);
+                error(" FractalX Decomposition Validation \u2014 "
+                        + validationReport.errors().size() + " error(s) found");
+                error(sep);
+                for (ValidationIssue e : validationReport.errors()) {
+                    error("[" + e.ruleId() + "] " + e.moduleName() + ": " + e.message());
+                    error("    Fix: " + e.fix());
+                }
+                error(sep);
+                error("Fix the issue(s) above and re-run: mvn fractalx:decompose");
+                throw new MojoExecutionException(
+                        validationReport.errors().size()
+                        + " decomposition validation error(s). See output above.");
+            }
+            // ─────────────────────────────────────────────────────────────────
 
             if (generate) {
                 boolean canAsk = ansi && interactive;
