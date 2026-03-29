@@ -3,7 +3,6 @@ package org.fractalx.core.validation.rules;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
-import com.github.javaparser.ast.body.FieldDeclaration;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.validation.ValidationContext;
 import org.fractalx.core.validation.ValidationIssue;
@@ -65,40 +64,20 @@ public class LombokConstructorRule implements ValidationRule {
             ClassOrInterfaceDeclaration cls = classDecl.get();
 
             boolean hasAllArgs      = cls.getAnnotationByName("AllArgsConstructor").isPresent();
-            boolean hasRequiredArgs = cls.getAnnotationByName("RequiredArgsConstructor").isPresent();
             boolean hasExplicitDeps = !module.getDependencies().isEmpty();
 
-            if (hasAllArgs && !hasRequiredArgs) {
-                // Check whether the class actually has injected service fields that we'd miss
-                boolean hasServiceFields = cls.getFields().stream().anyMatch(this::looksLikeServiceField);
-                if (hasServiceFields && !hasExplicitDeps) {
-                    issues.add(new ValidationIssue(
-                            ValidationSeverity.WARNING, ruleId(), module.getServiceName(),
-                            module.getClassName() + " uses @AllArgsConstructor — "
-                            + "ModuleAnalyzer cannot reliably detect cross-module dependencies "
-                            + "from Lombok-generated constructors",
-                            "Switch to @RequiredArgsConstructor and mark each injected service "
-                            + "field as 'private final', OR declare dependencies explicitly: "
-                            + "@DecomposableModule(dependencies = {PaymentService.class, ...})"));
-                }
+            if (hasAllArgs && !hasExplicitDeps) {
+                issues.add(new ValidationIssue(
+                        ValidationSeverity.WARNING, ruleId(), module.getServiceName(),
+                        module.getClassName() + " uses @AllArgsConstructor — "
+                        + "ModuleAnalyzer cannot reliably detect cross-module dependencies "
+                        + "from Lombok-generated constructors",
+                        "Switch to @RequiredArgsConstructor and mark each injected service "
+                        + "field as 'private final', OR declare dependencies explicitly: "
+                        + "@DecomposableModule(dependencies = {PaymentService.class, ...})"));
             }
         }
         return issues;
-    }
-
-    // -------------------------------------------------------------------------
-
-    /** Returns true if the field type looks like an injected service dependency. */
-    private boolean looksLikeServiceField(FieldDeclaration field) {
-        for (var variable : field.getVariables()) {
-            String typeName = variable.getTypeAsString();
-            if (typeName.endsWith("Service") || typeName.endsWith("Client")
-                    || typeName.endsWith("Gateway") || typeName.endsWith("Manager")
-                    || typeName.endsWith("Facade") || typeName.endsWith("Handler")) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private Path resolveSourceFile(Path sourceRoot, FractalModule module) {

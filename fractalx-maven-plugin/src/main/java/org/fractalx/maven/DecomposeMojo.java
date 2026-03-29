@@ -7,7 +7,9 @@ import org.fractalx.core.generator.ServiceGenerator;
 import org.fractalx.core.validation.DecompositionValidator;
 import org.fractalx.core.validation.ValidationIssue;
 import org.fractalx.core.validation.ValidationReport;
+import org.fractalx.core.validation.ValidationReport.Partition;
 import org.apache.maven.plugin.MojoExecutionException;
+import org.apache.maven.plugins.annotations.Execute;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
@@ -37,6 +39,7 @@ import java.util.List;
  * concise Vercel-style summary.
  */
 @Mojo(name = "decompose", defaultPhase = LifecyclePhase.PROCESS_CLASSES)
+@Execute(phase = LifecyclePhase.COMPILE)
 public class DecomposeMojo extends FractalxBaseMojo {
 
     private static final int GATEWAY_PORT  = 9999;
@@ -115,27 +118,27 @@ public class DecomposeMojo extends FractalxBaseMojo {
             out.println();
 
             // ── Pre-generation validation ─────────────────────────────────────
-            ValidationReport validationReport =
-                    new DecompositionValidator().validate(modules, sourcePath);
-            for (ValidationIssue w : validationReport.warnings()) {
+            Partition validation =
+                    new DecompositionValidator().validate(modules, sourcePath).partition();
+            for (ValidationIssue w : validation.warnings()) {
                 warn("[" + w.ruleId() + "] " + w.moduleName() + ": " + w.message());
                 warn("    Fix: " + w.fix());
             }
-            if (validationReport.hasErrors()) {
+            if (!validation.errors().isEmpty()) {
                 String sep = "\u2500".repeat(58);
                 out.println();
                 error(sep);
                 error(" FractalX Decomposition Validation \u2014 "
-                        + validationReport.errors().size() + " error(s) found");
+                        + validation.errors().size() + " error(s) found");
                 error(sep);
-                for (ValidationIssue e : validationReport.errors()) {
+                for (ValidationIssue e : validation.errors()) {
                     error("[" + e.ruleId() + "] " + e.moduleName() + ": " + e.message());
                     error("    Fix: " + e.fix());
                 }
                 error(sep);
                 error("Fix the issue(s) above and re-run: mvn fractalx:decompose");
                 throw new MojoExecutionException(
-                        validationReport.errors().size()
+                        validation.errors().size()
                         + " decomposition validation error(s). See output above.");
             }
             // ─────────────────────────────────────────────────────────────────
