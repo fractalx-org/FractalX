@@ -50,16 +50,26 @@ public class DockerComposeGenerator {
         services.append("    ports:\n");
         services.append("      - \"").append(JAEGER_UI_PORT).append(":").append(JAEGER_UI_PORT).append("\"\n");
         services.append("      - \"").append(JAEGER_OTLP_PORT).append(":").append(JAEGER_OTLP_PORT).append("\"\n");
-        services.append("      - \"4318:4318\"\n\n");
+        services.append("      - \"4318:4318\"\n");
+        services.append("    healthcheck:\n");
+        services.append("      test: [\"CMD\", \"wget\", \"--spider\", \"-q\", \"http://localhost:")
+                .append(JAEGER_UI_PORT).append("\"]\n");
+        services.append("      interval: 10s\n      timeout: 5s\n      retries: 3\n\n");
 
-        // Logger service
+        // Logger service — depends on registry so it can self-register on startup
         services.append("  logger-service:\n");
         services.append("    build:\n      context: ./logger-service\n      dockerfile: Dockerfile\n");
         services.append("    ports:\n      - \"").append(config.loggerPort()).append(":").append(config.loggerPort()).append("\"\n");
         services.append("    environment:\n");
         services.append("      - SPRING_PROFILES_ACTIVE=docker\n");
+        services.append("      - FRACTALX_REGISTRY_URL=http://fractalx-registry:").append(regPort).append("\n");
         services.append("      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:").append(JAEGER_OTLP_PORT).append("\n");
-        services.append("      - OTEL_SERVICE_NAME=logger-service\n\n");
+        services.append("      - OTEL_SERVICE_NAME=logger-service\n");
+        services.append("    healthcheck:\n");
+        services.append("      test: [\"CMD\", \"wget\", \"--spider\", \"-q\",");
+        services.append(" \"http://localhost:").append(config.loggerPort()).append("/actuator/health\"]\n");
+        services.append("      interval: 10s\n      timeout: 5s\n      retries: 3\n");
+        services.append("    depends_on:\n      fractalx-registry:\n        condition: service_healthy\n\n");
 
         // fractalx-registry (must start first)
         services.append("  fractalx-registry:\n");

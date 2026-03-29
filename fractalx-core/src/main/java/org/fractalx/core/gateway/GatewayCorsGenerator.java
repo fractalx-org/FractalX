@@ -18,6 +18,8 @@ public class GatewayCorsGenerator {
         String content = """
                 package org.fractalx.gateway.cors;
 
+                import org.slf4j.Logger;
+                import org.slf4j.LoggerFactory;
                 import org.springframework.beans.factory.annotation.Value;
                 import org.springframework.context.annotation.Bean;
                 import org.springframework.context.annotation.Configuration;
@@ -45,6 +47,8 @@ public class GatewayCorsGenerator {
                 @Configuration
                 public class GatewayCorsConfig {
 
+                    private static final Logger log = LoggerFactory.getLogger(GatewayCorsConfig.class);
+
                     @Value("${fractalx.gateway.cors.allowed-origins:http://localhost:3000,http://localhost:4200,http://localhost:8080}")
                     private String allowedOriginsRaw;
 
@@ -60,14 +64,27 @@ public class GatewayCorsGenerator {
                     @Bean
                     public CorsWebFilter corsWebFilter() {
                         CorsConfiguration config = new CorsConfiguration();
-                        config.setAllowedOrigins(Arrays.asList(allowedOriginsRaw.split(",")));
+                        List<String> origins = Arrays.asList(allowedOriginsRaw.split(","));
+                        config.setAllowedOrigins(origins);
                         config.setAllowedMethods(Arrays.asList(allowedMethodsRaw.split(",")));
-                        config.setAllowedHeaders(List.of("*"));
+                        // Explicit header whitelist instead of wildcard "*" for better security posture
+                        config.setAllowedHeaders(List.of(
+                                "Authorization", "Content-Type", "Accept", "Origin",
+                                "X-Correlation-Id", "X-Request-Id", "X-Internal-Token", "X-Api-Key"));
                         config.setExposedHeaders(List.of(
                                 "X-Request-Id", "X-Correlation-Id", "X-Auth-Method",
                                 "X-RateLimit-Limit", "X-RateLimit-Remaining",
                                 "Location", "Content-Disposition"));
-                        config.setAllowCredentials(allowCredentials);
+                        // CORS invariant: allowCredentials=true is incompatible with wildcard origins (CORS spec §7.3).
+                        // A browser will silently refuse cross-origin requests when both are set.
+                        if (allowCredentials && origins.contains("*")) {
+                            log.error("[CORS] CONFIGURATION ERROR: allowCredentials=true is incompatible with " +
+                                      "allowedOrigins=* (violates CORS spec). Credentials disabled for safety. " +
+                                      "Set fractalx.gateway.cors.allowed-origins to explicit origins.");
+                            config.setAllowCredentials(false);
+                        } else {
+                            config.setAllowCredentials(allowCredentials);
+                        }
                         config.setMaxAge(maxAge);
 
                         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

@@ -127,6 +127,9 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
                     .map(pd -> pd.getNameAsString())
                     .orElse("");
 
+            // Track seen method signatures to handle overloads by appending a numeric suffix
+            Set<String> seenMethodNames = new HashSet<>();
+
             cu.findAll(ClassOrInterfaceDeclaration.class).stream()
                     .filter(c -> c.getNameAsString().equals(beanType))
                     .findFirst()
@@ -134,21 +137,42 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
                             classDecl.getMethods().forEach(method -> {
                                 if (method.isPublic() && !method.isStatic()) {
                                     List<String> params = method.getParameters().stream()
-                                            .map(p -> p.getType().asString() + " " + p.getNameAsString())
+                                            // Use getTypeAsString() to preserve generic type parameters
+                                            // e.g., List<Product> instead of raw List
+                                            .map(p -> p.getTypeAsString() + " " + p.getNameAsString())
                                             .collect(Collectors.toList());
 
-                                    collectTypeImports(method.getType().asString(), importMap,
+                                    // Preserve generic return type (e.g. List<Product> not just List)
+                                    String returnType = method.getTypeAsString();
+
+                                    collectTypeImports(returnType, importMap,
                                             requiredImports, sourceFileDir, packageName);
                                     method.getParameters().forEach(p ->
-                                            collectTypeImports(p.getType().asString(), importMap,
+                                            collectTypeImports(p.getTypeAsString(), importMap,
                                                     requiredImports, sourceFileDir, packageName));
+
+                                    // Extract throws clauses so the generated interface is source-compatible
+                                    List<String> thrown = method.getThrownExceptions().stream()
+                                            .map(t -> t.asString())
+                                            .collect(Collectors.toList());
+
+                                    // Deduplicate overloaded method names by appending numeric suffix
+                                    String methodName = method.getNameAsString();
+                                    if (!seenMethodNames.add(methodName)) {
+                                        int suffix = 2;
+                                        while (!seenMethodNames.add(methodName + suffix)) suffix++;
+                                        log.debug("Overloaded method {}.{}() — generated as {}{}() in client interface",
+                                                beanType, methodName, methodName, suffix);
+                                        methodName = methodName + suffix;
+                                    }
 
                                     calls.add(new CrossModuleCall(
                                             beanType,
                                             targetServiceName,
-                                            method.getNameAsString(),
-                                            method.getType().asString(),
-                                            params
+                                            methodName,
+                                            returnType,
+                                            params,
+                                            thrown
                                     ));
                                 }
                             })
@@ -322,7 +346,11 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
             String params = String.join(", ", method.getParameters());
             sb.append("    ").append(method.getReturnType())
                     .append(" ").append(method.getMethodName())
-                    .append("(").append(params).append(");\n\n");
+                    .append("(").append(params).append(")");
+            if (!method.getThrownExceptions().isEmpty()) {
+                sb.append(" throws ").append(String.join(", ", method.getThrownExceptions()));
+            }
+            sb.append(";\n\n");
         }
 
         sb.append("}\n");

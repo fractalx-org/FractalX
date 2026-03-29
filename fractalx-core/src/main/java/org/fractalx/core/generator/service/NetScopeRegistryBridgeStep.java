@@ -81,7 +81,7 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
                     }
 
                     private void resolveAndUpdate(String serviceName) {
-                        for (int attempt = 1; attempt <= 5; attempt++) {
+                        for (int attempt = 1; attempt <= 10; attempt++) {
                             try {
                                 @SuppressWarnings("unchecked")
                                 Map<String, Object> reg = restTemplate.getForObject(
@@ -98,13 +98,15 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
                                     return;
                                 }
                             } catch (Exception e) {
-                                log.warn("Registry lookup for {} failed (attempt {}/5): {}",
+                                log.warn("Registry lookup for {} failed (attempt {}/10): {}",
                                         serviceName, attempt, e.getMessage());
                             }
-                            try { Thread.sleep(300L * attempt); }
+                            long backoff = Math.min(300L * (1L << (attempt - 1)), 5000L);
+                            try { Thread.sleep(backoff); }
                             catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
                         }
-                        log.warn("Could not resolve {} from registry — using static YAML fallback", serviceName);
+                        log.error("Could not resolve {} from registry after 10 attempts — using static YAML fallback. " +
+                                  "Check registry health and FRACTALX_REGISTRY_URL env var.", serviceName);
                     }
                 }
                 """.formatted(pkg, peerLoops.toString());

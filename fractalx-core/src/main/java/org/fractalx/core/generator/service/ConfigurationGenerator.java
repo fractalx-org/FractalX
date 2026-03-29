@@ -99,7 +99,8 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     org.fractalx: DEBUG
                     org.fractalx.netscope: DEBUG
                 """.formatted(module.getServiceName(), module.getPort(),
-                cfg.registryUrl(), cfg.sagaPort(), tracingEnabled, cfg.loggerUrl(),
+                cfg.registryUrl(), cfg.sagaPort(), tracingEnabled,
+                cfg.loggerUrl().replaceAll("/api/logs$", ""),
                 otelBlock, module.grpcPort(), samplingProbability);
     }
 

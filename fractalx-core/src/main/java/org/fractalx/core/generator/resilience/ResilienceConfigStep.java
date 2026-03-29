@@ -3,6 +3,7 @@ package org.fractalx.core.generator.resilience;
 import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
+import org.fractalx.core.generator.service.NetScopeClientGenerator;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +52,7 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
     private void generateResilienceConfig(Path pkgPath, String pkg, List<String> dependencies) throws IOException {
         StringBuilder cbBeans = new StringBuilder();
         for (String dep : dependencies) {
-            String svcName  = beanTypeToServiceName(dep);
+            String svcName  = NetScopeClientGenerator.beanTypeToServiceName(dep);
             String beanName = toCamelCase(svcName);
             cbBeans.append("""
 
@@ -86,7 +87,7 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
         StringBuilder yaml = new StringBuilder("\nresilience4j:\n");
         yaml.append("  circuitbreaker:\n    instances:\n");
         for (String dep : dependencies) {
-            String svc = beanTypeToServiceName(dep);
+            String svc = NetScopeClientGenerator.beanTypeToServiceName(dep);
             yaml.append("      ").append(svc).append(":\n");
             yaml.append("        failure-rate-threshold: ").append(r.failureRateThreshold()).append("\n");
             yaml.append("        wait-duration-in-open-state: ").append(r.waitDurationInOpenState()).append("\n");
@@ -96,7 +97,7 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
         }
         yaml.append("  retry:\n    instances:\n");
         for (String dep : dependencies) {
-            String svc = beanTypeToServiceName(dep);
+            String svc = NetScopeClientGenerator.beanTypeToServiceName(dep);
             yaml.append("      ").append(svc).append(":\n");
             yaml.append("        max-attempts: ").append(r.retryMaxAttempts()).append("\n");
             yaml.append("        wait-duration: ").append(r.retryWaitDuration()).append("\n");
@@ -104,7 +105,7 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
         }
         yaml.append("  timelimiter:\n    instances:\n");
         for (String dep : dependencies) {
-            String svc = beanTypeToServiceName(dep);
+            String svc = NetScopeClientGenerator.beanTypeToServiceName(dep);
             yaml.append("      ").append(svc).append(":\n");
             yaml.append("        timeout-duration: ").append(r.timeoutDuration()).append("\n");
         }
@@ -142,9 +143,4 @@ public class ResilienceConfigStep implements ServiceFileGenerator {
         return sb.toString();
     }
 
-    private static String beanTypeToServiceName(String beanType) {
-        String name  = beanType.replaceAll("(?i)(Service|Client)$", "");
-        String kebab = name.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
-        return kebab + "-service";
-    }
 }

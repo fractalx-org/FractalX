@@ -29,6 +29,7 @@ public class GatewayRateLimiterGenerator {
 
                 import org.springframework.boot.context.properties.ConfigurationProperties;
                 import org.springframework.context.annotation.Configuration;
+                import org.springframework.scheduling.annotation.EnableScheduling;
 
                 import java.util.HashMap;
                 import java.util.Map;
@@ -46,6 +47,7 @@ public class GatewayRateLimiterGenerator {
                  * </pre>
                  */
                 @Configuration
+                @EnableScheduling
                 @ConfigurationProperties(prefix = "fractalx.gateway.rate-limit")
                 public class RateLimitConfig {
 
@@ -79,16 +81,24 @@ public class GatewayRateLimiterGenerator {
                 import org.springframework.web.server.ServerWebExchange;
                 import reactor.core.publisher.Mono;
 
+                import org.springframework.scheduling.annotation.Scheduled;
+
                 import java.util.concurrent.ConcurrentHashMap;
 
                 /**
                  * Sliding-window in-memory rate limiter per remote IP + service path.
                  * No Redis required — suitable for single-instance gateway.
+                 *
+                 * NOTE [FractalX]: This rate limiter is in-memory and per-instance.
+                 * For distributed rate limiting across multiple gateway replicas, replace with
+                 * a Redis-backed implementation (e.g., Spring Cloud Gateway's RedisRateLimiter).
+                 * The current implementation resets cleanly on gateway restart.
                  */
                 @Component
                 public class RateLimitFilter implements GlobalFilter, Ordered {
 
                     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
+                    private static final long WINDOW_MS = 1000L;
 
                     private final RateLimitConfig config;
                     // key: "ip:service", value: [windowStartMs, count]
@@ -113,16 +123,17 @@ public class GatewayRateLimiterGenerator {
                         long[] slot = windows.computeIfAbsent(key, k -> new long[]{now, 0});
 
                         synchronized (slot) {
-                            if (now - slot[0] > 1000L) {
+                            if (now - slot[0] > WINDOW_MS) {
                                 slot[0] = now;
                                 slot[1] = 0;
                             }
                             slot[1]++;
+                            // Always emit limit headers so clients can proactively back off
+                            exchange.getResponse().getHeaders().set("X-RateLimit-Limit", String.valueOf(limit));
                             if (slot[1] > limit) {
                                 log.warn("Rate limit exceeded: ip={} service={} count={}", ip, svcName, slot[1]);
                                 exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
                                 exchange.getResponse().getHeaders().set("Retry-After", "1");
-                                exchange.getResponse().getHeaders().set("X-RateLimit-Limit",     String.valueOf(limit));
                                 exchange.getResponse().getHeaders().set("X-RateLimit-Remaining", "0");
                                 return exchange.getResponse().setComplete();
                             }
@@ -130,6 +141,27 @@ public class GatewayRateLimiterGenerator {
                                     .set("X-RateLimit-Remaining", String.valueOf(limit - slot[1]));
                         }
                         return chain.filter(exchange);
+                    }
+
+                    /**
+                     * Evicts stale window entries to prevent unbounded memory growth.
+                     * Runs every 60 seconds. Removes entries whose window started more than
+                     * 2 seconds ago (they will be re-created fresh on the next request).
+                     */
+                    @Scheduled(fixedRate = 60_000)
+                    public void evictStaleWindows() {
+                        long cutoff = System.currentTimeMillis() - WINDOW_MS * 2;
+                        int removed = 0;
+                        var it = windows.entrySet().iterator();
+                        while (it.hasNext()) {
+                            if (it.next().getValue()[0] < cutoff) {
+                                it.remove();
+                                removed++;
+                            }
+                        }
+                        if (removed > 0) {
+                            log.debug("Rate limiter evicted {} stale windows", removed);
+                        }
                     }
 
                     private String extractServiceName(String path) {

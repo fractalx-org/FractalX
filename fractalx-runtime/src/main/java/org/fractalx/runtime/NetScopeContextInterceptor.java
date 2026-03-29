@@ -122,9 +122,18 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
                         io.jsonwebtoken.Claims claims = io.jsonwebtoken.Jwts.parserBuilder()
                                 .setSigningKey(io.jsonwebtoken.security.Keys.hmacShaKeyFor(
                                         secret.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                                // Validate issuer — only accept tokens minted by the gateway
+                                .requireIssuer("fractalx-gateway")
                                 .build()
                                 .parseClaimsJws(internalToken)
                                 .getBody();
+                        // Validate audience — only accept tokens intended for internal service calls
+                        String aud = claims.getAudience();
+                        if (!"fractalx-internal".equals(aud)) {
+                            log.warn("NetScope: x-internal-token has unexpected audience '{}' — rejecting", aud);
+                            super.onHalfClose();
+                            return;
+                        }
                         String userId   = claims.getSubject();
                         String rolesStr = claims.get("roles", String.class);
                         java.util.List<org.springframework.security.core.authority.SimpleGrantedAuthority> auths =
@@ -142,6 +151,9 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
                                         new org.springframework.security.authentication
                                                 .UsernamePasswordAuthenticationToken(userId, internalToken, auths));
                         log.debug("NetScope: established Authentication for user={} from x-internal-token", userId);
+                    } catch (io.jsonwebtoken.ExpiredJwtException e) {
+                        log.warn("NetScope: x-internal-token expired for subject={} — request proceeds without auth. " +
+                                 "Check gateway clock sync or increase token TTL.", e.getClaims().getSubject());
                     } catch (Exception e) {
                         log.debug("NetScope: x-internal-token validation failed — {}", e.getMessage());
                     }
