@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Validates the integrity of {@code @DistributedSaga}-annotated methods.
@@ -27,6 +28,10 @@ import java.util.Map;
  * </ul>
  */
 public class SagaIntegrityRule implements ValidationRule {
+
+    private static final String ID_NO_ID       = "SAGA_NO_ID";
+    private static final String ID_DUPLICATE   = "SAGA_DUPLICATE_ID";
+    private static final String ID_BAD_TIMEOUT = "SAGA_BAD_TIMEOUT";
 
     @Override
     public String ruleId() { return "SAGA_INTEGRITY"; }
@@ -45,21 +50,19 @@ public class SagaIntegrityRule implements ValidationRule {
         for (SagaDefinition saga : sagas) {
             String id = saga.getSagaId();
 
-            // SAGA_NO_ID
             if (id == null || id.isBlank()) {
                 issues.add(new ValidationIssue(
-                        ValidationSeverity.ERROR, "SAGA_NO_ID", saga.getOwnerServiceName(),
+                        ValidationSeverity.ERROR, ID_NO_ID, saga.getOwnerServiceName(),
                         "@DistributedSaga on " + saga.getOwnerClassName() + "." + saga.getMethodName()
                         + " has no sagaId",
                         "Add sagaId = \"" + saga.getMethodName().toLowerCase().replace("_", "-")
                         + "-saga\" to the @DistributedSaga annotation"));
-                continue; // don't check other constraints without an id
+                continue;
             }
 
-            // SAGA_BAD_TIMEOUT
             if (saga.getTimeoutMs() <= 0) {
                 issues.add(new ValidationIssue(
-                        ValidationSeverity.ERROR, "SAGA_BAD_TIMEOUT", saga.getOwnerServiceName(),
+                        ValidationSeverity.ERROR, ID_BAD_TIMEOUT, saga.getOwnerServiceName(),
                         "@DistributedSaga(sagaId = \"" + id + "\") has timeout " + saga.getTimeoutMs()
                         + " ms — must be > 0",
                         "Set a positive timeout, e.g. @DistributedSaga(sagaId = \"" + id
@@ -69,19 +72,18 @@ public class SagaIntegrityRule implements ValidationRule {
             byId.computeIfAbsent(id, k -> new ArrayList<>()).add(saga);
         }
 
-        // SAGA_DUPLICATE_ID
-        for (Map.Entry<String, List<SagaDefinition>> entry : byId.entrySet()) {
-            if (entry.getValue().size() > 1) {
-                String locations = entry.getValue().stream()
+        byId.forEach((id, group) -> {
+            if (group.size() > 1) {
+                String locations = group.stream()
                         .map(s -> s.getOwnerClassName() + "." + s.getMethodName())
-                        .reduce((String a, String b) -> a + ", " + b).orElse("");
+                        .collect(Collectors.joining(", "));
                 issues.add(new ValidationIssue(
-                        ValidationSeverity.ERROR, "SAGA_DUPLICATE_ID", "—",
-                        "sagaId \"" + entry.getKey() + "\" is declared in " + entry.getValue().size()
+                        ValidationSeverity.ERROR, ID_DUPLICATE, "—",
+                        "sagaId \"" + id + "\" is declared in " + group.size()
                         + " methods: " + locations,
                         "Each @DistributedSaga must have a globally unique sagaId"));
             }
-        }
+        });
 
         return issues;
     }
