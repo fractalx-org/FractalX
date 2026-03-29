@@ -9,7 +9,7 @@ import java.nio.file.Path
 
 /**
  * Verifies that GatewayObservabilityGenerator creates three filters in the
- * gateway observability package: RequestLoggingFilter (order -100), TracingFilter
+ * gateway observability package: TracingFilter (order -100), RequestLoggingFilter
  * (order -99), and GatewayMetricsFilter (order -98).
  */
 class GatewayObservabilityGeneratorSpec extends Specification {
@@ -43,7 +43,7 @@ class GatewayObservabilityGeneratorSpec extends Specification {
         Files.exists(observabilityPkg().resolve("RequestLoggingFilter.java"))
     }
 
-    def "TracingFilter is a @Component implementing GlobalFilter with order -99"() {
+    def "TracingFilter is a @Component implementing GlobalFilter with order -100"() {
         when:
         generator.generate(srcMainJava)
 
@@ -52,7 +52,7 @@ class GatewayObservabilityGeneratorSpec extends Specification {
         c.startsWith("package org.fractalx.gateway.observability;")
         c.contains("@Component")
         c.contains("implements GlobalFilter, Ordered")
-        c.contains("-99")
+        c.contains("-100")
     }
 
     def "TracingFilter generates a UUID X-Request-Id per request"() {
@@ -82,7 +82,7 @@ class GatewayObservabilityGeneratorSpec extends Specification {
         tracingFilter().contains("getResponse().getHeaders().set(\"X-Request-Id\"")
     }
 
-    def "RequestLoggingFilter is a @Component implementing GlobalFilter with order -100"() {
+    def "RequestLoggingFilter is a @Component implementing GlobalFilter with order -99"() {
         when:
         generator.generate(srcMainJava)
 
@@ -91,7 +91,7 @@ class GatewayObservabilityGeneratorSpec extends Specification {
         c.startsWith("package org.fractalx.gateway.observability;")
         c.contains("@Component")
         c.contains("implements GlobalFilter, Ordered")
-        c.contains("-100")
+        c.contains("-99")
     }
 
     def "RequestLoggingFilter logs method, path, status, duration, and correlationId"() {

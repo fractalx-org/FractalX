@@ -29,23 +29,41 @@ public final class CrossModuleCall {
      */
     private final List<String> parameters;
 
+    /**
+     * Checked exception types declared on the method (e.g., {@code ["IOException"]}).
+     * Empty when the method declares no checked exceptions.
+     */
+    private final List<String> thrownExceptions;
+
+    /** Backward-compatible 5-arg constructor — assumes no thrown exceptions. */
     public CrossModuleCall(String targetBeanType,
                            String targetServiceName,
                            String methodName,
                            String returnType,
                            List<String> parameters) {
+        this(targetBeanType, targetServiceName, methodName, returnType, parameters, List.of());
+    }
+
+    public CrossModuleCall(String targetBeanType,
+                           String targetServiceName,
+                           String methodName,
+                           String returnType,
+                           List<String> parameters,
+                           List<String> thrownExceptions) {
         this.targetBeanType    = targetBeanType;
         this.targetServiceName = targetServiceName;
         this.methodName        = methodName;
         this.returnType        = returnType;
         this.parameters        = List.copyOf(parameters);
+        this.thrownExceptions  = List.copyOf(thrownExceptions);
     }
 
-    public String getTargetBeanType()    { return targetBeanType; }
-    public String getTargetServiceName() { return targetServiceName; }
-    public String getMethodName()        { return methodName; }
-    public String getReturnType()        { return returnType; }
-    public List<String> getParameters()  { return parameters; }
+    public String getTargetBeanType()       { return targetBeanType; }
+    public String getTargetServiceName()    { return targetServiceName; }
+    public String getMethodName()           { return methodName; }
+    public String getReturnType()           { return returnType; }
+    public List<String> getParameters()     { return parameters; }
+    public List<String> getThrownExceptions() { return thrownExceptions; }
 
     @Override
     public String toString() {

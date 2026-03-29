@@ -43,6 +43,7 @@ public class GatewaySecurityGenerator {
 
         generateAuthProperties(pkg, profile);
         generateSecurityConfig(pkg, profile);
+        generateInternalTokenMinter(pkg);
         generateJwtBearerFilter(pkg);
         generateApiKeyFilter(pkg);
         generateBasicAuthFilter(pkg);
@@ -300,6 +301,66 @@ public class GatewaySecurityGenerator {
         return chain.toString();
     }
 
+    private void generateInternalTokenMinter(Path pkg) throws IOException {
+        String content = """
+                package org.fractalx.gateway.security;
+
+                import io.jsonwebtoken.SignatureAlgorithm;
+                import io.jsonwebtoken.Jwts;
+                import io.jsonwebtoken.security.Keys;
+
+                import javax.crypto.SecretKey;
+                import java.nio.charset.StandardCharsets;
+                import java.util.Date;
+
+                /**
+                 * Utility for minting short-lived Internal Call Tokens forwarded by the gateway
+                 * to downstream services via the {@code X-Internal-Token} header.
+                 *
+                 * <p>All gateway auth filters (Bearer JWT, Basic Auth, API Key) use this utility
+                 * so that every authenticated request — regardless of auth method — carries a
+                 * standardised internal token. Downstream services validate this token via
+                 * {@code GatewayAuthHeaderFilter} or the FractalX runtime interceptor.
+                 *
+                 * <p>Token claims:
+                 * <ul>
+                 *   <li>{@code sub}   — user identifier (username, key prefix, or JWT subject)</li>
+                 *   <li>{@code roles} — comma-separated roles (may be empty for API key auth)</li>
+                 *   <li>{@code iss}   — "fractalx-gateway" (fixed; validated by services)</li>
+                 *   <li>{@code aud}   — "fractalx-internal" (fixed; validated by services)</li>
+                 *   <li>{@code exp}   — now + 30 seconds (short-lived to limit replay window)</li>
+                 * </ul>
+                 */
+                public final class InternalTokenMinter {
+
+                    private InternalTokenMinter() {}
+
+                    /**
+                     * Mints a signed internal call token.
+                     *
+                     * @param subject  user identifier forwarded as {@code sub} claim
+                     * @param roles    comma-separated role string forwarded as {@code roles} claim
+                     * @param secret   HMAC secret — must match {@code fractalx.security.internal-jwt-secret}
+                     *                 on all downstream services
+                     * @return compact JWT string
+                     */
+                    public static String mint(String subject, String roles, String secret) {
+                        SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+                        return Jwts.builder()
+                                .setSubject(subject)
+                                .claim("roles", roles != null ? roles : "")
+                                .setIssuer("fractalx-gateway")
+                                .setAudience("fractalx-internal")
+                                .setIssuedAt(new Date())
+                                .setExpiration(new Date(System.currentTimeMillis() + 30_000L))
+                                .signWith(key, SignatureAlgorithm.HS256)
+                                .compact();
+                    }
+                }
+                """;
+        Files.writeString(pkg.resolve("InternalTokenMinter.java"), content);
+    }
+
     private void generateJwtBearerFilter(Path pkg) throws IOException {
         String content = """
                 package org.fractalx.gateway.security;
@@ -307,7 +368,6 @@ public class GatewaySecurityGenerator {
                 import io.jsonwebtoken.Claims;
                 import io.jsonwebtoken.JwtException;
                 import io.jsonwebtoken.Jwts;
-                import io.jsonwebtoken.SignatureAlgorithm;
                 import io.jsonwebtoken.security.Keys;
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
@@ -322,7 +382,6 @@ public class GatewaySecurityGenerator {
 
                 import javax.crypto.SecretKey;
                 import java.nio.charset.StandardCharsets;
-                import java.util.Date;
 
                 /**
                  * Validates Bearer JWT tokens signed with HMAC-SHA256.
@@ -365,16 +424,8 @@ public class GatewaySecurityGenerator {
                             // Mint a short-lived Internal Call Token for downstream services.
                             // Services validate this token (not the original user JWT) to establish
                             // Authentication — prevents raw Bearer tokens from reaching internal services.
-                            SecretKey internalKey = Keys.hmacShaKeyFor(
-                                    props.getInternalJwtSecret().getBytes(StandardCharsets.UTF_8));
-                            String internalToken = Jwts.builder()
-                                    .setSubject(claims.getSubject())
-                                    .claim("roles", roles != null ? roles : "")
-                                    .setIssuer("fractalx-gateway")
-                                    .setIssuedAt(new Date())
-                                    .setExpiration(new Date(System.currentTimeMillis() + 30_000L))
-                                    .signWith(internalKey, SignatureAlgorithm.HS256)
-                                    .compact();
+                            String internalToken = InternalTokenMinter.mint(
+                                    claims.getSubject(), roles, props.getInternalJwtSecret());
                             ServerWebExchange mutated = exchange.mutate()
                                     .request(r -> r.headers(h -> {
                                         h.set("X-User-Id",        claims.getSubject());
@@ -415,6 +466,9 @@ public class GatewaySecurityGenerator {
                  * Validates API Key authentication.
                  * Accepts the key via {@code X-Api-Key} header or {@code api_key} query param.
                  * Active when {@code fractalx.gateway.security.api-key.enabled=true}.
+                 * On success, mints an Internal Call Token via {@link InternalTokenMinter} so
+                 * downstream services receive a standardised {@code X-Internal-Token} header
+                 * regardless of whether the client used Bearer JWT, Basic, or API Key auth.
                  * Registered automatically by Spring Cloud Gateway as a GlobalFilter bean.
                  */
                 @Component
@@ -443,11 +497,14 @@ public class GatewaySecurityGenerator {
                         List<String> validKeys = props.getApiKey().getValidKeys();
                         if (key != null && validKeys.contains(key)) {
                             final String finalKey = key;
+                            String keyPrefix = finalKey.substring(0, Math.min(6, finalKey.length()));
+                            String internalToken = InternalTokenMinter.mint(
+                                    "api-key:" + keyPrefix, "", props.getInternalJwtSecret());
                             ServerWebExchange mutated = exchange.mutate()
                                     .request(r -> r.headers(h -> {
-                                        h.set("X-Auth-Method", "api-key");
-                                        h.set("X-Api-Client", finalKey.substring(0,
-                                                Math.min(6, finalKey.length())) + "***");
+                                        h.set("X-Auth-Method",    "api-key");
+                                        h.set("X-Api-Client",     keyPrefix + "***");
+                                        h.set("X-Internal-Token", internalToken);
                                     }))
                                     .build();
                             return chain.filter(mutated);
@@ -485,6 +542,9 @@ public class GatewaySecurityGenerator {
                 /**
                  * Validates HTTP Basic / Simple Auth credentials.
                  * Active when {@code fractalx.gateway.security.basic.enabled=true}.
+                 * On success, mints an Internal Call Token via {@link InternalTokenMinter} so
+                 * downstream services receive a standardised {@code X-Internal-Token} header
+                 * regardless of whether the client used Bearer JWT, Basic, or API Key auth.
                  * Registered automatically by Spring Cloud Gateway as a GlobalFilter bean.
                  */
                 @Component
@@ -519,10 +579,13 @@ public class GatewaySecurityGenerator {
                             if (parts.length == 2
                                     && props.getBasic().getUsername().equals(parts[0])
                                     && props.getBasic().getPassword().equals(parts[1])) {
+                                String internalToken = InternalTokenMinter.mint(
+                                        parts[0], "ROLE_USER", props.getInternalJwtSecret());
                                 ServerWebExchange mutated = exchange.mutate()
                                         .request(r -> r.headers(h -> {
-                                            h.set("X-User-Id",    parts[0]);
-                                            h.set("X-Auth-Method", "basic");
+                                            h.set("X-User-Id",        parts[0]);
+                                            h.set("X-Auth-Method",    "basic");
+                                            h.set("X-Internal-Token", internalToken);
                                         }))
                                         .build();
                                 return chain.filter(mutated);

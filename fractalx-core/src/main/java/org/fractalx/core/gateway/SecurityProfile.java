@@ -1,6 +1,7 @@
 package org.fractalx.core.gateway;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Describes the security configuration detected from the monolith source.
@@ -9,6 +10,7 @@ import java.util.List;
  */
 public record SecurityProfile(
         AuthType authType,
+        Set<AuthType> authTypes,
         boolean securityEnabled,
         String jwkSetUri,
         String issuerUri,
@@ -30,7 +32,7 @@ public record SecurityProfile(
     /** Returns a profile representing a monolith with no detected security. */
     public static SecurityProfile none() {
         return new SecurityProfile(
-                AuthType.NONE, false, null, null, null, null, null, List.of(), List.of());
+                AuthType.NONE, Set.of(), false, null, null, null, null, null, List.of(), List.of());
     }
 
     /** Whether any route rules were detected. */
@@ -40,6 +42,6 @@ public record SecurityProfile(
 
     /** Whether any recognized auth mechanism was found. */
     public boolean isAnyAuthDetected() {
-        return authType != AuthType.NONE;
+        return authType != AuthType.NONE || (authTypes != null && !authTypes.isEmpty());
     }
 }

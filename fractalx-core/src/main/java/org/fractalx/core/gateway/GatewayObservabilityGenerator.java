@@ -12,8 +12,8 @@ import java.util.List;
 /**
  * Generates three gateway observability filters:
  * <ol>
- *   <li>{@code RequestLoggingFilter} (order -100) — structured ingress/egress logging</li>
- *   <li>{@code TracingFilter}        (order -99)  — propagates X-Correlation-Id + W3C traceparent</li>
+ *   <li>{@code TracingFilter}        (order -100) — sets X-Correlation-Id first so downstream filters can log it</li>
+ *   <li>{@code RequestLoggingFilter} (order -99)  — structured ingress/egress logging (reads correlation ID set above)</li>
  *   <li>{@code GatewayMetricsFilter} (order -98)  — Micrometer counters + timers per service</li>
  * </ol>
  */
@@ -70,7 +70,7 @@ public class GatewayObservabilityGenerator {
                 public class TracingFilter implements GlobalFilter, Ordered {
 
                     @Override
-                    public int getOrder() { return -99; }
+                    public int getOrder() { return -100; }
 
                     @Override
                     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
@@ -134,7 +134,7 @@ public class GatewayObservabilityGenerator {
                     private static final Logger log = LoggerFactory.getLogger(RequestLoggingFilter.class);
 
                     @Override
-                    public int getOrder() { return -100; }
+                    public int getOrder() { return -99; }
 
                     @Override
                     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {

@@ -20,9 +20,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -81,31 +83,35 @@ public class SecurityAnalyzer {
         List<CompilationUnit> cus = parseAll(javaRoot);
         log.debug("[SecurityAnalyzer] Parsed {} Java files from {}", cus.size(), javaRoot);
 
-        // Phase 3: detect auth type
-        AuthType authType = detectAuthType(cus, yaml);
-        log.info("[SecurityAnalyzer] Detected auth type: {}", authType);
+        // Phase 3: detect ALL auth types (monolith may configure more than one mechanism)
+        Set<AuthType> authTypes = detectAllAuthTypes(cus, yaml);
+        AuthType primaryAuthType = authTypes.isEmpty() ? AuthType.NONE : authTypes.iterator().next();
+        log.info("[SecurityAnalyzer] Detected auth types: {}", authTypes);
+        if (authTypes.size() > 1) {
+            log.info("[SecurityAnalyzer] Multiple auth types detected — gateway will enable all: {}", authTypes);
+        }
 
         // Phase 4: extract requestMatchers route rules from SecurityFilterChain
         List<RouteSecurityRule> rules = new ArrayList<>(extractRequestMatcherRules(cus));
 
-        // Phase 5: extract @PreAuthorize rules from controllers (only if no SecurityFilterChain rules)
-        if (rules.isEmpty()) {
-            rules.addAll(extractPreAuthorizeRules(cus));
-        }
+        // Phase 5: always extract @PreAuthorize rules from controllers (merged with SecurityFilterChain rules)
+        // Previously this was only done when SecurityFilterChain rules were empty — this was wrong
+        // because monoliths can have BOTH framework-level and method-level security.
+        rules.addAll(extractPreAuthorizeRules(cus));
 
         // Phase 6: collect explicit public paths
         List<String> publicPaths = collectPublicPaths(rules);
 
-        boolean securityEnabled = authType != AuthType.NONE;
+        boolean securityEnabled = primaryAuthType != AuthType.NONE;
 
         SecurityProfile profile = new SecurityProfile(
-                authType, securityEnabled,
+                primaryAuthType, authTypes, securityEnabled,
                 yaml.jwkSetUri, yaml.issuerUri, yaml.jwtSecret,
                 yaml.basicUsername, yaml.basicPassword,
                 rules, publicPaths);
 
-        log.info("[SecurityAnalyzer] Result: authType={} enabled={} routeRules={} publicPaths={}",
-                authType, securityEnabled, rules.size(), publicPaths.size());
+        log.info("[SecurityAnalyzer] Result: authTypes={} enabled={} routeRules={} publicPaths={}",
+                authTypes, securityEnabled, rules.size(), publicPaths.size());
         return profile;
     }
 
@@ -180,45 +186,43 @@ public class SecurityAnalyzer {
 
     // ── Auth type detection ───────────────────────────────────────────────────
 
-    private AuthType detectAuthType(List<CompilationUnit> cus, YamlSecurityConfig yaml) {
-        // 1. YAML declares OAuth2 JWT resource server
-        if (yaml.jwkSetUri != null || yaml.issuerUri != null) {
-            return AuthType.OAUTH2;
+    /**
+     * Detects ALL authentication mechanisms configured in the monolith.
+     * Returns an ordered set so the first element is the primary/highest-priority type.
+     * This replaces the old single-value detection that stopped at the first match —
+     * monoliths may legitimately configure e.g. both OAuth2 and Basic Auth.
+     */
+    private Set<AuthType> detectAllAuthTypes(List<CompilationUnit> cus, YamlSecurityConfig yaml) {
+        Set<AuthType> detected = new LinkedHashSet<>();
+
+        // OAuth2 (highest priority)
+        if (yaml.jwkSetUri != null || yaml.issuerUri != null || anyCallMatches(cus, "oauth2ResourceServer")) {
+            detected.add(AuthType.OAUTH2);
         }
 
-        // 2. AST has oauth2ResourceServer() call
-        if (anyCallMatches(cus, "oauth2ResourceServer")) {
-            return AuthType.OAUTH2;
+        // Basic Auth
+        if (yaml.basicUsername != null || anyCallMatches(cus, "httpBasic")) {
+            detected.add(AuthType.BASIC);
         }
 
-        // 3. YAML has spring.security.user.* (Basic Auth)
-        if (yaml.basicUsername != null) {
-            return AuthType.BASIC;
+        // Bearer JWT (custom OncePerRequestFilter with "Bearer " literal)
+        boolean hasBearerFilter = cus.stream().anyMatch(this::isBearerJwtFilter);
+        if (hasBearerFilter) {
+            detected.add(AuthType.BEARER_JWT);
         }
 
-        // 4. AST has httpBasic() call
-        if (anyCallMatches(cus, "httpBasic")) {
-            return AuthType.BASIC;
-        }
-
-        // 5. AST has a custom Bearer JWT filter (OncePerRequestFilter + "Bearer " literal)
-        for (CompilationUnit cu : cus) {
-            if (isBearerJwtFilter(cu)) {
-                return AuthType.BEARER_JWT;
-            }
-        }
-
-        // 6. @EnableWebSecurity is present but auth type unclear — assume Bearer JWT (most common)
-        for (CompilationUnit cu : cus) {
-            boolean hasWebSecurity = cu.findAll(ClassOrInterfaceDeclaration.class).stream()
-                    .anyMatch(c -> c.getAnnotationByName("EnableWebSecurity").isPresent());
+        // @EnableWebSecurity present but no specific type detected — assume Bearer JWT
+        if (detected.isEmpty()) {
+            boolean hasWebSecurity = cus.stream().anyMatch(cu ->
+                    cu.findAll(ClassOrInterfaceDeclaration.class).stream()
+                            .anyMatch(c -> c.getAnnotationByName("EnableWebSecurity").isPresent()));
             if (hasWebSecurity) {
                 log.info("[SecurityAnalyzer] @EnableWebSecurity detected but auth type unclear — assuming BEARER_JWT");
-                return AuthType.BEARER_JWT;
+                detected.add(AuthType.BEARER_JWT);
             }
         }
 
-        return AuthType.NONE;
+        return detected;
     }
 
     private boolean anyCallMatches(List<CompilationUnit> cus, String methodName) {

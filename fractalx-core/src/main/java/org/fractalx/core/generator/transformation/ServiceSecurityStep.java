@@ -244,7 +244,7 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
         if (!Files.exists(pomFile)) return;
 
         String pom = Files.readString(pomFile);
-        if (pom.contains("jjwt-api")) return; // already injected
+        if (pom.contains("<artifactId>jjwt-api</artifactId>")) return; // already injected
 
         String jjwtBlock = """
 
@@ -272,8 +272,17 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                         </dependency>
                 """.formatted(JJWT_VERSION, JJWT_VERSION, JJWT_VERSION);
 
-        // Insert just before the closing </dependencies> tag
-        String updated = pom.replace("</dependencies>", jjwtBlock + "    </dependencies>");
+        // Insert just before the LAST </dependencies> tag to avoid corrupting
+        // <dependencyManagement> blocks that also contain </dependencies>.
+        int lastClose = pom.lastIndexOf("</dependencies>");
+        if (lastClose < 0) {
+            log.warn("Could not find </dependencies> in pom.xml for {} — JJWT dependencies not injected",
+                    context.getModule().getServiceName());
+            return;
+        }
+        String updated = pom.substring(0, lastClose)
+                + jjwtBlock + "    </dependencies>"
+                + pom.substring(lastClose + "</dependencies>".length());
         Files.writeString(pomFile, updated);
     }
 

@@ -58,7 +58,8 @@ Manual microservices migrations are slow, error-prone, and expensive — requiri
 23. [Security Architecture](#23-security-architecture)
 24. [Known Limitations](#24-known-limitations)
 25. [JPA Data Layer and Entity Relationships](#25-jpa-data-layer-and-entity-relationships)
-26. [License](#26-license)
+26. [API Gateway, Registry, and Service Communication](#26-api-gateway-registry-and-service-communication)
+27. [License](#27-license)
 
 ---
 
@@ -2093,6 +2094,162 @@ patterns under **Gap 9**.
 
 ---
 
-## 26. License
+## 26. API Gateway, Registry, and Service Communication
+
+### 26.1 Generated Infrastructure Overview
+
+FractalX generates four supporting services in addition to the decomposed microservices:
+
+| Service | Default Port | Responsibility |
+|---------|-------------|----------------|
+| `fractalx-registry` | 8761 | Lightweight service registry — all services self-register on startup; gateway fetches live routes |
+| `fractalx-gateway` | 9999 | API Gateway — security filter chain, circuit breaker, rate limiter, CORS, observability |
+| `admin-service` | 9090 | Topology viewer, health dashboard, alert engine, live config management |
+| `fractalx-saga-orchestrator` | 8099 | Distributed saga coordination (only generated when `@DistributedSaga` is present) |
+| `logger-service` | 9099 | Centralized structured log store — all services forward logs via HTTP |
+
+Startup order enforced by Docker Compose `depends_on` / `service_healthy`:
+1. `fractalx-registry` (healthcheck: `/services/health`)
+2. `logger-service`, `jaeger` (independent of each other, both after registry)
+3. All microservices, gateway, admin, saga-orchestrator (after registry healthy)
+
+---
+
+### 26.2 API Gateway Architecture
+
+The generated `fractalx-gateway` is a Spring Cloud Gateway application. Its security filter chain
+processes requests in this order (lowest `@Order` runs first):
+
+| Order | Filter | Responsibility |
+|-------|--------|---------------|
+| -100 | `TracingFilter` | Assigns `X-Request-Id`, propagates/generates `X-Correlation-Id`, tags OTel span |
+| -99 | `RequestLoggingFilter` | Structured request/response log line (method, path, status, duration, correlationId) |
+| -98 | `GatewayMetricsFilter` | Increments Micrometer counter `fractalx.gateway.requests` per route |
+| -90 | `GatewayBearerJwtFilter` | Validates HMAC-SHA256 Bearer JWT; mints `X-Internal-Token` |
+| -89 | `GatewayApiKeyFilter` | Validates `X-Api-Key` header or `?api_key=` param; mints `X-Internal-Token` |
+| -88 | `GatewayBasicAuthFilter` | Validates HTTP Basic credentials; mints `X-Internal-Token` |
+| -80 | `RateLimitFilter` | In-memory token-bucket rate limiter per IP + service |
+| -70 | `CircuitBreakerFilter` | Resilience4j circuit breaker per route with fallback endpoint |
+
+`TracingFilter` **must** run before `RequestLoggingFilter` so the correlation ID is set before
+the first log line is written. All auth filters are disabled by default and enabled via:
+
+```yaml
+fractalx:
+  gateway:
+    security:
+      enabled: true
+      bearer.enabled: true    # HMAC-SHA256 JWT
+      oauth2.enabled: true    # JWK Set (Keycloak / Auth0)
+      basic.enabled: true     # username + password
+      api-key.enabled: true   # X-Api-Key header
+```
+
+---
+
+### 26.3 Service Registry
+
+`fractalx-registry` is a lightweight REST registry (not Eureka). Each service registers itself
+on startup via `ServiceRegistrationBean` (a `@PostConstruct` component) by posting:
+
+```
+POST http://fractalx-registry:8761/services/register
+{ "name": "order-service", "host": "order-service", "port": 8081, "grpcPort": 18081 }
+```
+
+The gateway's `DynamicRouteLocatorConfig` polls the registry every 30 seconds and rebuilds
+its in-memory route table. If the registry is unreachable the gateway falls back to the static
+routes defined in `application.yml`.
+
+`NetScopeRegistryBridge` (generated in each service that has gRPC dependencies) queries the
+registry on startup and overrides `netscope.client.servers.<peer>.host` in the Spring
+`Environment`, making container host names dynamic without editing YAML.
+
+---
+
+### 26.4 NetScope gRPC Communication
+
+NetScope is FractalX's inter-service RPC layer built on gRPC.
+
+**Port convention:** every service listens for gRPC on `HTTP port + 10000`.
+Example: HTTP `:8081` → gRPC `:18081`.
+
+**Server side** — methods on beans called by other modules are annotated `@NetworkPublic` by
+`NetScopeServerAnnotationStep`. The NetScope runtime starts a gRPC server on the computed port
+and exposes annotated methods.
+
+**Client side** — `NetScopeClientGenerator` generates a `@NetScopeClient` interface mirroring
+the target bean's public method signatures (including generic return types and `throws` clauses).
+The generated interface is used exactly like the original Spring bean — no manual HTTP/gRPC code
+required.
+
+**Metadata propagation** — `NetScopeContextInterceptor` (in `fractalx-runtime`) handles both
+sides of every gRPC call:
+
+- *Client*: reads `correlationId` from MDC and the current Spring `Authentication` credentials,
+  injects them as `x-correlation-id` and `x-internal-token` gRPC metadata headers.
+- *Server*: extracts `x-correlation-id` (or generates a new one), re-populates MDC, then
+  validates and reconstructs the Spring `Authentication` from `x-internal-token` so that
+  `@PreAuthorize` rules work inside gRPC-invoked service methods.
+
+---
+
+### 26.5 Internal Call Token Flow
+
+The **Internal Call Token** is a short-lived HMAC-SHA256 JWT that carries the user's identity
+across gRPC hops so backend services can enforce role-based access without talking to an
+external auth server.
+
+```
+Browser / Client
+      │
+      │  (Bearer JWT / API Key / Basic)
+      ▼
+fractalx-gateway
+      │  validates external credential
+      │  mints X-Internal-Token  ──► setSubject(userId) + claim("roles", ...) +
+      │                               setIssuer("fractalx-gateway") + setAudience("fractalx-internal")
+      │                               TTL = 30 seconds
+      ▼
+microservice (HTTP handler)
+      │  NetScopeContextInterceptor (client side) reads X-Internal-Token
+      │  injects into outgoing gRPC metadata
+      ▼
+peer microservice (gRPC handler)
+      │  NetScopeContextInterceptor (server side) validates token:
+      │    • signature (HMAC-SHA256, shared secret)
+      │    • issuer == "fractalx-gateway"
+      │    • audience == "fractalx-internal"
+      │    • exp (auto-enforced by JJWT)
+      │  reconstructs Spring Authentication → SecurityContextHolder
+      ▼
+  @PreAuthorize / method security enforced normally
+```
+
+The shared secret is set via env var (identical across all services):
+
+```bash
+FRACTALX_INTERNAL_JWT_SECRET=your-256-bit-production-secret-here
+```
+
+All three gateway auth paths (Bearer JWT, Basic, API Key) mint the token via the shared
+`InternalTokenMinter` utility class (generated in `fractalx-gateway/security/`).
+
+---
+
+### 26.6 Known Limitations
+
+| Area | Limitation | Workaround |
+|------|-----------|------------|
+| Rate limiter | In-memory, per-instance — does not share state across multiple gateway replicas | Replace `RateLimitFilter` with Redis-backed `spring-cloud-gateway` `RedisRateLimiter` |
+| Service registry | No TTL / heartbeat — dead instances stay registered until restarted | Implement a `/services/heartbeat` endpoint and add eviction in the registry |
+| Static YAML fallback | If registry is down at startup, `NetScopeRegistryBridge` retries 10× (exponential, cap 5 s) then falls back to `application.yml` hostnames — these are `localhost` in dev | Ensure registry is healthy before starting dependent services; use Docker Compose `depends_on` |
+| Internal token single-cluster | `aud=fractalx-internal` is a flat string — all services in the deployment share the same audience | For multi-cluster deployments, add a cluster-id claim and validate it in `NetScopeContextInterceptor` |
+| gRPC TLS | Generated gRPC channels are plaintext — appropriate for within a private Docker network | Add TLS termination at the ingress or enable `netscope.server.tls` in the runtime config |
+| OAuth2 multi-tenant | `SecurityAnalyzer` detects a single JWK Set URI — multiple tenants/issuers not supported | Configure `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` per tenant manually |
+
+---
+
+## 27. License
 
 Licensed under the [Apache License 2.0](LICENSE).
