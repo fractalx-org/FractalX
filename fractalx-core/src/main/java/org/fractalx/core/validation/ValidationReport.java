@@ -1,0 +1,68 @@
+package org.fractalx.core.validation;
+
+import java.util.List;
+
+/**
+ * Aggregated result of running all {@link ValidationRule}s against a set of modules.
+ *
+ * <p>If {@link #hasErrors()} returns {@code true} the caller <em>must</em> abort
+ * decomposition and surface the error list to the developer.
+ */
+public final class ValidationReport {
+
+    private final List<ValidationIssue> issues;
+
+    public ValidationReport(List<ValidationIssue> issues) {
+        this.issues = List.copyOf(issues);
+    }
+
+    /** @return all issues (both errors and warnings). */
+    public List<ValidationIssue> issues() { return issues; }
+
+    /** @return only ERROR-severity issues. */
+    public List<ValidationIssue> errors() {
+        return issues.stream().filter(ValidationIssue::isError).toList();
+    }
+
+    /** @return only WARNING-severity issues. */
+    public List<ValidationIssue> warnings() {
+        return issues.stream().filter(ValidationIssue::isWarning).toList();
+    }
+
+    /** @return {@code true} if any ERROR-level issue was found — generation must be blocked. */
+    public boolean hasErrors() {
+        return issues.stream().anyMatch(ValidationIssue::isError);
+    }
+
+    /** @return {@code true} if there are no issues at all. */
+    public boolean isClean() { return issues.isEmpty(); }
+
+    /**
+     * Formats all issues into a multi-line string suitable for console output.
+     * Errors appear first, then warnings.
+     */
+    public String formatReport() {
+        if (issues.isEmpty()) return "  No decomposition issues found.";
+        StringBuilder sb = new StringBuilder();
+        String sep = "─".repeat(58);
+        sb.append(sep).append('\n');
+        long errorCount   = errors().size();
+        long warningCount = warnings().size();
+        sb.append(" FractalX Decomposition Validation — ")
+          .append(errorCount).append(" error(s), ")
+          .append(warningCount).append(" warning(s)\n");
+        sb.append(sep).append('\n');
+        for (ValidationIssue e : errors()) {
+            sb.append("[ERROR] [").append(e.ruleId()).append("] ")
+              .append(e.moduleName()).append(": ").append(e.message()).append('\n');
+            sb.append("        Fix: ").append(e.fix()).append('\n');
+        }
+        for (ValidationIssue w : warnings()) {
+            sb.append("[WARN]  [").append(w.ruleId()).append("] ")
+              .append(w.moduleName()).append(": ").append(w.message()).append('\n');
+            sb.append("        Fix: ").append(w.fix()).append('\n');
+        }
+        sb.append(sep);
+        return sb.toString();
+    }
+}
