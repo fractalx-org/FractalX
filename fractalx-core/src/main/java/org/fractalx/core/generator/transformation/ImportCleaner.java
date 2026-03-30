@@ -40,11 +40,11 @@ public class ImportCleaner implements ServiceFileGenerator {
         log.debug("Cleaning imports in: {}", context.getServiceRoot());
         try (Stream<Path> paths = Files.walk(context.getServiceRoot())) {
             paths.filter(p -> p.toString().endsWith(".java"))
-                    .forEach(this::cleanFile);
+                    .forEach(p -> cleanFile(p, context));
         }
     }
 
-    private void cleanFile(Path javaFile) {
+    private void cleanFile(Path javaFile, GenerationContext context) {
         try {
             CompilationUnit cu = javaParser.parse(javaFile).getResult()
                     .orElseThrow(() -> new IOException("Failed to parse: " + javaFile));
@@ -56,7 +56,18 @@ public class ImportCleaner implements ServiceFileGenerator {
             Set<ImportDeclaration> toRemove = new HashSet<>();
 
             for (ImportDeclaration imp : cu.getImports()) {
-                if (imp.isAsterisk()) continue;
+                if (imp.isAsterisk()) {
+                    String pkg = imp.getNameAsString(); // e.g. "com.ultimatepoc.customer"
+                    boolean isCrossModule = context.getAllModules().stream()
+                            .anyMatch(m -> !m.getPackageName().equals(context.getModule().getPackageName())
+                                    && pkg.startsWith(m.getPackageName()));
+                    if (isCrossModule) {
+                        toRemove.add(imp);
+                        modified = true;
+                        log.debug("Removed cross-module wildcard import: {}.*", pkg);
+                    }
+                    continue;
+                }
 
                 String importName    = imp.getNameAsString();
                 String importedClass = lastSegment(importName);

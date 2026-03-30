@@ -2,6 +2,7 @@ package org.fractalx.maven;
 
 import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.ModuleAnalyzer;
+import org.fractalx.core.ReflectiveModuleAnalyzer;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.generator.ServiceGenerator;
 import org.fractalx.core.validation.DecompositionValidator;
@@ -68,6 +69,10 @@ public class DecomposeMojo extends FractalxBaseMojo {
     @Parameter(property = "fractalx.interactive", defaultValue = "true")
     private boolean interactive;
 
+    /** Compiled output directory — populated by {@code @Execute(phase=COMPILE)}. */
+    @Parameter(defaultValue = "${project.build.outputDirectory}", readonly = true)
+    private File classesDirectory;
+
     // ── Decomposition options collected by the questionnaire ─────────────────
 
     private record DecompositionConfig(
@@ -96,10 +101,20 @@ public class DecomposeMojo extends FractalxBaseMojo {
         try {
             Path sourcePath = sourceDirectory.toPath();
 
-            out.println(a(DIM) + "  Inspecting " + a(RST) + sourceDirectory.getAbsolutePath());
-            out.println();
-
-            List<FractalModule> modules = new ModuleAnalyzer().analyzeProject(sourcePath);
+            List<FractalModule> modules;
+            if (classesDirectory != null && classesDirectory.isDirectory()) {
+                out.println(a(DIM) + "  Analysing compiled classes at " + a(RST)
+                        + classesDirectory.getAbsolutePath());
+                out.println();
+                modules = new ReflectiveModuleAnalyzer()
+                        .analyzeProject(classesDirectory.toPath(), sourcePath,
+                                        getClass().getClassLoader());
+            } else {
+                out.println(a(DIM) + "  Inspecting " + a(RST) + sourceDirectory.getAbsolutePath()
+                        + a(DIM) + "  (source fallback — target/classes/ not found)" + a(RST));
+                out.println();
+                modules = new ModuleAnalyzer().analyzeProject(sourcePath);
+            }
 
             if (modules.isEmpty()) {
                 warn("No @DecomposableModule classes found.");

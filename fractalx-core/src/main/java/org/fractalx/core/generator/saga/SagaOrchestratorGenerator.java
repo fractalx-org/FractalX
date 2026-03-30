@@ -362,8 +362,7 @@ public class SagaOrchestratorGenerator {
                 + "\n"
                 + "netscope:\n"
                 + "  client:\n"
-                + "    servers:\n"
-                + serversBlock
+                + "    servers:" + (serversBlock.length() == 0 ? " {}\n" : "\n" + serversBlock)
                 + "\n"
                 + "management:\n"
                 + "  endpoints:\n"

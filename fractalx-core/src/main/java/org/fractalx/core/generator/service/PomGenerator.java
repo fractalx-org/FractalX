@@ -59,7 +59,7 @@ public class PomGenerator implements ServiceFileGenerator {
      * by default — we only prune what we are confident about.
      */
     private static final List<PruneRule> PRUNE_RULES = List.of(
-            new PruneRule("data-jpa",   "jakarta.persistence", "org.springframework.data.jpa", "org.springframework.data.repository"),
+            new PruneRule("data-jpa",   "jakarta.persistence", "org.springframework.data.jpa", "org.springframework.data.repository", "org.springframework.transaction"),
             new PruneRule("hibernate",  "jakarta.persistence", "org.hibernate"),
             new PruneRule("flyway",     "jakarta.persistence", "org.flywaydb", "org.springframework.data.jpa"),
             // DB drivers are runtime-only — Spring JPA code never imports com.mysql.* or org.postgresql.*

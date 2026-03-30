@@ -90,10 +90,12 @@ public class DistributedServiceHelper {
         flywayGen.generateMigration(module, serviceRoot);
 
         // 5. Generate transactional outbox (for services with cross-module deps or sagas)
-        if (hasJpaContent(module) && !module.getDependencies().isEmpty()) {
+        boolean isSagaOwner = sagaDefinitions.stream()
+                .anyMatch(s -> module.getServiceName().equals(s.getOwnerServiceName()));
+        if ((hasJpaContent(module) || isSagaOwner) && !module.getDependencies().isEmpty()) {
             outboxGen.generateOutbox(module, serviceRoot, sagaDefinitions, basePackage);
         } else if (!module.getDependencies().isEmpty()) {
-            log.info("   ⏭ No JPA entities in {} — skipping Outbox (no DB to persist events)", module.getServiceName());
+            log.info("   ⏭ No JPA entities in {} and not a saga owner — skipping Outbox", module.getServiceName());
         }
 
         // 6. Generate reference validators for decoupled foreign keys
