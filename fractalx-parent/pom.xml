@@ -46,6 +46,7 @@
     <modules>
         <module>../fractalx-annotations</module>
         <module>../fractalx-core</module>
+        <module>../fractalx-initializr-core</module>
         <module>../fractalx-maven-plugin</module>
         <module>../fractalx-runtime</module>
     </modules>
