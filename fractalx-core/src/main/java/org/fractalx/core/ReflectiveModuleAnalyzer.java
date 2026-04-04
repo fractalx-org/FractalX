@@ -126,7 +126,7 @@ public class ReflectiveModuleAnalyzer {
                          .toList();
             log.info("Explicit dependencies for {}: {}", ann.serviceName(), deps);
         } else {
-            deps = inferDepsFromConstructors(clazz, pkg, classesDir);
+            deps = inferDepsFromConstructors(clazz, pkg, classesDir, sourceRoot);
             if (!deps.isEmpty()) {
                 log.info("Constructor-inferred dependencies for {}: {}", ann.serviceName(), deps);
             }
@@ -149,14 +149,19 @@ public class ReflectiveModuleAnalyzer {
      *   <li><b>Largest constructor</b> — works when the module class itself has injected fields
      *       (e.g. Lombok {@code @AllArgsConstructor} on the module class).  Returns immediately
      *       if any constructor parameters are found.</li>
-     *   <li><b>Package-wide field scan</b> — used when the module class is a bare marker
-     *       ({@code @Configuration @DecomposableModule} with no fields/constructor params).
-     *       Loads every compiled class in the same package and inspects their declared fields;
-     *       any field whose type is not a local or well-known type is treated as a cross-module dep.</li>
+     *   <li><b>Package-wide field scan via reflection</b> — used when the module class is a bare
+     *       marker ({@code @Configuration @DecomposableModule} with no fields/constructor params).
+     *       Loads every compiled class in the same package and inspects their declared fields.</li>
+     *   <li><b>JavaParser source fallback</b> — when reflection fails to load service classes
+     *       (e.g. because they reference JPA repositories whose JpaRepository supertype is not
+     *       on the plugin's classpath), parse the source files directly as {@link ModuleAnalyzer}
+     *       does. This handles the common monolith pattern where {@code *Service} classes use
+     *       Spring field injection and inject JPA repositories.</li>
      * </ol>
      */
     private List<String> inferDepsFromConstructors(Class<?> clazz,
-                                                    String modulePkg, Path classesDir) {
+                                                    String modulePkg, Path classesDir,
+                                                    Path sourceRoot) {
         Set<String> localTypes = collectLocalTypeNames(modulePkg, classesDir);
         Set<String> deps = new LinkedHashSet<>();
 
@@ -186,6 +191,18 @@ public class ReflectiveModuleAnalyzer {
         log.debug("Module class {} has no constructor params — scanning package fields for deps",
                 clazz.getSimpleName());
         scanPackageFieldsForDeps(modulePkg, classesDir, localTypes, deps);
+        if (!deps.isEmpty()) return new ArrayList<>(deps);
+
+        // ── Strategy 3: JavaParser source fallback ────────────────────────────────────────────
+        // Service classes in Spring Boot apps typically inject JPA repositories whose JpaRepository
+        // supertype is NOT on the Maven plugin's classpath → Class.forName() throws NoClassDefFoundError
+        // → strategy 2 skips those classes silently. Fall back to parsing source files directly.
+        if (sourceRoot != null && Files.isDirectory(sourceRoot)) {
+            scanSourceFieldsForDeps(modulePkg, sourceRoot, localTypes, deps);
+            if (!deps.isEmpty()) {
+                log.debug("Source-fallback deps for package {}: {}", modulePkg, deps);
+            }
+        }
         return new ArrayList<>(deps);
     }
 
@@ -226,6 +243,41 @@ public class ReflectiveModuleAnalyzer {
                   });
         } catch (IOException e) {
             log.debug("Could not walk package dir {}: {}", pkgDir, e.getMessage());
+        }
+    }
+
+    /**
+     * JavaParser-based field scan: mirrors {@code ModuleAnalyzer.findDependencies()} logic.
+     * Walks {@code .java} files under {@code sourceRoot/<packagePath>} and collects field types
+     * ending in "Service" or "Client" that are not local module types.
+     */
+    private void scanSourceFieldsForDeps(String modulePkg, Path sourceRoot,
+                                          Set<String> localTypes, Set<String> deps) {
+        Path pkgDir = sourceRoot.resolve(modulePkg.replace('.', '/'));
+        if (!Files.isDirectory(pkgDir)) return;
+
+        try (var stream = Files.walk(pkgDir)) {
+            stream.filter(p -> p.toString().endsWith(".java"))
+                  .forEach(javaFile -> {
+                      try {
+                          javaParser.parse(javaFile).getResult().ifPresent(cu -> {
+                              cu.findAll(com.github.javaparser.ast.body.FieldDeclaration.class)
+                                .forEach(field -> {
+                                    String t = field.getCommonType().asString();
+                                    if ((t.endsWith("Service") || t.endsWith("Client"))
+                                            && !localTypes.contains(t)) {
+                                        deps.add(t);
+                                        log.debug("Source field dep '{}' found in {}",
+                                                t, javaFile.getFileName());
+                                    }
+                                });
+                          });
+                      } catch (IOException e) {
+                          log.debug("Could not parse {} for deps: {}", javaFile, e.getMessage());
+                      }
+                  });
+        } catch (IOException e) {
+            log.debug("Could not walk source package dir {}: {}", pkgDir, e.getMessage());
         }
     }
 

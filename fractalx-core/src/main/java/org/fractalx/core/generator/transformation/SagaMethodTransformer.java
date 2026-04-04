@@ -526,14 +526,24 @@ public class SagaMethodTransformer implements ServiceFileGenerator {
         // Add import
         cu.addImport(outboxPackage + ".OutboxPublisher");
 
+        // Find the constructor and inject the parameter + assignment
+        List<ConstructorDeclaration> constructors = cls.getConstructors();
+
+        if (constructors.isEmpty()) {
+            // Class uses @Autowired field injection — no constructor to inject into.
+            // Add a non-final @Autowired field so Spring can wire it.
+            cu.addImport("org.springframework.beans.factory.annotation.Autowired");
+            FieldDeclaration field = cls.addField("OutboxPublisher", "outboxPublisher",
+                    com.github.javaparser.ast.Modifier.Keyword.PRIVATE);
+            field.addAnnotation("Autowired");
+            return;
+        }
+
+        // Class has a constructor — use constructor injection (preferred style)
         // Add field before the first existing field (or at top of class)
         FieldDeclaration field = cls.addField("OutboxPublisher", "outboxPublisher",
                 com.github.javaparser.ast.Modifier.Keyword.PRIVATE,
                 com.github.javaparser.ast.Modifier.Keyword.FINAL);
-
-        // Find the constructor and inject the parameter + assignment
-        List<ConstructorDeclaration> constructors = cls.getConstructors();
-        if (constructors.isEmpty()) return;
 
         // Use the constructor with the most parameters (main constructor)
         ConstructorDeclaration ctor = constructors.stream()

@@ -75,6 +75,7 @@ public class DependencyManager {
 
         boolean needsLombok     = false;
         boolean needsValidation = false;
+        boolean needsDataJpa    = false;
 
         try (Stream<Path> files = Files.walk(srcMainJava)) {
             for (Path javaFile : files.filter(p -> p.toString().endsWith(".java"))
@@ -82,7 +83,8 @@ public class DependencyManager {
                 String content = Files.readString(javaFile);
                 if (content.contains("import lombok.")) needsLombok     = true;
                 if (content.contains("import jakarta.validation.")) needsValidation = true;
-                if (needsLombok && needsValidation) break;
+                if (content.contains("import org.springframework.data.jpa.")) needsDataJpa = true;
+                if (needsLombok && needsValidation && needsDataJpa) break;
             }
         } catch (IOException e) {
             log.error("Failed to scan sources for implied dependencies in {}", module.getServiceName(), e);
@@ -110,6 +112,26 @@ public class DependencyManager {
                 </dependency>""";
             injectDependency(module, serviceRoot, "spring-boot-starter-validation", validationXml);
             log.info("   ✓ Provisioned spring-boot-starter-validation for {}", module.getServiceName());
+        }
+
+        if (needsDataJpa) {
+            // Generated outbox files (OutboxRepository etc.) import JpaRepository — ensure JPA is on the classpath.
+            String dataJpaXml = """
+        <dependency>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-data-jpa</artifactId>
+                </dependency>""";
+            injectDependency(module, serviceRoot, "spring-boot-starter-data-jpa", dataJpaXml);
+            // The generated application.yml uses jdbc:h2:mem:... as the dev datasource fallback;
+            // add the H2 runtime driver so DataSourceAutoConfiguration can connect.
+            String h2Xml = """
+        <dependency>
+                    <groupId>com.h2database</groupId>
+                    <artifactId>h2</artifactId>
+                    <scope>runtime</scope>
+                </dependency>""";
+            injectDependency(module, serviceRoot, "h2database", h2Xml);
+            log.info("   ✓ Provisioned spring-boot-starter-data-jpa + H2 for {}", module.getServiceName());
         }
     }
 
@@ -192,9 +214,18 @@ public class DependencyManager {
             // Prevent duplicate entries
             if (content.contains(checkString)) return;
 
-            // Locate the end of the dependencies block
+            // Locate the end of the project-level <dependencies> block.
+            // PomGenerator appends <dependencyManagement> after <dependencies>, so the
+            // LAST </dependencies> in the serialized pom may belong to the inner
+            // <dependencyManagement><dependencies> block — inserting there would make the
+            // dep managed-only (not compiled). Step back one when that is the case.
             int lastIndex = content.lastIndexOf("</dependencies>");
             if (lastIndex == -1) return;
+            String afterTag = content.substring(lastIndex + "</dependencies>".length()).trim();
+            if (afterTag.startsWith("</dependencyManagement>")) {
+                lastIndex = content.lastIndexOf("</dependencies>", lastIndex - 1);
+                if (lastIndex == -1) return;
+            }
 
             // Prepare the clean insertion point
             String start = content.substring(0, lastIndex).stripTrailing();
