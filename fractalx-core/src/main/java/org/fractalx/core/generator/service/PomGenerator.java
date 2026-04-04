@@ -59,7 +59,7 @@ public class PomGenerator implements ServiceFileGenerator {
      * by default — we only prune what we are confident about.
      */
     private static final List<PruneRule> PRUNE_RULES = List.of(
-            new PruneRule("data-jpa",   "jakarta.persistence", "org.springframework.data.jpa", "org.springframework.data.repository", "org.springframework.transaction"),
+            new PruneRule("data-jpa",   "jakarta.persistence", "org.springframework.data.jpa", "org.springframework.data.repository"),
             new PruneRule("hibernate",  "jakarta.persistence", "org.hibernate"),
             new PruneRule("flyway",     "jakarta.persistence", "org.flywaydb", "org.springframework.data.jpa"),
             // DB drivers are runtime-only — Spring JPA code never imports com.mysql.* or org.postgresql.*
@@ -130,6 +130,7 @@ public class PomGenerator implements ServiceFileGenerator {
             pruneAndResolveUnusedDeps(doc, module.getDetectedImports(), monolithProps,
                     module.getServiceName());
             addFractalxDeps(doc);
+            addTransactionSupportIfNeeded(doc, module.getDetectedImports());
             if (cfg.features().observability()) {
                 appendObservabilityDeps(doc);
             }
@@ -426,6 +427,24 @@ public class PomGenerator implements ServiceFileGenerator {
         addDepIfAbsent(doc, depsEl, "org.fractalx",              "netscope-client",               NETSCOPE_VERSION,        null);
         addDepIfAbsent(doc, depsEl, "org.fractalx",              "fractalx-runtime",              FRACTALX_RUNTIME_VERSION, null);
         addDepIfAbsent(doc, depsEl, "io.github.resilience4j",    "resilience4j-spring-boot3",     RESILIENCE4J_VERSION,    null);
+    }
+
+    /**
+     * Adds standalone {@code spring-tx} when a service uses {@code @Transactional} but has no
+     * JPA content (i.e. {@code spring-boot-starter-data-jpa} was pruned).
+     *
+     * <p>Using standalone {@code spring-tx} (rather than keeping the full {@code data-jpa})
+     * is intentional: {@code spring-tx} does <em>not</em> pull in {@code spring-jdbc}, so
+     * Spring Boot's {@code DataSourceAutoConfiguration} is not activated and no DataSource
+     * bean is required at startup.
+     */
+    private static void addTransactionSupportIfNeeded(Document doc, Set<String> imports) {
+        if (imports == null || imports.isEmpty()) return;
+        if (!importsAny(imports, "org.springframework.transaction")) return;
+        // data-jpa already on classpath → spring-tx is a transitive dep, nothing to add
+        if (hasDependency(doc, "spring-boot-starter-data-jpa")) return;
+        addDepIfAbsent(doc, ensureDependenciesElement(doc),
+                "org.springframework", "spring-tx", null, null);
     }
 
     /**
