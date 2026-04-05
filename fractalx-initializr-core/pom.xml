@@ -16,6 +16,15 @@
     <name>FractalX Initializr Core</name>
     <description>Project scaffold generator for FractalX-annotated modular monoliths</description>
 
+    <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
+    </build>
+
     <dependencies>
         <!-- YAML spec file parsing -->
         <dependency>
