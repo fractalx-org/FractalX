@@ -5,13 +5,37 @@ import org.fractalx.initializr.model.ProjectSpec;
 import org.fractalx.initializr.model.SecuritySpec;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
 
 /**
  * Generates the root {@code pom.xml} for the scaffolded monolith.
  * The pom pre-wires the fractalx-maven-plugin so that {@code mvn fractalx:decompose}
  * works on day one without any manual configuration.
+ *
+ * <p>The FractalX version is read from {@code fractalx-version.properties} on the
+ * classpath, which is populated by Maven resource filtering from the parent pom's
+ * {@code ${revision}} property — keeping the parent pom as the single source of truth.
  */
 public class RootPomWriter implements InitializerFileGenerator {
+
+    private static final String FRACTALX_VERSION = loadFractalxVersion();
+
+    private static String loadFractalxVersion() {
+        try (InputStream in = RootPomWriter.class.getClassLoader()
+                .getResourceAsStream("fractalx-version.properties")) {
+            if (in != null) {
+                Properties props = new Properties();
+                props.load(in);
+                String v = props.getProperty("version");
+                if (v != null && !v.isBlank()) return v.trim();
+            }
+        } catch (IOException ignored) { }
+        // Fallback: should never be reached in a correctly built jar
+        throw new IllegalStateException(
+                "fractalx-version.properties not found on classpath — " +
+                "ensure fractalx-initializr-core is built with Maven resource filtering enabled.");
+    }
 
     @Override
     public String label() { return "pom.xml"; }
@@ -44,7 +68,7 @@ public class RootPomWriter implements InitializerFileGenerator {
 
         sb.append("    <properties>\n");
         sb.append("        <java.version>").append(spec.getJavaVersion()).append("</java.version>\n");
-        sb.append("        <fractalx.version>0.3.1</fractalx.version>\n");
+        sb.append("        <fractalx.version>").append(FRACTALX_VERSION).append("</fractalx.version>\n");
         sb.append("    </properties>\n\n");
 
         sb.append("    <dependencies>\n");
