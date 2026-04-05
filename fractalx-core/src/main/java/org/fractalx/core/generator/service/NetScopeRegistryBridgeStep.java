@@ -36,12 +36,29 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
     }
 
     private void generateBridge(Path pkgPath, String pkg, List<String> dependencies) throws IOException {
-        StringBuilder peerLoops = new StringBuilder();
+        StringBuilder futures = new StringBuilder();
         for (String dep : dependencies) {
-            peerLoops.append("""
-                            resolveAndUpdate("%s");
-                    """.formatted(beanTypeToServiceName(dep)));
+            futures.append("""
+                                    CompletableFuture.runAsync(() -> resolveAndUpdate("%s"), executor),
+                            """.formatted(beanTypeToServiceName(dep)));
         }
+
+        // Strip trailing comma from last entry so the vararg compiles cleanly
+        String futuresStr = futures.toString().stripTrailing();
+        if (futuresStr.endsWith(",")) {
+            futuresStr = futuresStr.substring(0, futuresStr.length() - 1);
+        }
+
+        String peerLoops = """
+                        ExecutorService executor = Executors.newFixedThreadPool(%d);
+                        try {
+                            CompletableFuture.allOf(
+                %s
+                            ).join();
+                        } finally {
+                            executor.shutdown();
+                        }
+                """.formatted(dependencies.size(), futuresStr);
 
         String content = """
                 package %s;
@@ -52,12 +69,16 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
                 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
                 import org.springframework.core.env.ConfigurableEnvironment;
                 import org.springframework.core.env.MapPropertySource;
+                import org.springframework.http.client.SimpleClientHttpRequestFactory;
                 import org.springframework.stereotype.Component;
                 import org.springframework.web.client.RestTemplate;
 
                 import jakarta.annotation.PostConstruct;
                 import java.util.HashMap;
                 import java.util.Map;
+                import java.util.concurrent.CompletableFuture;
+                import java.util.concurrent.ExecutorService;
+                import java.util.concurrent.Executors;
 
                 @Component
                 @ConditionalOnProperty(name = "fractalx.registry.enabled", havingValue = "true", matchIfMissing = true)
@@ -66,13 +87,23 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
                     private static final Logger log = LoggerFactory.getLogger(NetScopeRegistryBridge.class);
 
                     private final ConfigurableEnvironment environment;
-                    private final RestTemplate restTemplate = new RestTemplate();
+                    private final RestTemplate restTemplate = buildRestTemplate();
 
                     @Value("${fractalx.registry.url:http://localhost:8761}")
                     private String registryUrl;
 
+                    @Value("${fractalx.registry.max-retries:10}")
+                    private int maxRetries;
+
                     public NetScopeRegistryBridge(ConfigurableEnvironment environment) {
                         this.environment = environment;
+                    }
+
+                    private static RestTemplate buildRestTemplate() {
+                        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+                        factory.setConnectTimeout(2000);
+                        factory.setReadTimeout(3000);
+                        return new RestTemplate(factory);
                     }
 
                     @PostConstruct
@@ -81,7 +112,7 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
                     }
 
                     private void resolveAndUpdate(String serviceName) {
-                        for (int attempt = 1; attempt <= 10; attempt++) {
+                        for (int attempt = 1; attempt <= maxRetries; attempt++) {
                             try {
                                 @SuppressWarnings("unchecked")
                                 Map<String, Object> reg = restTemplate.getForObject(
@@ -98,18 +129,18 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
                                     return;
                                 }
                             } catch (Exception e) {
-                                log.warn("Registry lookup for {} failed (attempt {}/10): {}",
-                                        serviceName, attempt, e.getMessage());
+                                log.warn("Registry lookup for {} failed (attempt {}/{}): {}",
+                                        serviceName, attempt, maxRetries, e.getMessage());
                             }
                             long backoff = Math.min(300L * (1L << (attempt - 1)), 5000L);
                             try { Thread.sleep(backoff); }
                             catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
                         }
-                        log.error("Could not resolve {} from registry after 10 attempts — using static YAML fallback. " +
-                                  "Check registry health and FRACTALX_REGISTRY_URL env var.", serviceName);
+                        log.error("Could not resolve {} from registry after {} attempts — using static YAML fallback. " +
+                                  "Check registry health and FRACTALX_REGISTRY_URL env var.", serviceName, maxRetries);
                     }
                 }
-                """.formatted(pkg, peerLoops.toString());
+                """.formatted(pkg, peerLoops);
 
         Files.writeString(pkgPath.resolve("NetScopeRegistryBridge.java"), content);
     }

@@ -710,7 +710,7 @@ fractalx-output/
 | `OtelConfig.java` | OpenTelemetry SDK -- OTLP/gRPC to Jaeger, W3C traceparent propagation |
 | `ServiceHealthConfig.java` | One Spring `HealthIndicator` + Micrometer gauge per gRPC dependency |
 | `ServiceRegistrationAutoConfig` | Self-register on startup; heartbeat every 30s; deregister on shutdown |
-| `NetScopeRegistryBridgeStep` | Dynamic gRPC host resolution from registry at startup |
+| `NetScopeRegistryBridgeStep` | Dynamic gRPC host resolution from registry at startup; all peers resolved in parallel; configurable retries (`fractalx.registry.max-retries`, default 10); 2 s connect / 3 s read timeout on registry HTTP calls |
 | Resilience4j YAML | CircuitBreaker + Retry + TimeLimiter per dependency |
 | `Dockerfile` | Multi-stage (build + runtime), non-root user |
 | `@NetScopeClient` interfaces | One per outgoing gRPC dependency |
@@ -2163,7 +2163,12 @@ routes defined in `application.yml`.
 
 `NetScopeRegistryBridge` (generated in each service that has gRPC dependencies) queries the
 registry on startup and overrides `netscope.client.servers.<peer>.host` in the Spring
-`Environment`, making container host names dynamic without editing YAML.
+`Environment`, making container host names dynamic without editing YAML. All peer lookups
+run **in parallel** (one thread per dependency) so registry latency does not multiply with
+the number of dependencies. Each lookup retries up to `fractalx.registry.max-retries`
+(default `10`) times with exponential back-off capped at 5 s, using a 2 s connect / 3 s
+read timeout on the underlying HTTP call. If all retries are exhausted the static
+`application.yml` hostnames are used as a fallback.
 
 ---
 
@@ -2243,7 +2248,7 @@ All three gateway auth paths (Bearer JWT, Basic, API Key) mint the token via the
 |------|-----------|------------|
 | Rate limiter | In-memory, per-instance — does not share state across multiple gateway replicas | Replace `RateLimitFilter` with Redis-backed `spring-cloud-gateway` `RedisRateLimiter` |
 | Service registry | No TTL / heartbeat — dead instances stay registered until restarted | Implement a `/services/heartbeat` endpoint and add eviction in the registry |
-| Static YAML fallback | If registry is down at startup, `NetScopeRegistryBridge` retries 10× (exponential, cap 5 s) then falls back to `application.yml` hostnames — these are `localhost` in dev | Ensure registry is healthy before starting dependent services; use Docker Compose `depends_on` |
+| Static YAML fallback | If registry is down at startup, `NetScopeRegistryBridge` retries up to `fractalx.registry.max-retries` times (default 10, exponential back-off, cap 5 s) **in parallel** per peer, then falls back to `application.yml` hostnames — these are `localhost` in dev | Lower `fractalx.registry.max-retries` (e.g. `3`) for a faster fallback; ensure registry is healthy before starting dependent services, or use Docker Compose `depends_on` |
 | Internal token single-cluster | `aud=fractalx-internal` is a flat string — all services in the deployment share the same audience | For multi-cluster deployments, add a cluster-id claim and validate it in `NetScopeContextInterceptor` |
 | gRPC TLS | Generated gRPC channels are plaintext — appropriate for within a private Docker network | Add TLS termination at the ingress or enable `netscope.server.tls` in the runtime config |
 | OAuth2 multi-tenant | `SecurityAnalyzer` detects a single JWK Set URI — multiple tenants/issuers not supported | Configure `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` per tenant manually |
