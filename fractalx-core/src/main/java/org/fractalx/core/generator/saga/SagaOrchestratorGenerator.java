@@ -359,6 +359,13 @@ public class SagaOrchestratorGenerator {
                 + "  saga:\n"
                 + "    owner-urls:\n"
                 + ownerUrlsBlock
+                + "    notification:\n"
+                + "      poll-interval-ms: 2000\n"
+                + "      max-retries: 10\n"
+                + "    timeout:\n"
+                + "      check-interval-ms: 10000\n"
+                + "    step-timeout-ms: 10000\n"
+                + "    step-max-retries: 2\n"
                 + "\n"
                 + "netscope:\n"
                 + "  client:\n"
@@ -401,7 +408,9 @@ public class SagaOrchestratorGenerator {
                     updated_at                   TIMESTAMP,
                     owner_notified               BOOLEAN      NOT NULL DEFAULT FALSE,
                     notification_retry_count     INT          NOT NULL DEFAULT 0,
-                    last_notification_attempt    TIMESTAMP
+                    last_notification_attempt    TIMESTAMP,
+                    timeout_ms                   BIGINT       NOT NULL DEFAULT 0,
+                    last_completed_step          INT          NOT NULL DEFAULT -1
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_saga_status          ON saga_instance (status);
@@ -499,6 +508,14 @@ public class SagaOrchestratorGenerator {
                     /** Timestamp of the most recent notification attempt (null = never attempted). */
                     private LocalDateTime lastNotificationAttempt;
 
+                    /** Saga-wide timeout in milliseconds (from @DistributedSaga#timeout). 0 = no timeout. */
+                    @Column(nullable = false)
+                    private long timeoutMs = 0;
+
+                    /** Index of the last step that completed successfully (-1 = none). Used by timeout reaper. */
+                    @Column(nullable = false)
+                    private int lastCompletedStep = -1;
+
                     @PrePersist
                     protected void onCreate() { startedAt = LocalDateTime.now(); updatedAt = startedAt; }
 
@@ -529,6 +546,10 @@ public class SagaOrchestratorGenerator {
                     public void setNotificationRetryCount(int v) { notificationRetryCount = v; }
                     public LocalDateTime getLastNotificationAttempt() { return lastNotificationAttempt; }
                     public void setLastNotificationAttempt(LocalDateTime v) { lastNotificationAttempt = v; }
+                    public long getTimeoutMs()                { return timeoutMs; }
+                    public void setTimeoutMs(long v)          { timeoutMs = v; }
+                    public int  getLastCompletedStep()        { return lastCompletedStep; }
+                    public void setLastCompletedStep(int v)   { lastCompletedStep = v; }
                 }
                 """.formatted(basePackage);
     }
@@ -553,6 +574,8 @@ public class SagaOrchestratorGenerator {
                     List<SagaInstance> findByStatus(SagaStatus status);
                     /** Used by the notification retry poller to find sagas whose owner wasn't notified yet. */
                     List<SagaInstance> findByOwnerNotifiedFalseAndStatusIn(List<SagaStatus> statuses);
+                    /** Used by the timeout reaper to find active sagas that may have exceeded their deadline. */
+                    List<SagaInstance> findByStatusIn(List<SagaStatus> statuses);
                 }
                 """.formatted(basePackage, basePackage, basePackage);
     }
@@ -602,6 +625,12 @@ public class SagaOrchestratorGenerator {
         sb.append("import org.springframework.transaction.annotation.Transactional;\n");
         sb.append("import org.springframework.web.client.RestTemplate;\n");
         sb.append("import java.util.UUID;\n");
+        sb.append("import java.util.concurrent.CompletableFuture;\n");
+        sb.append("import java.util.concurrent.ExecutionException;\n");
+        sb.append("import java.util.concurrent.ExecutorService;\n");
+        sb.append("import java.util.concurrent.Executors;\n");
+        sb.append("import java.util.concurrent.TimeoutException;\n");
+        sb.append("import java.util.concurrent.TimeUnit;\n");
 
         // Emit imports for non-trivial payload field types (both method params and extra vars)
         for (MethodParam p : allPayloadFields) {
@@ -647,6 +676,11 @@ public class SagaOrchestratorGenerator {
         sb.append("    @Value(\"${fractalx.saga.owner-urls.")
           .append(saga.getSagaId()).append(":http://localhost:8080}\")\n");
         sb.append("    private String ownerServiceBaseUrl;\n\n");
+        sb.append("    @Value(\"${fractalx.saga.step-timeout-ms:10000}\")\n");
+        sb.append("    private long stepTimeoutMs;\n\n");
+        sb.append("    @Value(\"${fractalx.saga.step-max-retries:2}\")\n");
+        sb.append("    private int maxStepRetries;\n\n");
+        sb.append("    private final ExecutorService stepExecutor = Executors.newCachedThreadPool();\n\n");
 
         // Constructor
         sb.append("    public ").append(className).append("(");
@@ -702,12 +736,23 @@ public class SagaOrchestratorGenerator {
         sb.append("                ? incomingCorrelationId\n");
         sb.append("                : (MDC.get(\"correlationId\") != null ? MDC.get(\"correlationId\") : UUID.randomUUID().toString());\n\n");
 
+        // P0-2: Idempotency guard — at-least-once outbox delivery may re-send the same event
+        sb.append("        // Idempotency guard — at-least-once outbox delivery may re-send the same event\n");
+        sb.append("        java.util.Optional<SagaInstance> existing = sagaRepository.findByCorrelationId(correlationId);\n");
+        sb.append("        if (existing.isPresent()) {\n");
+        sb.append("            log.info(\"Saga '").append(saga.getSagaId())
+          .append("' already exists for correlationId={} (status={}), skipping duplicate\",\n");
+        sb.append("                    correlationId, existing.get().getStatus());\n");
+        sb.append("            return correlationId;\n");
+        sb.append("        }\n\n");
+
         sb.append("        SagaInstance instance = new SagaInstance();\n");
         sb.append("        instance.setSagaId(\"").append(saga.getSagaId()).append("\");\n");
         sb.append("        instance.setCorrelationId(correlationId);\n");
         sb.append("        instance.setOwnerService(\"").append(saga.getOwnerServiceName()).append("\");\n");
         sb.append("        instance.setStatus(SagaStatus.STARTED);\n");
         sb.append("        instance.setPayload(payload);\n");
+        sb.append("        instance.setTimeoutMs(").append(saga.getTimeoutMs()).append("L);\n");
         sb.append("        sagaRepository.save(instance);\n\n");
         sb.append("        log.info(\"Starting saga '").append(saga.getSagaId())
           .append("' correlationId={}\", instance.getCorrelationId());\n\n");
@@ -722,15 +767,10 @@ public class SagaOrchestratorGenerator {
             SagaStep step = saga.getSteps().get(i);
             String clientField = Character.toLowerCase(step.getBeanType().charAt(0))
                                + step.getBeanType().substring(1) + "Client";
-            sb.append("\n            // Step ").append(i).append(": ")
-              .append(step.getTargetServiceName()).append(" → ").append(step.getMethodName()).append("\n");
-            sb.append("            instance.setCurrentStep(\"")
-              .append(step.getTargetServiceName()).append(":").append(step.getMethodName()).append("\");\n");
-            sb.append("            sagaRepository.save(instance);\n");
-            sb.append("            ").append(clientField).append(".").append(step.getMethodName()).append("(");
-            sb.append(buildCallArgs(step.getCallArguments(), paramTypeMap, params));
-            sb.append(");\n");
-            sb.append("            lastCompletedStep = ").append(i).append(";\n");
+            String stepLabel = step.getTargetServiceName() + ":" + step.getMethodName();
+            String callArgs = buildCallArgs(step.getCallArguments(), paramTypeMap, params);
+
+            emitStepExecution(sb, i, stepLabel, clientField, step.getMethodName(), callArgs);
         }
 
         sb.append("\n            instance.setStatus(SagaStatus.DONE);\n");
@@ -759,6 +799,16 @@ public class SagaOrchestratorGenerator {
         String compensateParam = params.isEmpty() ? "" : ", " + payloadClass + " p";
         sb.append("    private void compensate(SagaInstance instance, int lastCompletedStep")
           .append(compensateParam).append(") {\n");
+        // P0-3: Race condition guard — re-read to avoid race with timeout reaper
+        sb.append("        // Guard against race between timeout reaper and still-running start() thread\n");
+        sb.append("        SagaInstance fresh = sagaRepository.findByCorrelationId(instance.getCorrelationId()).orElse(null);\n");
+        sb.append("        if (fresh != null && (fresh.getStatus() == SagaStatus.COMPENSATING\n");
+        sb.append("                || fresh.getStatus() == SagaStatus.FAILED\n");
+        sb.append("                || fresh.getStatus() == SagaStatus.DONE)) {\n");
+        sb.append("            log.warn(\"Saga correlationId={} already in state {}, skipping compensation\",\n");
+        sb.append("                    instance.getCorrelationId(), fresh.getStatus());\n");
+        sb.append("            return;\n");
+        sb.append("        }\n\n");
         sb.append("        instance.setStatus(SagaStatus.COMPENSATING);\n");
         sb.append("        sagaRepository.save(instance);\n");
         sb.append("        MDC.put(\"correlationId\", instance.getCorrelationId());\n\n");
@@ -901,17 +951,18 @@ public class SagaOrchestratorGenerator {
 
         // retryPendingNotifications — @Scheduled poller that retries owner notifications
         // that failed during the initial attempt (e.g. owner service was down).
-        sb.append("    private static final int MAX_NOTIFICATION_RETRIES = 10;\n\n");
+        sb.append("    @Value(\"${fractalx.saga.notification.max-retries:10}\")\n");
+        sb.append("    private int maxNotificationRetries;\n\n");
         sb.append("    /**\n");
         sb.append("     * Retries owner-service notifications that failed during the initial attempt.\n");
         sb.append("     *\n");
         sb.append("     * <p>Runs every 2 seconds. Finds saga instances in DONE or FAILED state whose\n");
         sb.append("     * {@code ownerNotified} flag is still {@code false} (meaning the HTTP callback\n");
         sb.append("     * to the owner service has not succeeded yet). Retries up to\n");
-        sb.append("     * {@code MAX_NOTIFICATION_RETRIES} times, after which the failure is logged\n");
+        sb.append("     * {@code maxNotificationRetries} times, after which the failure is logged\n");
         sb.append("     * as a dead-letter requiring manual intervention.\n");
         sb.append("     */\n");
-        sb.append("    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 2000)\n");
+        sb.append("    @org.springframework.scheduling.annotation.Scheduled(fixedDelayString = \"${fractalx.saga.notification.poll-interval-ms:2000}\")\n");
         sb.append("    @Transactional\n");
         sb.append("    public void retryPendingNotifications() {\n");
         sb.append("        java.util.List<SagaInstance> pending = sagaRepository\n");
@@ -919,11 +970,11 @@ public class SagaOrchestratorGenerator {
         sb.append("                        java.util.List.of(SagaStatus.DONE, SagaStatus.FAILED));\n");
         sb.append("        if (pending.isEmpty()) return;\n\n");
         sb.append("        for (SagaInstance instance : pending) {\n");
-        sb.append("            if (instance.getNotificationRetryCount() >= MAX_NOTIFICATION_RETRIES) {\n");
+        sb.append("            if (instance.getNotificationRetryCount() >= maxNotificationRetries) {\n");
         sb.append("                log.error(\"Saga notification dead-letter: correlationId={} sagaId={} status={} \"\n");
         sb.append("                        + \"— exceeded {} retries. Manual intervention required.\",\n");
         sb.append("                        instance.getCorrelationId(), instance.getSagaId(),\n");
-        sb.append("                        instance.getStatus(), MAX_NOTIFICATION_RETRIES);\n");
+        sb.append("                        instance.getStatus(), maxNotificationRetries);\n");
         sb.append("                continue;\n");
         sb.append("            }\n");
         sb.append("            if (instance.getStatus() == SagaStatus.DONE) {\n");
@@ -934,8 +985,88 @@ public class SagaOrchestratorGenerator {
         sb.append("        }\n");
         sb.append("    }\n\n");
 
+        // P0-3: Timeout reaper — compensates sagas that have exceeded their deadline
+        sb.append("    /**\n");
+        sb.append("     * Reaps sagas that have exceeded their configured timeout.\n");
+        sb.append("     * Finds active sagas (STARTED or IN_PROGRESS) and checks whether their elapsed\n");
+        sb.append("     * time exceeds {@code timeoutMs}. Timed-out sagas are compensated automatically.\n");
+        sb.append("     */\n");
+        sb.append("    @org.springframework.scheduling.annotation.Scheduled(fixedDelayString = \"${fractalx.saga.timeout.check-interval-ms:10000}\")\n");
+        sb.append("    @Transactional\n");
+        sb.append("    public void reapTimedOutSagas() {\n");
+        sb.append("        java.util.List<SagaInstance> active = sagaRepository.findByStatusIn(\n");
+        sb.append("                java.util.List.of(SagaStatus.STARTED, SagaStatus.IN_PROGRESS));\n");
+        sb.append("        java.time.LocalDateTime now = java.time.LocalDateTime.now();\n");
+        sb.append("        for (SagaInstance inst : active) {\n");
+        sb.append("            if (!inst.getSagaId().equals(\"").append(saga.getSagaId()).append("\")) continue;\n");
+        sb.append("            if (inst.getTimeoutMs() <= 0) continue;\n");
+        sb.append("            long elapsedMs = java.time.Duration.between(inst.getStartedAt(), now).toMillis();\n");
+        sb.append("            if (elapsedMs > inst.getTimeoutMs()) {\n");
+        sb.append("                log.warn(\"Saga '").append(saga.getSagaId())
+          .append("' correlationId={} timed out ({}ms > {}ms) — initiating compensation\",\n");
+        sb.append("                        inst.getCorrelationId(), elapsedMs, inst.getTimeoutMs());\n");
+        sb.append("                inst.setErrorMessage(\"Saga timed out after \" + elapsedMs + \"ms\");\n");
+
+        // If saga has params, deserialize payload for compensation
+        if (!params.isEmpty()) {
+            sb.append("                ").append(payloadClass).append(" p = null;\n");
+            sb.append("                try { p = objectMapper.readValue(inst.getPayload(), ")
+              .append(payloadClass).append(".class); }\n");
+            sb.append("                catch (Exception ignored) {}\n");
+            sb.append("                compensate(inst, inst.getLastCompletedStep(), p);\n");
+        } else {
+            sb.append("                compensate(inst, inst.getLastCompletedStep());\n");
+        }
+
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+
         sb.append("}\n");
         return sb.toString();
+    }
+
+    /**
+     * Emits a single saga step execution with per-step timeout and retry logic.
+     *
+     * <p>Each gRPC call is wrapped in {@code CompletableFuture.runAsync().get(timeout)}
+     * with exponential backoff retry. This prevents a stalled downstream service from
+     * blocking the entire saga indefinitely.
+     */
+    private void emitStepExecution(StringBuilder sb, int stepIndex, String stepLabel,
+                                    String clientField, String methodName, String callArgs) {
+        sb.append("\n            // Step ").append(stepIndex).append(": ").append(stepLabel).append("\n");
+        sb.append("            instance.setCurrentStep(\"").append(stepLabel).append("\");\n");
+        sb.append("            sagaRepository.save(instance);\n");
+        sb.append("            {\n");
+        sb.append("                int stepAttempt = 0;\n");
+        sb.append("                while (true) {\n");
+        sb.append("                    try {\n");
+        sb.append("                        CompletableFuture.runAsync(() -> ")
+          .append(clientField).append(".").append(methodName).append("(").append(callArgs).append("), stepExecutor)\n");
+        sb.append("                            .get(stepTimeoutMs, TimeUnit.MILLISECONDS);\n");
+        sb.append("                        break;\n");
+        sb.append("                    } catch (ExecutionException | TimeoutException e) {\n");
+        sb.append("                        stepAttempt++;\n");
+        sb.append("                        if (stepAttempt >= maxStepRetries) {\n");
+        sb.append("                            if (e instanceof ExecutionException ee)\n");
+        sb.append("                                throw ee.getCause() instanceof RuntimeException\n");
+        sb.append("                                        ? (RuntimeException) ee.getCause() : new RuntimeException(ee.getCause());\n");
+        sb.append("                            throw new RuntimeException(\"Step ").append(stepLabel)
+          .append(" timed out after \" + stepTimeoutMs + \"ms\");\n");
+        sb.append("                        }\n");
+        sb.append("                        long backoff = Math.min(500L * (1L << (stepAttempt - 1)), 3000L);\n");
+        sb.append("                        log.warn(\"Step ").append(stepLabel)
+          .append(" failed (attempt {}/{}), retrying in {}ms\", stepAttempt, maxStepRetries, backoff);\n");
+        sb.append("                        Thread.sleep(backoff);\n");
+        sb.append("                    } catch (InterruptedException ie) {\n");
+        sb.append("                        Thread.currentThread().interrupt();\n");
+        sb.append("                        throw new RuntimeException(\"Step interrupted\", ie);\n");
+        sb.append("                    }\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("            lastCompletedStep = ").append(stepIndex).append(";\n");
+        sb.append("            instance.setLastCompletedStep(").append(stepIndex).append(");\n");
     }
 
     /**

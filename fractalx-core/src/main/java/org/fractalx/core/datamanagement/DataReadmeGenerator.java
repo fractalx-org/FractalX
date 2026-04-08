@@ -398,7 +398,9 @@ public class DataReadmeGenerator {
         md.append("| `status` | `VARCHAR(30)` | Current `SagaStatus` value |\n");
         md.append("| `current_step` | `VARCHAR(200)` | Last attempted step (`service:method`) |\n");
         md.append("| `payload` | `TEXT` | Original JSON payload |\n");
-        md.append("| `error_message` | `TEXT` | Failure message if any |\n\n");
+        md.append("| `error_message` | `TEXT` | Failure message if any |\n");
+        md.append("| `timeout_ms` | `BIGINT` | Saga-level timeout in milliseconds (0 = no timeout) |\n");
+        md.append("| `last_completed_step` | `INT` | Index of last successfully completed step (-1 = none) |\n\n");
         md.append("Migration script: `src/main/resources/db/migration/V1__init_saga.sql`\n\n");
         md.append("> **⚠️ Note:** Data is lost when this service stops (H2 in-memory).\n");
         md.append("> For production, configure a persistent datasource — see **Configuration Guide** below.\n");
@@ -437,7 +439,53 @@ public class DataReadmeGenerator {
         md.append("    <groupId>org.postgresql</groupId>\n");
         md.append("    <artifactId>postgresql</artifactId>\n");
         md.append("</dependency>\n");
-        md.append("```\n");
+        md.append("```\n\n");
+
+        // ── 9. CDC / Debezium (Production Scaling) ────────────────────────────
+        md.append("## 9. Scaling: Change Data Capture (CDC) with Debezium\n\n");
+        md.append("The generated **Transactional Outbox** uses polling + an event-driven in-process trigger as the primary delivery mechanism. ");
+        md.append("This works well for most workloads. However, at high throughput you may want to replace the polling outbox with ");
+        md.append("**Debezium Change Data Capture (CDC)** for:\n\n");
+        md.append("- **Near-zero latency** — changes are streamed from the database WAL, not polled.\n");
+        md.append("- **No polling overhead** — no scheduled queries against the outbox table.\n");
+        md.append("- **Ordering guarantees** — events arrive in commit order.\n");
+        md.append("- **Decoupled deployment** — the connector runs outside your application process.\n\n");
+
+        md.append("### Debezium Outbox Event Router Configuration\n\n");
+        md.append("Deploy a Debezium PostgreSQL or MySQL connector with the **Outbox Event Router** SMT:\n\n");
+        md.append("```json\n");
+        md.append("{\n");
+        md.append("  \"name\": \"outbox-connector\",\n");
+        md.append("  \"config\": {\n");
+        md.append("    \"connector.class\": \"io.debezium.connector.postgresql.PostgresConnector\",\n");
+        md.append("    \"database.hostname\": \"localhost\",\n");
+        md.append("    \"database.port\": \"5432\",\n");
+        md.append("    \"database.user\": \"postgres\",\n");
+        md.append("    \"database.password\": \"<your_password>\",\n");
+        md.append("    \"database.dbname\": \"<service_db>\",\n");
+        md.append("    \"table.include.list\": \"public.fractalx_outbox\",\n");
+        md.append("    \"transforms\": \"outbox\",\n");
+        md.append("    \"transforms.outbox.type\": \"io.debezium.transforms.outbox.EventRouter\",\n");
+        md.append("    \"transforms.outbox.table.field.event.id\": \"id\",\n");
+        md.append("    \"transforms.outbox.table.field.event.key\": \"aggregate_id\",\n");
+        md.append("    \"transforms.outbox.table.field.event.type\": \"event_type\",\n");
+        md.append("    \"transforms.outbox.table.field.event.payload\": \"payload\",\n");
+        md.append("    \"transforms.outbox.route.topic.replacement\": \"saga.events\"\n");
+        md.append("  }\n");
+        md.append("}\n");
+        md.append("```\n\n");
+
+        md.append("### Migration Steps\n\n");
+        md.append("1. **Deploy Kafka** (or use a managed service like Confluent Cloud / Amazon MSK).\n");
+        md.append("2. **Deploy the Debezium connector** using Kafka Connect with the config above.\n");
+        md.append("3. **Add a Kafka consumer** in the saga orchestrator that reads from the `saga.events` topic ");
+        md.append("and calls the same `start()` method the `OutboxPoller` currently invokes.\n");
+        md.append("4. **Disable the `OutboxPoller`** — set `fractalx.outbox.poll-interval-ms: -1` or remove the bean.\n");
+        md.append("5. **Verify** — outbox rows should be consumed by Debezium within milliseconds of commit.\n\n");
+
+        md.append("> **Recommendation:** The polling outbox with event-driven trigger is sufficient for most workloads ");
+        md.append("(< 1,000 events/sec). Only migrate to CDC when you observe outbox table growth, ");
+        md.append("polling latency, or need strict ordering guarantees across services.\n");
 
         try {
             Files.writeString(serviceRoot.resolve("DATA_README.md"), md.toString());
