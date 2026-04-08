@@ -1,7 +1,6 @@
 package org.fractalx.maven;
 
 import org.fractalx.core.FractalxVersion;
-import org.fractalx.core.ModuleAnalyzer;
 import org.fractalx.core.ReflectiveModuleAnalyzer;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.generator.ServiceGenerator;
@@ -101,20 +100,17 @@ public class DecomposeMojo extends FractalxBaseMojo {
         try {
             Path sourcePath = sourceDirectory.toPath();
 
-            List<FractalModule> modules;
-            if (classesDirectory != null && classesDirectory.isDirectory()) {
-                out.println(a(DIM) + "  Analysing compiled classes at " + a(RST)
-                        + classesDirectory.getAbsolutePath());
-                out.println();
-                modules = new ReflectiveModuleAnalyzer()
-                        .analyzeProject(classesDirectory.toPath(), sourcePath,
-                                        getClass().getClassLoader());
-            } else {
-                out.println(a(DIM) + "  Inspecting " + a(RST) + sourceDirectory.getAbsolutePath()
-                        + a(DIM) + "  (source fallback — target/classes/ not found)" + a(RST));
-                out.println();
-                modules = new ModuleAnalyzer().analyzeProject(sourcePath);
+            if (classesDirectory == null || !classesDirectory.isDirectory()) {
+                throw new MojoExecutionException(
+                        "Compiled classes not found at " + classesDirectory
+                        + " — run 'mvn compile' before 'mvn fractalx:decompose'.");
             }
+            out.println(a(DIM) + "  Analysing compiled classes at " + a(RST)
+                    + classesDirectory.getAbsolutePath());
+            out.println();
+            List<FractalModule> modules = new ReflectiveModuleAnalyzer()
+                    .analyzeProject(classesDirectory.toPath(), sourcePath,
+                                    getClass().getClassLoader());
 
             if (modules.isEmpty()) {
                 warn("No @DecomposableModule classes found.");
