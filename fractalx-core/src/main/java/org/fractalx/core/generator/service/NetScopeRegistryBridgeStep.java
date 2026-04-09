@@ -160,9 +160,9 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
         return sb.toString();
     }
 
+    // Delegate to the shared canonical implementation so all pipeline steps agree
+    // on the service name derived from a bean type (eliminates divergence risk).
     private static String beanTypeToServiceName(String beanType) {
-        String name = beanType.replaceAll("(?i)(Service|Client)$", "");
-        String kebab = name.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
-        return kebab + "-service";
+        return NetScopeClientGenerator.beanTypeToServiceName(beanType);
     }
 }

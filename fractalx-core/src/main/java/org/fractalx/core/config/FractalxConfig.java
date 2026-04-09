@@ -1,5 +1,7 @@
 package org.fractalx.core.config;
 
+import org.fractalx.core.naming.NamingConventions;
+
 import java.util.Map;
 
 /**
@@ -79,7 +81,8 @@ public record FractalxConfig(
         int    sagaPort,
         ResilienceDefaults resilience,
         DockerImages dockerImages,
-        FeatureFlags features
+        FeatureFlags features,
+        NamingConventions naming
 ) {
 
     // ── Nested records ────────────────────────────────────────────────────────
@@ -177,7 +180,8 @@ public record FractalxConfig(
                 8099,
                 ResilienceDefaults.defaults(),
                 DockerImages.defaults(),
-                FeatureFlags.defaults()
+                FeatureFlags.defaults(),
+                NamingConventions.defaults()
         );
     }
 
@@ -197,7 +201,7 @@ public record FractalxConfig(
         return new FractalxConfig(registryUrl, loggerUrl, otelEndpoint, gatewayPort,
                 corsAllowedOrigins, oauth2JwksUri, adminPort, serviceOverrides,
                 basePackage, springBootVersion, springCloudVersion, registryPort,
-                loggerPort, sagaPort, resilience, dockerImages, features);
+                loggerPort, sagaPort, resilience, dockerImages, features, naming);
     }
 
     /** Returns the configured port for a service, or {@code defaultPort} if not set. */
