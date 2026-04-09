@@ -2,6 +2,7 @@ package org.fractalx.core.generator.transformation;
 
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
+import org.fractalx.core.generator.service.NetScopeClientGenerator;
 import org.fractalx.core.model.FractalModule;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
@@ -86,6 +87,15 @@ public class NetScopeClientWiringStep implements ServiceFileGenerator {
         for (String beanType : deps) {
             String clientType = beanType + "Client";
 
+            // Guard: only wire if NetScopeClientGenerator would have resolved the target module.
+            // Both steps use the same two-pass (exact → normalized) lookup so they stay consistent:
+            // if the generator cannot find the module and skips writing the interface, the wiring
+            // step also skips — preventing a compile error from a reference to a non-existent type.
+            if (!isTargetModuleResolvable(beanType, context)) {
+                log.debug("Cannot resolve target module for dep '{}' — skipping client wiring", beanType);
+                continue;
+            }
+
             if (!referencesType(cu, beanType)) {
                 continue; // no field of this type in the file — skip
             }
@@ -156,6 +166,26 @@ public class NetScopeClientWiringStep implements ServiceFileGenerator {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Returns {@code true} if the target module for {@code beanType} can be resolved
+     * using the same two-pass (exact → normalized) lookup that
+     * {@link org.fractalx.core.generator.service.NetScopeClientGenerator} uses.
+     *
+     * <p>Both steps must agree on resolvability: if the generator cannot find the module
+     * and skips writing the client interface, this step must also skip the rename — otherwise
+     * the generated source references a type that does not exist, causing a compile error.
+     */
+    private boolean isTargetModuleResolvable(String beanType, GenerationContext context) {
+        String derivedName      = NetScopeClientGenerator.beanTypeToServiceName(beanType);
+        String normalizedDerived = NetScopeClientGenerator.normalizeModuleName(derivedName);
+
+        return context.getAllModules().stream()
+                .filter(m -> !m.equals(context.getModule()))
+                .anyMatch(m -> derivedName.equals(m.getServiceName())
+                        || normalizedDerived.equals(
+                                NetScopeClientGenerator.normalizeModuleName(m.getServiceName())));
+    }
 
     /**
      * AST-based type reference check: returns true only if the compilation unit

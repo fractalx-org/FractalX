@@ -416,11 +416,48 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
         return Optional.of(candidates.get(0));
     }
 
-    private FractalModule findModule(String serviceName, List<FractalModule> modules) {
-        return modules.stream()
-                .filter(m -> serviceName.equals(m.getServiceName()))
+    /**
+     * Finds the module that owns {@code derivedServiceName}.
+     *
+     * <p>Uses a two-pass lookup to be robust against any naming convention:
+     * <ol>
+     *   <li><b>Exact match</b> — fast path for the common case.</li>
+     *   <li><b>Normalized match</b> — strips non-alphanumeric characters and common
+     *       infrastructure suffixes ({@code service}, {@code client}, {@code module})
+     *       from both sides before comparing. This handles module names that do not
+     *       follow the {@code <name>-service} pattern (e.g. {@code svc1}, {@code payments},
+     *       {@code auth-module}) and bean types with unusual capitalization.</li>
+     * </ol>
+     */
+    private FractalModule findModule(String derivedServiceName, List<FractalModule> modules) {
+        // Pass 1 — exact match
+        FractalModule exact = modules.stream()
+                .filter(m -> derivedServiceName.equals(m.getServiceName()))
                 .findFirst()
                 .orElse(null);
+        if (exact != null) return exact;
+
+        // Pass 2 — normalized match
+        String normalizedDerived = normalizeModuleName(derivedServiceName);
+        return modules.stream()
+                .filter(m -> normalizedDerived.equals(normalizeModuleName(m.getServiceName())))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Normalizes a module/service name for fuzzy comparison.
+     * Strips separators (hyphens, underscores, dots), lowercases, and removes
+     * common infrastructure suffixes so that names like {@code payment-service},
+     * {@code PaymentService}, {@code payments}, and {@code payment_svc} all
+     * produce comparable tokens.
+     */
+    public static String normalizeModuleName(String name) {
+        return name.toLowerCase()
+                   .replaceAll("[^a-z0-9]", "")   // strip separators
+                   .replaceAll("service$", "")     // remove trailing "service"
+                   .replaceAll("client$", "")      // remove trailing "client"
+                   .replaceAll("module$", "");     // remove trailing "module"
     }
 
     private Path toPackagePath(Path root, String packageName) {

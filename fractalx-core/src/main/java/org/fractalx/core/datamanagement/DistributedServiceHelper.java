@@ -89,10 +89,20 @@ public class DistributedServiceHelper {
         // 4. Generate Flyway V1 migration scaffold
         flywayGen.generateMigration(module, serviceRoot);
 
-        // 5. Generate transactional outbox (for services with cross-module deps or sagas)
+        // 5. Generate transactional outbox.
+        //
+        // Two independent reasons to generate the outbox:
+        //   a) Saga owner — SagaMethodTransformer unconditionally injects OutboxPublisher
+        //      into any class annotated with @DistributedSaga, regardless of whether
+        //      the module has cross-module dependencies or JPA entities. If we skip
+        //      generation here the import reference compiles to a missing class.
+        //   b) Cross-module JPA service — has explicit dependencies and persistent state
+        //      that needs the dual-write guarantee.
         boolean isSagaOwner = sagaDefinitions.stream()
                 .anyMatch(s -> module.getServiceName().equals(s.getOwnerServiceName()));
-        if ((hasJpaContent(module) || isSagaOwner) && !module.getDependencies().isEmpty()) {
+        boolean needsOutbox = isSagaOwner
+                || (hasJpaContent(module) && !module.getDependencies().isEmpty());
+        if (needsOutbox) {
             outboxGen.generateOutbox(module, serviceRoot, sagaDefinitions, basePackage);
         } else if (!module.getDependencies().isEmpty()) {
             log.info("   ⏭ No JPA entities in {} and not a saga owner — skipping Outbox", module.getServiceName());
