@@ -1,5 +1,6 @@
 package org.fractalx.core.config;
 
+import org.fractalx.core.naming.NamingConventions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -11,9 +12,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * Reads platform-level FractalX configuration from the pre-decomposed
@@ -230,13 +235,17 @@ public class FractalxConfigReader {
         if (!features.resilience())      log.info("[FractalxConfig] Feature DISABLED: resilience");
         if (!features.distributedData()) log.info("[FractalxConfig] Feature DISABLED: distributed-data");
 
+        // ── NamingConventions ─────────────────────────────────────────────────
+
+        NamingConventions naming = readNamingConventions(nestedMap(fx, "naming"));
+
         FractalxConfig cfg = new FractalxConfig(
                 registryUrl, loggerUrl, otelEndpoint,
                 gatewayPort, corsOrigins, jwksUri,
                 adminPort, overrides,
                 basePackage, springBootVersion, springCloudVersion,
                 registryPort, loggerPort, sagaPort,
-                resilience, dockerImages, features);
+                resilience, dockerImages, features, naming);
 
         log.info("[FractalxConfig] basePackage={} springBoot={} registry-port={} gateway-port={} admin-port={}",
                 cfg.effectiveBasePackage(), springBootVersion, registryPort, gatewayPort, adminPort);
@@ -326,6 +335,70 @@ public class FractalxConfigReader {
             if (groupId == null || groupId.isBlank()) return null;
             return groupId + ".generated";
         }
+    }
+
+    // ── NamingConventions parsing ─────────────────────────────────────────────
+
+    /**
+     * Reads the {@code fractalx.naming} sub-map and constructs a {@link NamingConventions}.
+     * Any omitted key falls back to the value from {@link NamingConventions#defaults()}.
+     */
+    @SuppressWarnings("unchecked")
+    private NamingConventions readNamingConventions(Map<String, Object> namingMap) {
+        NamingConventions d = NamingConventions.defaults();
+
+        List<String> compensationPrefixes    = readStringList(namingMap, "compensation-prefixes",    d.compensationPrefixes());
+        List<String> infrastructureSuffixes  = readStringList(namingMap, "infrastructure-suffixes",  d.infrastructureSuffixes());
+        List<String> dependencyTypeSuffixes  = readStringList(namingMap, "dependency-type-suffixes", d.dependencyTypeSuffixes());
+        List<String> aggregateClassSuffixes  = readStringList(namingMap, "aggregate-class-suffixes", d.aggregateClassSuffixes());
+        List<String> eventPublisherMethods   = readStringList(namingMap, "event-publisher-method-names", d.eventPublisherMethodNames());
+        boolean caseInsensitive              = readBool(namingMap, "case-insensitive-service-names", d.caseInsensitiveServiceNames());
+
+        // irregular-plurals: YAML map of plural → singular entries
+        Map<String, String> irregularPlurals = new HashMap<>(d.irregularPlurals());
+        Object rawPlurals = namingMap.isEmpty() ? null : namingMap.get("irregular-plurals");
+        if (rawPlurals instanceof Map<?, ?> pm) {
+            pm.forEach((k, v) -> {
+                if (k != null && v != null) {
+                    irregularPlurals.put(k.toString().toLowerCase(), v.toString().toLowerCase());
+                }
+            });
+        }
+
+        return new NamingConventions(
+                compensationPrefixes,
+                infrastructureSuffixes,
+                dependencyTypeSuffixes,
+                aggregateClassSuffixes,
+                Map.copyOf(irregularPlurals),
+                eventPublisherMethods,
+                caseInsensitive
+        );
+    }
+
+    /**
+     * Reads a YAML list at {@code key} from {@code map}.
+     * Accepts a {@code List<?>} value or a single {@code String} (comma-separated).
+     * Returns {@code defaultVal} if the key is absent.
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> readStringList(Map<String, Object> map, String key, List<String> defaultVal) {
+        if (map == null || map.isEmpty()) return defaultVal;
+        Object val = map.get(key);
+        if (val instanceof List<?> list) {
+            List<String> result = new ArrayList<>();
+            list.forEach(item -> { if (item != null) result.add(item.toString()); });
+            return List.copyOf(result);
+        }
+        if (val instanceof String s && !s.isBlank()) {
+            List<String> result = new ArrayList<>();
+            for (String part : s.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) result.add(trimmed);
+            }
+            return List.copyOf(result);
+        }
+        return defaultVal;
     }
 
     // ── Per-service port overrides ────────────────────────────────────────────

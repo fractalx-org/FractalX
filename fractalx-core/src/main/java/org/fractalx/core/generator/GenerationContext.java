@@ -4,6 +4,7 @@ import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.gateway.SecurityProfile;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.SagaDefinition;
+import org.fractalx.core.naming.NameResolver;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -21,6 +22,7 @@ public final class GenerationContext {
     private final FractalxConfig fractalxConfig;
     private final List<SagaDefinition> sagaDefinitions;
     private final SecurityProfile securityProfile;  // nullable — null means no security detected
+    private final NameResolver nameResolver;
 
     /** Full constructor. */
     public GenerationContext(FractalModule module,
@@ -29,7 +31,8 @@ public final class GenerationContext {
                              List<FractalModule> allModules,
                              FractalxConfig fractalxConfig,
                              List<SagaDefinition> sagaDefinitions,
-                             SecurityProfile securityProfile) {
+                             SecurityProfile securityProfile,
+                             NameResolver nameResolver) {
         this.module = module;
         this.sourceRoot = sourceRoot;
         this.serviceRoot = serviceRoot;
@@ -37,6 +40,20 @@ public final class GenerationContext {
         this.fractalxConfig = fractalxConfig;
         this.sagaDefinitions = List.copyOf(sagaDefinitions);
         this.securityProfile = securityProfile;
+        this.nameResolver = nameResolver != null ? nameResolver
+                : new NameResolver(fractalxConfig.naming());
+    }
+
+    /** Backward-compatible 7-arg constructor (securityProfile supplied, nameResolver derived from config). */
+    public GenerationContext(FractalModule module,
+                             Path sourceRoot,
+                             Path serviceRoot,
+                             List<FractalModule> allModules,
+                             FractalxConfig fractalxConfig,
+                             List<SagaDefinition> sagaDefinitions,
+                             SecurityProfile securityProfile) {
+        this(module, sourceRoot, serviceRoot, allModules, fractalxConfig, sagaDefinitions,
+                securityProfile, null);
     }
 
     /** Backward-compatible 6-arg constructor (for tests). Passes null for securityProfile. */
@@ -56,6 +73,7 @@ public final class GenerationContext {
     public FractalxConfig getFractalxConfig()          { return fractalxConfig; }
     public List<SagaDefinition> getSagaDefinitions()   { return sagaDefinitions; }
     public SecurityProfile getSecurityProfile()        { return securityProfile; }
+    public NameResolver getNameResolver()              { return nameResolver; }
 
     /**
      * Returns {@code true} if the monolith had Spring Security enabled

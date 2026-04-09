@@ -4,6 +4,7 @@ import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.CrossModuleCall;
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.naming.NameResolver;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -61,7 +62,7 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
 
     private void generateClientInterface(String beanType, Path packagePath, GenerationContext context) throws IOException {
         String targetServiceName = beanTypeToServiceName(beanType);
-        FractalModule targetModule = findModule(targetServiceName, context.getAllModules());
+        FractalModule targetModule = context.getNameResolver().findModule(targetServiceName, context.getAllModules());
 
         if (targetModule == null) {
             log.warn("Target module '{}' not found for dependency type '{}' – skipping", targetServiceName, beanType);
@@ -429,35 +430,26 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
      *       {@code auth-module}) and bean types with unusual capitalization.</li>
      * </ol>
      */
-    private FractalModule findModule(String derivedServiceName, List<FractalModule> modules) {
-        // Pass 1 — exact match
-        FractalModule exact = modules.stream()
-                .filter(m -> derivedServiceName.equals(m.getServiceName()))
-                .findFirst()
-                .orElse(null);
-        if (exact != null) return exact;
-
-        // Pass 2 — normalized match
-        String normalizedDerived = normalizeModuleName(derivedServiceName);
-        return modules.stream()
-                .filter(m -> normalizedDerived.equals(normalizeModuleName(m.getServiceName())))
-                .findFirst()
-                .orElse(null);
+    /**
+     * Finds the module whose service name matches {@code derivedServiceName}.
+     * Public so that other pipeline steps ({@link ConfigurationGenerator},
+     * {@link NetScopeRegistryBridgeStep}, etc.) share one consistent lookup
+     * rather than each maintaining their own exact-match filter.
+     *
+     * <p>Delegates to {@link NameResolver} — single implementation.
+     */
+    public static FractalModule findModule(String derivedServiceName, List<FractalModule> modules) {
+        return NameResolver.defaults().findModule(derivedServiceName, modules);
     }
 
     /**
      * Normalizes a module/service name for fuzzy comparison.
-     * Strips separators (hyphens, underscores, dots), lowercases, and removes
-     * common infrastructure suffixes so that names like {@code payment-service},
-     * {@code PaymentService}, {@code payments}, and {@code payment_svc} all
-     * produce comparable tokens.
+     * Strips separators and configured infrastructure suffixes, then lowercases.
+     *
+     * <p>Delegates to {@link NameResolver} — single implementation.
      */
     public static String normalizeModuleName(String name) {
-        return name.toLowerCase()
-                   .replaceAll("[^a-z0-9]", "")   // strip separators
-                   .replaceAll("service$", "")     // remove trailing "service"
-                   .replaceAll("client$", "")      // remove trailing "client"
-                   .replaceAll("module$", "");     // remove trailing "module"
+        return NameResolver.defaults().normalizeModuleName(name);
     }
 
     private Path toPackagePath(Path root, String packageName) {

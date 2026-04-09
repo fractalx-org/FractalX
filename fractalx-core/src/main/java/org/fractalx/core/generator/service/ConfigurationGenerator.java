@@ -162,17 +162,15 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
             sb.append("netscope:\n  client:\n    servers:\n");
             for (String beanType : deps) {
                 String targetServiceName = NetScopeClientGenerator.beanTypeToServiceName(beanType);
-                allModules.stream()
-                        .filter(m -> targetServiceName.equals(m.getServiceName()))
-                        .findFirst()
-                        .ifPresent(target -> {
-                            String envPfx = targetServiceName.toUpperCase().replace("-", "_");
-                            sb.append("      ").append(targetServiceName).append(":\n");
-                            sb.append("        host: ${").append(envPfx).append("_HOST:")
-                              .append(targetServiceName).append("}\n");
-                            sb.append("        port: ${").append(envPfx).append("_GRPC_PORT:")
-                              .append(target.grpcPort()).append("}\n");
-                        });
+                FractalModule target = NetScopeClientGenerator.findModule(targetServiceName, allModules);
+                if (target != null) {
+                    String envPfx = targetServiceName.toUpperCase().replace("-", "_");
+                    sb.append("      ").append(targetServiceName).append(":\n");
+                    sb.append("        host: ${").append(envPfx).append("_HOST:")
+                      .append(targetServiceName).append("}\n");
+                    sb.append("        port: ${").append(envPfx).append("_GRPC_PORT:")
+                      .append(target.grpcPort()).append("}\n");
+                }
             }
         }
         return sb.toString();
@@ -197,14 +195,12 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
         StringBuilder sb = new StringBuilder("netscope:\n  client:\n    servers:\n");
         for (String beanType : deps) {
             String targetServiceName = NetScopeClientGenerator.beanTypeToServiceName(beanType);
-            allModules.stream()
-                    .filter(m -> targetServiceName.equals(m.getServiceName()))
-                    .findFirst()
-                    .ifPresent(target -> {
-                        sb.append("      ").append(targetServiceName).append(":\n");
-                        sb.append("        host: localhost\n");
-                        sb.append("        port: ").append(target.grpcPort()).append("\n");
-                    });
+            FractalModule target = NetScopeClientGenerator.findModule(targetServiceName, allModules);
+            if (target != null) {
+                sb.append("      ").append(targetServiceName).append(":\n");
+                sb.append("        host: localhost\n");
+                sb.append("        port: ").append(target.grpcPort()).append("\n");
+            }
         }
         return sb.toString();
     }

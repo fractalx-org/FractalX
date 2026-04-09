@@ -37,6 +37,8 @@ import org.fractalx.core.generator.transformation.NetScopeServerAnnotationStep;
 import org.fractalx.core.generator.transformation.SagaMethodTransformer;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.SagaDefinition;
+import org.fractalx.core.naming.NameResolver;
+import org.fractalx.core.naming.NamingValidator;
 import org.fractalx.core.observability.LoggerServiceGenerator;
 import org.fractalx.core.observability.ObservabilityInjector;
 import org.slf4j.Logger;
@@ -242,6 +244,10 @@ public class ServiceGenerator {
             log.warn("Repository boundary violations detected — review DATA_README.md for guidance");
         }
 
+        // Build the NameResolver from config and run pre-pipeline naming validation
+        NameResolver nameResolver = new NameResolver(fractalxConfig.naming());
+        new NamingValidator(nameResolver).validate(modules);
+
         // Detect @DistributedSaga definitions across all modules
         List<SagaDefinition> sagaDefinitions = sagaAnalyzer.analyzeSagas(sourceRoot, modules);
 
@@ -266,7 +272,7 @@ public class ServiceGenerator {
 
         for (FractalModule module : modules) {
             onStepStart.accept(module.getServiceName());
-            generateService(module, modules, fractalxConfig, sagaDefinitions, securityProfile);
+            generateService(module, modules, fractalxConfig, sagaDefinitions, securityProfile, nameResolver);
             onStepComplete.accept(module.getServiceName());
         }
 
@@ -325,7 +331,8 @@ public class ServiceGenerator {
     private void generateService(FractalModule module, List<FractalModule> allModules,
                                   FractalxConfig fractalxConfig,
                                   List<SagaDefinition> sagaDefinitions,
-                                  SecurityProfile securityProfile) throws IOException {
+                                  SecurityProfile securityProfile,
+                                  NameResolver nameResolver) throws IOException {
         log.debug("Generating service: {}", module.getServiceName());
 
         Path serviceRoot = outputRoot.resolve(module.getServiceName());
@@ -335,7 +342,7 @@ public class ServiceGenerator {
 
         GenerationContext context = new GenerationContext(
                 module, sourceRoot, serviceRoot, allModules, fractalxConfig, sagaDefinitions,
-                securityProfile);
+                securityProfile, nameResolver);
 
         for (ServiceFileGenerator step : pipeline) {
             step.generate(context);

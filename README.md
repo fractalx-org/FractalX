@@ -38,6 +38,8 @@ Manual microservices migrations are slow, error-prone, and expensive — requiri
 4. [Build the Framework](#4-build-the-framework)
 5. [Annotate Your Monolith](#5-annotate-your-monolith)
 6. [Pre-Decomposition Configuration](#6-pre-decomposition-configuration)
+    - [Naming Conventions](#naming-conventions)
+    - [Feature Flags](#feature-flags)
 7. [Maven Plugin Reference](#7-maven-plugin-reference)
 8. [Generated Output](#8-generated-output)
 9. [Start Generated Services](#9-start-generated-services)
@@ -502,6 +504,78 @@ fractalx:
 ```
 
 This produces one microservice directory per `@DecomposableModule` with NetScope client/server wiring only — a minimal starting point before incrementally enabling features.
+
+### Naming Conventions
+
+FractalX derives service names, client interface names, compensation methods, and aggregate names from class names and annotations.
+All naming rules are configurable via the `fractalx.naming` block in `fractalx-config.yml`.
+Every key has a built-in default so the block can be omitted entirely — existing projects are unaffected.
+
+```yaml
+fractalx:
+  naming:
+    # Prefixes scanned when looking for a compensation/rollback method for a saga step.
+    # e.g. forward method "processPayment" is matched against "cancelProcessPayment",
+    # "rollbackProcessPayment", "undoProcessPayment", etc.
+    compensation-prefixes: [cancel, rollback, undo, revert, release, refund]
+
+    # Class name suffixes that mark a type as infrastructure — never transitively
+    # copied into a consuming service as a model class.
+    infrastructure-suffixes: [Service, Repository, Controller, Module, Config, Configuration, Application]
+
+    # Field/parameter type suffixes that signal a cross-module dependency when
+    # ModuleAnalyzer infers dependencies without an explicit @DecomposableModule declaration.
+    dependency-type-suffixes: [Service, Client]
+
+    # Suffixes stripped when deriving the domain aggregate name from the saga owner class.
+    # e.g. "OrderService" → "Order", "OrderFacade" → "Order" (when "Facade" is listed).
+    # Also used during module name normalisation for fuzzy lookup:
+    # "svc1-service" and "svc1" both resolve to module "svc1".
+    aggregate-class-suffixes: [Service, Module]
+
+    # Method names recognised as Spring ApplicationEvent publishers during
+    # DecompositionHints scanning.
+    event-publisher-method-names: [publishEvent]
+
+    # When true, service name comparisons during module lookup are case-insensitive.
+    # Allows "Order-Service" and "order-service" to resolve to the same module.
+    case-insensitive-service-names: true
+
+    # Irregular English plural → singular mappings for collection-field-to-ID conversion.
+    # Key = plural form, value = singular form. Defaults include common irregulars.
+    irregular-plurals:
+      children: child
+      people: person
+      data: datum
+      media: medium
+      criteria: criterion
+      indices: index
+      vertices: vertex
+      matrices: matrix
+```
+
+#### How module name normalisation works
+
+When a dependency bean type such as `Svc1Service` is wired to a module named `svc1`, exact name matching would fail.
+FractalX uses a two-pass lookup:
+
+1. **Exact match** — fast path; `"svc1-service"` vs `"svc1"` → no match.
+2. **Normalized match** — strips separators and every suffix listed in `aggregate-class-suffixes`, then lowercases both sides: `"svc1service"` → strip `"service"` → `"svc1"` == `"svc1"` → match.
+
+Any bean type that resolves to a known module via normalization will have its NetScope client generated and wired correctly.
+Dependency names that cannot be resolved (after normalization) are logged as warnings before the pipeline starts — no silent failures, no broken builds.
+
+#### Defaults reference
+
+| Key | Default |
+|---|---|
+| `compensation-prefixes` | `cancel, rollback, undo, revert, release, refund` |
+| `infrastructure-suffixes` | `Service, Repository, Controller, Module, Config, Configuration, Application` |
+| `dependency-type-suffixes` | `Service, Client` |
+| `aggregate-class-suffixes` | `Service, Module` |
+| `event-publisher-method-names` | `publishEvent` |
+| `case-insensitive-service-names` | `true` |
+| `irregular-plurals` | children/child, people/person, data/datum, media/medium, criteria/criterion, indices/index, vertices/vertex, matrices/matrix |
 
 ---
 
