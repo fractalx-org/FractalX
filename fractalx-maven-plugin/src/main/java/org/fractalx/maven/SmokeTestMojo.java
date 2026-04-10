@@ -39,12 +39,14 @@ import java.util.regex.Pattern;
  * <ol>
  *   <li><b>Per-Service</b> (always) — build, start, health-check, endpoint probe, shutdown.
  *       Tests each service in isolation.</li>
- *   <li><b>Integration</b> ({@code -Dfractalx.smoketest.integration=true}) — starts the
- *       registry + all business services simultaneously, verifies service discovery, tests
- *       gateway routing, and probes saga orchestrator endpoints.</li>
- *   <li><b>Compose</b> ({@code -Dfractalx.smoketest.compose=true}) — runs
- *       {@code docker compose up}, waits for container health, probes the gateway, and
- *       tears down.</li>
+ *   <li><b>Integration</b> (default: on) — starts the registry + all business services
+ *       simultaneously, verifies service discovery, tests gateway routing, and probes saga
+ *       orchestrator endpoints. Skipped automatically when {@code fractalx-registry} is absent.
+ *       Disable with {@code -Dfractalx.smoketest.integration=false}.</li>
+ *   <li><b>Compose</b> (default: on) — runs {@code docker compose up}, waits for container
+ *       health, probes the gateway, and tears down. Skipped automatically when
+ *       {@code docker-compose.yml} is absent or Docker is not available.
+ *       Disable with {@code -Dfractalx.smoketest.compose=false}.</li>
  * </ol>
  *
  * <p>Two log files are written to {@code <outputDirectory>/}:
@@ -54,12 +56,11 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <pre>
- *   mvn fractalx:smoke-test                                                    # per-service only
- *   mvn fractalx:smoke-test -Dfractalx.smoketest.endpoints=false               # skip endpoint probe
- *   mvn fractalx:smoke-test -Dfractalx.smoketest.integration=true              # + integration tests
- *   mvn fractalx:smoke-test -Dfractalx.smoketest.compose=true                  # + docker compose tests
- *   mvn fractalx:smoke-test -Dfractalx.smoketest.integration=true \
- *       -Dfractalx.smoketest.compose=true -Dfractalx.smoketest.failBuild=true  # full suite, fail CI
+ *   mvn fractalx:smoke-test                                        # full suite (all phases)
+ *   mvn fractalx:smoke-test -Dfractalx.smoketest.endpoints=false   # skip endpoint probing
+ *   mvn fractalx:smoke-test -Dfractalx.smoketest.integration=false # skip integration phase
+ *   mvn fractalx:smoke-test -Dfractalx.smoketest.compose=false     # skip compose phase
+ *   mvn fractalx:smoke-test -Dfractalx.smoketest.failBuild=true    # fail build on any error
  * </pre>
  */
 @Mojo(name = "smoke-test", requiresProject = true, threadSafe = false)
@@ -110,16 +111,19 @@ public class SmokeTestMojo extends FractalxBaseMojo {
     /**
      * Multi-service integration tests: registry discovery, gateway routing, saga endpoints.
      * Starts all services simultaneously after per-service tests complete.
+     * Runs automatically when {@code fractalx-registry} is present; no-op otherwise.
      */
-    @Parameter(property = "fractalx.smoketest.integration", defaultValue = "false")
-    private boolean integration = false;
+    @Parameter(property = "fractalx.smoketest.integration", defaultValue = "true")
+    private boolean integration = true;
 
     /**
      * Docker Compose full-stack test: {@code docker compose up}, container health checks,
      * gateway probe, and {@code docker compose down}.
+     * Runs automatically when {@code docker-compose.yml} is present and Docker is available;
+     * no-op otherwise.
      */
-    @Parameter(property = "fractalx.smoketest.compose", defaultValue = "false")
-    private boolean compose = false;
+    @Parameter(property = "fractalx.smoketest.compose", defaultValue = "true")
+    private boolean compose = true;
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -221,11 +225,36 @@ public class SmokeTestMojo extends FractalxBaseMojo {
             // Phase 1: Per-service (build → start → health → endpoints → kill)
             runPerServicePhase(dash, dirs, root);
 
+            // Ensure all ports from Phase 1 are fully released before Phase 2.
+            // killProcess() now kills the entire process tree, but the OS may keep
+            // sockets in TIME_WAIT briefly. Polling here avoids BindException in Phase 2.
+            // Both HTTP and gRPC ports (HTTP + 10000) must be free.
+            if ((integration && hasRegistry) || (compose && hasCompose)) {
+                for (Path d : dirs) {
+                    int p = readPort(d);
+                    if (p > 0) {
+                        awaitPortFree(p, 10);
+                        awaitPortFree(p + 10000, 10);   // gRPC port
+                    }
+                }
+            }
+
             // Phase 2: Integration (registry + all services + gateway + saga)
             if (integration && hasRegistry) {
                 runIntegrationPhase(dash, dirs, businessDirs,
                         registryDir, gatewayDir, sagaDir,
                         hasGateway, hasSaga);
+
+                // Wait for ports to be free before Compose phase
+                if (compose && hasCompose) {
+                    for (Path d : dirs) {
+                        int p = readPort(d);
+                        if (p > 0) {
+                            awaitPortFree(p, 10);
+                            awaitPortFree(p + 10000, 10);
+                        }
+                    }
+                }
             }
 
             // Phase 3: Compose (docker compose up/down)
@@ -725,8 +754,24 @@ public class SmokeTestMojo extends FractalxBaseMojo {
         return false;
     }
 
+    /**
+     * Kills a process and its entire process tree.
+     *
+     * <p>{@code mvn spring-boot:run} spawns the Spring Boot JVM as a child process.
+     * {@link Process#destroy()} only signals the parent Maven process — the child JVM
+     * keeps running and holds the port. We must walk the process tree and kill descendants
+     * first to guarantee the port is released.
+     */
     private void killProcess(Process proc) {
         if (proc == null || !proc.isAlive()) return;
+
+        // Kill the entire process tree (children first, then parent)
+        proc.descendants().forEach(child -> {
+            child.destroy();
+            try { child.onExit().get(3, TimeUnit.SECONDS); } catch (Exception ignored) {}
+            if (child.isAlive()) child.destroyForcibly();
+        });
+
         proc.destroy();
         try { proc.waitFor(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
         if (proc.isAlive()) proc.destroyForcibly();
@@ -734,6 +779,26 @@ public class SmokeTestMojo extends FractalxBaseMojo {
 
     private void killAll(List<Process> procs) {
         for (Process p : procs) killProcess(p);
+    }
+
+    /**
+     * Waits until the given port is free (connection refused). Used between test phases
+     * to ensure ports from Phase 1 are fully released before Phase 2 starts.
+     */
+    private boolean awaitPortFree(int port, int timeoutSec) throws InterruptedException {
+        if (port <= 0) return true;
+        long deadline = System.currentTimeMillis() + timeoutSec * 1000L;
+        while (System.currentTimeMillis() < deadline) {
+            try (Socket s = new Socket()) {
+                s.connect(new InetSocketAddress("localhost", port), 200);
+                // Port is still in use — wait and retry
+                Thread.sleep(500);
+            } catch (IOException e) {
+                // Connection refused → port is free
+                return true;
+            }
+        }
+        return false;
     }
 
     // =========================================================================
