@@ -77,8 +77,10 @@ class GatewayCircuitBreakerGeneratorSpec extends Specification {
         def c = fallbackController()
         c.contains("/fallback/order-service")
         c.contains("/fallback/payment-service")
-        c.contains("@GetMapping")
-        c.contains("@PostMapping")
+        // Single @RequestMapping with both methods — avoids Spring MVC duplicate-annotation warning
+        c.contains("@RequestMapping")
+        c.contains("RequestMethod.GET")
+        c.contains("RequestMethod.POST")
     }
 
     def "fallback endpoints return HTTP 503 SERVICE_UNAVAILABLE"() {

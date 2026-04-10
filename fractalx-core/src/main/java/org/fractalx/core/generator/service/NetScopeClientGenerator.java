@@ -69,6 +69,17 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
             return;
         }
 
+        // Guard: if the source file doesn't exist we cannot extract methods and would write
+        // a zero-method interface that causes runtime UnsupportedOperationException on every call.
+        Optional<Path> sourceFile = findSourceFile(context.getSourceRoot(), beanType, targetServiceName);
+        if (sourceFile.isEmpty()) {
+            log.warn("NetScopeClientGenerator: source file not found for '{}' (target service '{}') "
+                    + "— skipping client interface generation. If the class lives in a sub-project, "
+                    + "ensure it is on the source root passed to the plugin.",
+                    beanType, targetServiceName);
+            return;
+        }
+
         int grpcPort = targetModule.grpcPort();
         Set<String> requiredImports = new LinkedHashSet<>();
         List<CrossModuleCall> methods = extractPublicMethods(beanType, context.getSourceRoot(), targetServiceName, requiredImports);

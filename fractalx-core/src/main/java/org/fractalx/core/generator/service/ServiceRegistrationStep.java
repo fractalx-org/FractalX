@@ -66,7 +66,9 @@ public class ServiceRegistrationStep implements ServiceFileGenerator {
                             restTemplate.postForObject(registryUrl + "/services", payload, Object.class);
                             log.info("Registered with fractalx-registry: {} at {}:{}", name, host, port);
                         } catch (Exception e) {
-                            log.warn("Could not register with fractalx-registry ({}): {}", registryUrl, e.getMessage());
+                            log.warn("Could not register with fractalx-registry at '{}': {} "
+                                    + "— verify that 'fractalx.registry.url' is correctly set in application.yml "
+                                    + "and that fractalx-registry is running.", registryUrl, e.getMessage());
                         }
                     }
 

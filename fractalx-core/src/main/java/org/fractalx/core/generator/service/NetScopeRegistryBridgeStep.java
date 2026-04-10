@@ -31,16 +31,22 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
         String generatedPkg = context.servicePackage();
         Path pkgPath = resolvePackage(context.getSrcMainJava(), generatedPkg);
 
-        generateBridge(pkgPath, generatedPkg, module.getDependencies());
+        generateBridge(pkgPath, generatedPkg, module.getDependencies(), context.getAllModules());
         log.debug("Generated NetScopeRegistryBridge for {}", module.getServiceName());
     }
 
-    private void generateBridge(Path pkgPath, String pkg, List<String> dependencies) throws IOException {
+    private void generateBridge(Path pkgPath, String pkg, List<String> dependencies,
+                                 List<FractalModule> allModules) throws IOException {
         StringBuilder futures = new StringBuilder();
         for (String dep : dependencies) {
+            // Resolve the actual registered service name via module lookup so the registry key
+            // matches what fractalx-registry stores (e.g. "svc2" not "svc2-service").
+            String derivedName = beanTypeToServiceName(dep);
+            FractalModule target = NetScopeClientGenerator.findModule(derivedName, allModules);
+            String registryKey = target != null ? target.getServiceName() : derivedName;
             futures.append("""
                                     CompletableFuture.runAsync(() -> resolveAndUpdate("%s"), executor),
-                            """.formatted(beanTypeToServiceName(dep)));
+                            """.formatted(registryKey));
         }
 
         // Strip trailing comma from last entry so the vararg compiles cleanly

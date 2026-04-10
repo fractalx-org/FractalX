@@ -59,6 +59,15 @@ class RegistryControllerGeneratorSpec extends Specification {
         content().contains("@RequestBody")
     }
 
+    def "register endpoint uses @Valid to reject malformed probe requests with HTTP 400 instead of 500"() {
+        when:
+        generator.generate(srcMainJava)
+
+        then:
+        content().contains("@Valid")
+        content().contains("import jakarta.validation.Valid")
+    }
+
     def "controller exposes a GET /services list endpoint"() {
         when:
         generator.generate(srcMainJava)

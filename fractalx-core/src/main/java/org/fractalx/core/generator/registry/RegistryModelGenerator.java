@@ -18,11 +18,15 @@ class RegistryModelGenerator {
         String content = """
                 package org.fractalx.registry.model;
 
+                import jakarta.validation.constraints.NotBlank;
                 import java.time.Instant;
 
                 public class ServiceRegistration {
 
+                    @NotBlank(message = "Service name must not be blank")
                     private String name;
+
+                    @NotBlank(message = "Service host must not be blank")
                     private String host;
                     private int port;
                     private int grpcPort;

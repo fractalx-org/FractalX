@@ -63,6 +63,14 @@ class RegistryPomGeneratorSpec extends Specification {
         pom().contains("spring-boot-starter-actuator")
     }
 
+    def "pom.xml includes spring-boot-starter-validation so @Valid on register endpoint works"() {
+        when:
+        generator.generate(registryRoot, FractalxConfig.defaults())
+
+        then:
+        pom().contains("spring-boot-starter-validation")
+    }
+
     def "pom.xml uses spring-boot-dependencies BOM for dependency management"() {
         when:
         generator.generate(registryRoot, FractalxConfig.defaults())
