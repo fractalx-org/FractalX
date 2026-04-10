@@ -623,6 +623,24 @@ mvn fractalx:decompose -Dfractalx.generate=false
 mvn fractalx:decompose -Dfractalx.outputDirectory=/path/to/output
 ```
 
+#### Pre-decomposition validation rules
+
+Before generating any code, FractalX validates your annotations and module graph. Errors block generation; warnings are advisory.
+
+| Rule ID | Severity | Triggered when | How to fix |
+|---|---|---|---|
+| `INVALID_SERVICE_NAME` | **Error** | `serviceName` is blank or doesn't match `^[a-z][a-z0-9-]{0,62}$` | Use a lowercase, hyphen-separated name, e.g. `order-service` |
+| `DUP_SERVICE_NAME` | **Error** | Two or more modules declare the same `serviceName` | Give each `@DecomposableModule` a unique `serviceName` |
+| `DUP_PORT` | **Error** | Two modules share the same HTTP port, the same derived gRPC port (HTTP + 10000), or one module's HTTP port collides with another's gRPC port | Assign unique HTTP ports in `@DecomposableModule(port = ...)` |
+| `INFRA_PORT_CONFLICT` | **Error** | A module's HTTP or gRPC port conflicts with a reserved infrastructure port (registry: 8761, gateway: 9999, admin: 9090, logger: 9099, saga orchestrator: 8099) | Change `@DecomposableModule(port = ...)` to an unreserved port |
+| `CIRCULAR_DEP` | **Error** | A circular dependency is detected in the service graph, e.g. `order-service → payment-service → order-service` | Extract shared state into a new `@DecomposableModule`, or break the cycle using an event/outbox pattern |
+| `REPO_BOUNDARY` | **Error** | A module directly injects a JPA repository owned by a different module — after decomposition that repository lives in a separate JVM and database | Move the data access logic into the owning service and expose it via a service method |
+| `SAGA_INTEGRITY` | **Error** | A `@DistributedSaga` method has no `sagaId`, two methods share the same `sagaId`, or a timeout value is ≤ 0 | Add a unique `sagaId`, e.g. `sagaId = "place-order-saga"`, and set a positive `timeout` |
+| `UNRESOLVED_DEP` | Warning | A declared dependency type cannot be mapped to any known module's `serviceName` | Annotate the target class with a matching `@DecomposableModule`, or declare the dependency explicitly: `@DecomposableModule(dependencies = {PaymentService.class})` |
+| `LOMBOK_ALL_ARGS` | Warning | A `@DecomposableModule` class uses `@AllArgsConstructor` (or has no explicit constructor), which makes dependency detection unreliable | Switch to `@RequiredArgsConstructor` with `private final` fields, or declare dependencies explicitly in `@DecomposableModule(dependencies = {...})` |
+
+Errors are printed before generation begins and the mojo exits without writing any files. Warnings are printed but do not block generation.
+
 ---
 
 ### `fractalx:verify` -- Verify generated output
