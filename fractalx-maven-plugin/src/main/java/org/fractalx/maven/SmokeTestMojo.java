@@ -43,10 +43,9 @@ import java.util.regex.Pattern;
  *       simultaneously, verifies service discovery, tests gateway routing, and probes saga
  *       orchestrator endpoints. Skipped automatically when {@code fractalx-registry} is absent.
  *       Disable with {@code -Dfractalx.smoketest.integration=false}.</li>
- *   <li><b>Compose</b> (default: on) — runs {@code docker compose up}, waits for container
- *       health, probes the gateway, and tears down. Skipped automatically when
- *       {@code docker-compose.yml} is absent or Docker is not available.
- *       Disable with {@code -Dfractalx.smoketest.compose=false}.</li>
+ *   <li><b>Compose</b> (default: off) — runs {@code docker compose up}, waits for container
+ *       health, probes the gateway, and tears down.
+ *       Enable with {@code -Dfractalx.smoketest.compose=true}.</li>
  * </ol>
  *
  * <p>Two log files are written to {@code <outputDirectory>/}:
@@ -56,10 +55,10 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <pre>
- *   mvn fractalx:smoke-test                                        # full suite (all phases)
+ *   mvn fractalx:smoke-test                                        # per-service + integration
  *   mvn fractalx:smoke-test -Dfractalx.smoketest.endpoints=false   # skip endpoint probing
  *   mvn fractalx:smoke-test -Dfractalx.smoketest.integration=false # skip integration phase
- *   mvn fractalx:smoke-test -Dfractalx.smoketest.compose=false     # skip compose phase
+ *   mvn fractalx:smoke-test -Dfractalx.smoketest.compose=true      # + docker compose phase
  *   mvn fractalx:smoke-test -Dfractalx.smoketest.failBuild=true    # fail build on any error
  * </pre>
  */
@@ -119,11 +118,10 @@ public class SmokeTestMojo extends FractalxBaseMojo {
     /**
      * Docker Compose full-stack test: {@code docker compose up}, container health checks,
      * gateway probe, and {@code docker compose down}.
-     * Runs automatically when {@code docker-compose.yml} is present and Docker is available;
-     * no-op otherwise.
+     * Disabled by default. Enable with {@code -Dfractalx.smoketest.compose=true}.
      */
-    @Parameter(property = "fractalx.smoketest.compose", defaultValue = "true")
-    private boolean compose = true;
+    @Parameter(property = "fractalx.smoketest.compose", defaultValue = "false")
+    private boolean compose = false;
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
