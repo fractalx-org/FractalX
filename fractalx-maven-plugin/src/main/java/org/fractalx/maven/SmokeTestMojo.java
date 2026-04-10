@@ -838,12 +838,17 @@ public class SmokeTestMojo extends FractalxBaseMojo {
         cmd.addAll(List.of(args));
         Path log = workDir.resolve("logs/smoketest-compose.log");
         Files.createDirectories(log.getParent());
-        return new ProcessBuilder(cmd)
+        Process proc = new ProcessBuilder(cmd)
                 .directory(workDir.toFile())
                 .redirectOutput(log.toFile())
                 .redirectError(ProcessBuilder.Redirect.appendTo(log.toFile()))
-                .start()
-                .waitFor(5, TimeUnit.MINUTES) ? 0 : -1;
+                .start();
+        boolean finished = proc.waitFor(10, TimeUnit.MINUTES);
+        if (!finished) {
+            killProcess(proc);
+            return -1;
+        }
+        return proc.exitValue();
     }
 
     // =========================================================================
