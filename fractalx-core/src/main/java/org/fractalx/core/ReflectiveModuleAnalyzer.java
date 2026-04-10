@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Analyses {@code target/classes/} via a {@link URLClassLoader} instead of parsing source files.
@@ -44,23 +45,37 @@ public class ReflectiveModuleAnalyzer {
     /** Set during {@link #analyzeProject} so helper methods can load package-sibling classes. */
     private URLClassLoader moduleClassLoader;
 
+    /** Convenience overload — no extra compile classpath (suitable for tests and simple projects). */
+    public List<FractalModule> analyzeProject(Path classesDir, Path sourceRoot,
+                                               ClassLoader parentClassLoader) throws IOException {
+        return analyzeProject(classesDir, sourceRoot, parentClassLoader, new URL[0]);
+    }
+
     /**
      * Scans {@code classesDir} (e.g. {@code target/classes/}) for classes annotated with
      * {@code @DecomposableModule} and returns a {@link FractalModule} for each one found.
      *
-     * @param classesDir      compiled output directory (must already exist)
-     * @param sourceRoot      source root ({@code src/main/java}) used only for import collection;
-     *                        may point to a non-existent path — imports will just be empty
+     * @param classesDir        compiled output directory (must already exist)
+     * @param sourceRoot        source root ({@code src/main/java}) used only for import collection;
+     *                          may point to a non-existent path — imports will just be empty
      * @param parentClassLoader the plugin's own classloader; must already have
      *                          {@code fractalx-annotations} loaded so that
      *                          {@code clazz.getAnnotation(DecomposableModule.class)} resolves
+     * @param compileClasspath  full compile-scope classpath of the project being analysed
+     *                          (Spring Data, Spring Security, JPA, etc.); required so that
+     *                          {@link Class#forName} can resolve transitive supertype chains
+     *                          such as {@code OrderRepository → JpaRepository}
      */
     public List<FractalModule> analyzeProject(Path classesDir, Path sourceRoot,
-                                               ClassLoader parentClassLoader) throws IOException {
-        moduleClassLoader = new URLClassLoader(
-                new URL[]{ classesDir.toUri().toURL() },
-                parentClassLoader
-        );
+                                               ClassLoader parentClassLoader,
+                                               URL[] compileClasspath) throws IOException {
+        // classesDir first so project classes shadow any conflicting plugin classes,
+        // then the full compile classpath so transitive framework supertypes resolve.
+        URL[] allUrls = Stream.concat(
+                Stream.of(classesDir.toUri().toURL()),
+                Arrays.stream(compileClasspath))
+                .toArray(URL[]::new);
+        moduleClassLoader = new URLClassLoader(allUrls, parentClassLoader);
 
         List<FractalModule> modules = new ArrayList<>();
 
