@@ -134,6 +134,7 @@ public class PomGenerator implements ServiceFileGenerator {
             if (cfg.features().observability()) {
                 appendObservabilityDeps(doc);
             }
+            ensureSpringBootBom(doc, cfg.springBootVersion());
             ensureSpringCloudBom(doc, cfg.springCloudVersion());
             ensureSpringBootPlugin(doc);
 
@@ -468,6 +469,49 @@ public class PomGenerator implements ServiceFileGenerator {
         } catch (Exception e) {
             log.warn("Could not parse observability deps fragment: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Ensures {@code spring-boot-dependencies} BOM is present in {@code <dependencyManagement>}.
+     * This is a safety net: when the monolith uses {@code spring-boot-starter-parent} as parent,
+     * all Spring Boot starters are already managed by the parent. However, when the parent version
+     * cannot be resolved at build time, having an explicit BOM entry guarantees that starters added
+     * by {@link #addFractalxDeps} (e.g. {@code spring-boot-starter-aop}) have managed versions.
+     */
+    private static void ensureSpringBootBom(Document doc, String version) {
+        NodeList dms = doc.getElementsByTagName("dependencyManagement");
+        if (dms.getLength() > 0) {
+            Element dmEl = (Element) dms.item(0);
+            NodeList deps = dmEl.getElementsByTagName("dependency");
+            for (int i = 0; i < deps.getLength(); i++) {
+                String aid = text((Element) deps.item(i), "artifactId");
+                if ("spring-boot-dependencies".equals(aid) || "spring-boot-starter-parent".equals(aid)) {
+                    return; // already managed
+                }
+            }
+            NodeList innerDeps = dmEl.getElementsByTagName("dependencies");
+            Element innerDepsEl = innerDeps.getLength() > 0
+                    ? (Element) innerDeps.item(0)
+                    : doc.createElement("dependencies");
+            if (innerDeps.getLength() == 0) dmEl.appendChild(innerDepsEl);
+            innerDepsEl.appendChild(createSpringBootBomElement(doc, version));
+        } else {
+            Element dm = doc.createElement("dependencyManagement");
+            Element innerDeps = doc.createElement("dependencies");
+            innerDeps.appendChild(createSpringBootBomElement(doc, version));
+            dm.appendChild(innerDeps);
+            doc.getDocumentElement().appendChild(dm);
+        }
+    }
+
+    private static Element createSpringBootBomElement(Document doc, String version) {
+        Element dep = doc.createElement("dependency");
+        Element g = doc.createElement("groupId");    g.setTextContent("org.springframework.boot");  dep.appendChild(g);
+        Element a = doc.createElement("artifactId"); a.setTextContent("spring-boot-dependencies"); dep.appendChild(a);
+        Element v = doc.createElement("version");    v.setTextContent(version);                     dep.appendChild(v);
+        Element t = doc.createElement("type");       t.setTextContent("pom");                       dep.appendChild(t);
+        Element s = doc.createElement("scope");      s.setTextContent("import");                    dep.appendChild(s);
+        return dep;
     }
 
     /**

@@ -269,6 +269,9 @@ public class FractalxConfigReader {
 
             String groupId            = firstElement(doc, "groupId");
             String springBootVersion  = pomProperty(doc, "spring-boot.version");
+            if (springBootVersion == null) {
+                springBootVersion = parentVersionIfStarter(doc);
+            }
             String springCloudVersion = dependencyVersion(doc, "spring-cloud-dependencies");
 
             return new SourcePomInfo(groupId, springBootVersion, springCloudVersion);
@@ -305,6 +308,27 @@ public class FractalxConfigReader {
             }
         }
         return null;
+    }
+
+    /**
+     * Returns the version from {@code <parent>} when the parent artifact is
+     * {@code spring-boot-starter-parent}, as an alternative to reading
+     * {@code <properties><spring-boot.version>}.
+     */
+    private String parentVersionIfStarter(Document doc) {
+        NodeList parents = doc.getElementsByTagName("parent");
+        if (parents.getLength() == 0) return null;
+        org.w3c.dom.Node parentNode = parents.item(0);
+        if (parentNode.getNodeType() != org.w3c.dom.Node.ELEMENT_NODE) return null;
+        String aid = null, ver = null;
+        NodeList children = parentNode.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            org.w3c.dom.Node c = children.item(i);
+            if (c.getNodeType() != org.w3c.dom.Node.ELEMENT_NODE) continue;
+            if ("artifactId".equals(c.getNodeName())) aid = c.getTextContent().trim();
+            if ("version".equals(c.getNodeName()))    ver = c.getTextContent().trim();
+        }
+        return "spring-boot-starter-parent".equals(aid) ? ver : null;
     }
 
     /** Returns the version declared for the named artifact in dependencyManagement. */
