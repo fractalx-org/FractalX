@@ -187,6 +187,12 @@ public class RelationshipDecoupler {
                 String renamedName  = originalName;
 
                 for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
+                    if (entry.getValue() == null) {
+                        log.warn("RelationshipDecoupler: null rename target for field '{}' in {} "
+                                + "— skipping rename for this entry",
+                                entry.getKey(), javaFile.getFileName());
+                        continue;
+                    }
                     String oldSegment = upperFirst(entry.getKey());   // e.g. "Payment"
                     String newSegment = upperFirst(entry.getValue()); // e.g. "PaymentId"
                     renamedName = renamedName.replace(oldSegment, newSegment);

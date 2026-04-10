@@ -170,6 +170,12 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                       .append(targetServiceName).append("}\n");
                     sb.append("        port: ${").append(envPfx).append("_GRPC_PORT:")
                       .append(target.grpcPort()).append("}\n");
+                } else {
+                    log.warn("ConfigurationGenerator: module not found for dependency '{}' "
+                            + "(derived service name '{}') — omitted from application-docker.yml "
+                            + "netscope.client.servers block. Check that the module name matches "
+                            + "the bean type after normalization.",
+                            beanType, targetServiceName);
                 }
             }
         }
@@ -200,6 +206,12 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                 sb.append("      ").append(targetServiceName).append(":\n");
                 sb.append("        host: localhost\n");
                 sb.append("        port: ").append(target.grpcPort()).append("\n");
+            } else {
+                log.warn("ConfigurationGenerator: module not found for dependency '{}' "
+                        + "(derived service name '{}') — omitted from application-dev.yml "
+                        + "netscope.client.servers block. Check that the module name matches "
+                        + "the bean type after normalization.",
+                        beanType, targetServiceName);
             }
         }
         return sb.toString();

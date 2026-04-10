@@ -92,4 +92,14 @@ class RegistryModelGeneratorSpec extends Specification {
         c.contains("getBaseUrl()")
         c.contains("http://")
     }
+
+    def "name and host fields are annotated with @NotBlank so empty probe requests return HTTP 400"() {
+        when:
+        generator.generate(srcMainJava)
+
+        then:
+        def c = content()
+        c.contains("import jakarta.validation.constraints.NotBlank")
+        c.contains("@NotBlank")
+    }
 }

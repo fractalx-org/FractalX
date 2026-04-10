@@ -58,13 +58,19 @@ public class ImportCleaner implements ServiceFileGenerator {
             for (ImportDeclaration imp : cu.getImports()) {
                 if (imp.isAsterisk()) {
                     String pkg = imp.getNameAsString(); // e.g. "com.ultimatepoc.customer"
+                    String currentPkg = context.getModule().getPackageName();
                     boolean isCrossModule = context.getAllModules().stream()
-                            .anyMatch(m -> !m.getPackageName().equals(context.getModule().getPackageName())
+                            .filter(m -> m.getPackageName() != null)
+                            .anyMatch(m -> !m.getPackageName().equals(currentPkg)
                                     && pkg.startsWith(m.getPackageName()));
                     if (isCrossModule) {
-                        toRemove.add(imp);
-                        modified = true;
-                        log.debug("Removed cross-module wildcard import: {}.*", pkg);
+                        // Preserve cross-module wildcard imports — they may cover annotation-only
+                        // or transitive type references not visible in the AST simple-name sets.
+                        // Removing them blindly can cause compile errors in generated services.
+                        log.warn("ImportCleaner: preserving cross-module wildcard import '{}.*' "
+                                + "in {} — cannot safely determine transitive/annotation coverage. "
+                                + "Remove manually if confirmed unused.",
+                                pkg, javaFile.getFileName());
                     }
                     continue;
                 }

@@ -28,8 +28,7 @@ public class GatewayCircuitBreakerGenerator {
         for (FractalModule m : modules) {
             methods.append("""
 
-                        @GetMapping("/fallback/%s")
-                        @PostMapping("/fallback/%s")
+                        @RequestMapping(method = {RequestMethod.GET, RequestMethod.POST}, value = "/fallback/%s")
                         public ResponseEntity<Map<String, Object>> %sFallback() {
                             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                                     .body(Map.of(
@@ -39,8 +38,7 @@ public class GatewayCircuitBreakerGenerator {
                                             "timestamp", System.currentTimeMillis()
                                     ));
                         }
-                    """.formatted(m.getServiceName(), m.getServiceName(),
-                    toCamelCase(m.getServiceName()), m.getServiceName()));
+                    """.formatted(m.getServiceName(), toCamelCase(m.getServiceName()), m.getServiceName()));
         }
 
         String content = """
@@ -48,9 +46,8 @@ public class GatewayCircuitBreakerGenerator {
 
                 import org.springframework.http.HttpStatus;
                 import org.springframework.http.ResponseEntity;
-                import org.springframework.web.bind.annotation.GetMapping;
-                import org.springframework.web.bind.annotation.PostMapping;
                 import org.springframework.web.bind.annotation.RequestMapping;
+                import org.springframework.web.bind.annotation.RequestMethod;
                 import org.springframework.web.bind.annotation.RestController;
 
                 import java.util.Map;

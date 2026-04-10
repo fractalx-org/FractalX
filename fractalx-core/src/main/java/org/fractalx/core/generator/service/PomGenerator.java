@@ -703,7 +703,9 @@ public class PomGenerator implements ServiceFileGenerator {
         // element so the dep becomes BOM-managed in the generated service pom, which still
         // inherits the same parent.  Dropping the dep entirely would silently lose it.
         dep.removeChild(vn);
-        log.debug("Stripped unresolvable version placeholder '{}' from '{}' — relying on parent/BOM",
+        log.warn("PomGenerator: version placeholder '{}' for dependency '{}' could not be resolved "
+                + "from monolith <properties> — stripped <version> and relying on parent/BOM. "
+                + "If the generated pom fails to build, add the version property explicitly.",
                 ver, artifactId);
         return true;
     }

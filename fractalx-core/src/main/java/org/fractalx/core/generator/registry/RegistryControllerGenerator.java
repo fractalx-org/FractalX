@@ -18,6 +18,7 @@ class RegistryControllerGenerator {
         String content = """
                 package org.fractalx.registry.controller;
 
+                import jakarta.validation.Valid;
                 import org.fractalx.registry.model.ServiceRegistration;
                 import org.fractalx.registry.service.RegistryService;
                 import org.springframework.http.ResponseEntity;
@@ -37,7 +38,7 @@ class RegistryControllerGenerator {
                     }
 
                     @PostMapping
-                    public ResponseEntity<ServiceRegistration> register(@RequestBody ServiceRegistration reg) {
+                    public ResponseEntity<ServiceRegistration> register(@Valid @RequestBody ServiceRegistration reg) {
                         return ResponseEntity.ok(registryService.register(reg));
                     }
 
