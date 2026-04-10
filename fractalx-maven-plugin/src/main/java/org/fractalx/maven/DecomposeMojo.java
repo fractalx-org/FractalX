@@ -8,17 +8,20 @@ import org.fractalx.core.validation.DecompositionValidator;
 import org.fractalx.core.validation.ValidationIssue;
 import org.fractalx.core.validation.ValidationReport;
 import org.fractalx.core.validation.ValidationReport.Partition;
+import org.apache.maven.artifact.DependencyResolutionRequiredException;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.Execute;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
+import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -38,7 +41,8 @@ import java.util.List;
  * completes (or fails) the plugin returns to the normal screen and prints a
  * concise Vercel-style summary.
  */
-@Mojo(name = "decompose", defaultPhase = LifecyclePhase.PROCESS_CLASSES)
+@Mojo(name = "decompose", defaultPhase = LifecyclePhase.PROCESS_CLASSES,
+      requiresDependencyResolution = ResolutionScope.COMPILE)
 @Execute(phase = LifecyclePhase.COMPILE)
 public class DecomposeMojo extends FractalxBaseMojo {
 
@@ -108,9 +112,15 @@ public class DecomposeMojo extends FractalxBaseMojo {
             out.println(a(DIM) + "  Analysing compiled classes at " + a(RST)
                     + classesDirectory.getAbsolutePath());
             out.println();
+            // Build the full compile classpath so the URLClassLoader can resolve transitive
+            // framework types (Spring Data JpaRepository, Spring Security interfaces, etc.).
+            // Without these, Class.forName() throws NoClassDefFoundError on any service class
+            // that injects a JPA repository or Spring bean — silently skipping @DecomposableModule.
+            URL[] compileClasspath = buildCompileClasspath();
+
             List<FractalModule> modules = new ReflectiveModuleAnalyzer()
                     .analyzeProject(classesDirectory.toPath(), sourcePath,
-                                    getClass().getClassLoader());
+                                    getClass().getClassLoader(), compileClasspath);
 
             if (modules.isEmpty()) {
                 warn("No @DecomposableModule classes found.");
@@ -177,6 +187,25 @@ public class DecomposeMojo extends FractalxBaseMojo {
     }
 
     // =========================================================================
+    /**
+     * Builds a URL array covering the project's full compile classpath.
+     * This allows the {@link ReflectiveModuleAnalyzer}'s URLClassLoader to resolve
+     * transitive framework types (e.g. {@code JpaRepository}, Spring Security interfaces)
+     * that are referenced by service classes but not present in {@code target/classes/}.
+     */
+    private URL[] buildCompileClasspath() {
+        List<URL> urls = new ArrayList<>();
+        try {
+            for (String element : project.getCompileClasspathElements()) {
+                urls.add(new File(element).toURI().toURL());
+            }
+        } catch (DependencyResolutionRequiredException | java.net.MalformedURLException e) {
+            getLog().warn("Could not resolve compile classpath — some @DecomposableModule classes "
+                    + "may be skipped if they reference unresolvable types: " + e.getMessage());
+        }
+        return urls.toArray(URL[]::new);
+    }
+
     // Questionnaire — runs on the normal screen before the dashboard
     // =========================================================================
 

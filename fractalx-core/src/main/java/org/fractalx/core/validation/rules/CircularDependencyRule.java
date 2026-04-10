@@ -43,7 +43,7 @@ public class CircularDependencyRule implements ValidationRule {
                         "circular dependency detected: " + f.detail(),
                         "Extract shared state into a new @DecomposableModule, or break the cycle "
                         + "by reversing one of the dependency edges (e.g. use an event/outbox "
-                        + "instead of a direct NetScope call)"));
+                        + "pattern instead of a direct call)"));
             }
         }
         return issues;

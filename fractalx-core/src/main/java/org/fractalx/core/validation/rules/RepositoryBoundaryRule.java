@@ -25,8 +25,8 @@ import java.util.List;
  * will compile but throw {@code NoSuchBeanDefinitionException} at runtime because
  * {@code PaymentRepository} and its datasource live in a different JVM.
  *
- * <p>Fix: replace the cross-boundary repository call with a NetScope client call
- * to the owning service, or introduce a read-model/snapshot pattern.
+ * <p>Fix: move the data access logic into the owning service and expose it via
+ * a service method, or introduce a read-model/snapshot pattern.
  */
 public class RepositoryBoundaryRule implements ValidationRule {
 
@@ -45,8 +45,7 @@ public class RepositoryBoundaryRule implements ValidationRule {
                     ValidationSeverity.ERROR, ruleId(), v.usedInModule,
                     v.usedInClass + " injects " + v.repositoryName
                     + " which is owned by '" + v.ownerModule + "'",
-                    "Replace the direct repository injection with a NetScope call to '"
-                    + v.ownerModule + "', or move the data access logic into '"
+                    "Move the data access logic into '"
                     + v.ownerModule + "' and expose it via a service method"));
         }
         return issues;
