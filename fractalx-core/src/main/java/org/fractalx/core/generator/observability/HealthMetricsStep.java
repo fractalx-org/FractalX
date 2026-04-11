@@ -80,7 +80,11 @@ public class HealthMetricsStep implements ServiceFileGenerator {
                                             .withDetail("grpcPort", port)
                                             .build();
                                 } catch (Exception e) {
-                                    return Health.down()
+                                    // UNKNOWN rather than DOWN: a dependency being unreachable
+                                    // does not mean this service is broken. DOWN propagates to
+                                    // HTTP 503 on /actuator/health, which blocks smoke-test
+                                    // service registration and readiness probes.
+                                    return Health.unknown()
                                             .withDetail("service", "%s")
                                             .withDetail("error",   e.getMessage())
                                             .build();
