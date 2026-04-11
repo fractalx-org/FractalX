@@ -310,7 +310,7 @@ public class ServiceGenerator {
 
         if (generateAdmin && fractalxConfig.features().admin()) {
             onStepStart.accept("fractalx-admin");
-            adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions);
+            adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions, authPattern);
             onStepComplete.accept("fractalx-admin");
         } else if (!fractalxConfig.features().admin()) {
             log.info("Feature 'admin' disabled — skipping admin-service generation");

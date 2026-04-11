@@ -69,7 +69,7 @@ public class GatewayPomGenerator {
                     <!-- Spring Cloud Gateway -->
                     <dependency>
                         <groupId>org.springframework.cloud</groupId>
-                        <artifactId>spring-cloud-starter-gateway</artifactId>
+                        <artifactId>__GATEWAY_ARTIFACT__</artifactId>
                     </dependency>
                     
                     <!-- Actuator for health checks -->
@@ -167,10 +167,18 @@ public class GatewayPomGenerator {
                         <artifactId>opentelemetry-semconv</artifactId>
                         <version>1.21.0-alpha</version>
                     </dependency>""";
+        // Spring Cloud Gateway 4.3.x (2025.0.x) has a binary incompatibility with
+        // Spring Framework 7.0.3+ (HttpHeaders.containsKey(Object) removed in Boot 4.x).
+        // Pin the gateway to Spring Boot 3.4.x + Spring Cloud 2024.0.0 (Gateway 4.2.x /
+        // Spring Framework 6.x) which is unaffected. The gateway is a pure HTTP proxy
+        // so mixed-version routing to Boot 4.x services is safe.
+        String gatewayBootVersion  = isBoot4Plus ? "3.4.13" : config.springBootVersion();
+        String gatewayCloudVersion = isBoot4Plus ? "2024.0.0" : config.springCloudVersion();
         pomContent = pomContent
-                .replace("__SB_VERSION__", config.springBootVersion())
-                .replace("__SC_VERSION__", config.springCloudVersion())
-                .replace("__OTEL_DEPS__", otelDeps);
+                .replace("__SB_VERSION__", gatewayBootVersion)
+                .replace("__SC_VERSION__", gatewayCloudVersion)
+                .replace("__OTEL_DEPS__", otelDeps)
+                .replace("__GATEWAY_ARTIFACT__", "spring-cloud-starter-gateway");
         Path pomPath = gatewayRoot.resolve("pom.xml");
         Files.writeString(pomPath, pomContent);
         log.info("✓ Generated gateway pom.xml");

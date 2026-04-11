@@ -1,5 +1,6 @@
 package org.fractalx.core.generator.admin;
 
+import org.fractalx.core.auth.AuthPattern;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.SagaDefinition;
 import org.slf4j.Logger;
@@ -117,6 +118,14 @@ public class AdminServiceGenerator {
                                       org.fractalx.core.config.FractalxConfig fractalxConfig,
                                       List<SagaDefinition> sagaDefinitions)
             throws IOException {
+        generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions, null);
+    }
+
+    public void generateAdminService(List<FractalModule> modules, Path outputRoot, Path sourceRoot,
+                                      org.fractalx.core.config.FractalxConfig fractalxConfig,
+                                      List<SagaDefinition> sagaDefinitions,
+                                      AuthPattern authPattern)
+            throws IOException {
         log.info("Generating Admin Service...");
 
         Path serviceRoot   = outputRoot.resolve(ADMIN_SERVICE_NAME);
@@ -145,7 +154,8 @@ public class AdminServiceGenerator {
         staticAssetsGenerator.generate(staticPath);
 
         // Service topology + existing observability
-        topologyGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
+        boolean hasAuth = authPattern != null && authPattern.detected();
+        topologyGenerator.generate(srcMainJava, BASE_PACKAGE, modules, hasAuth);
         observabilityGenerator.generate(srcMainJava, BASE_PACKAGE, modules);
 
         // New enhanced sub-systems

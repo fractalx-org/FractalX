@@ -19,11 +19,15 @@ class AdminTopologyGenerator {
     private static final Logger log = LoggerFactory.getLogger(AdminTopologyGenerator.class);
 
     void generate(Path srcMainJava, String basePackage, List<FractalModule> modules) throws IOException {
+        generate(srcMainJava, basePackage, modules, false);
+    }
+
+    void generate(Path srcMainJava, String basePackage, List<FractalModule> modules, boolean hasAuth) throws IOException {
         Path pkg = AdminPackageUtil.createPackagePath(srcMainJava, basePackage + ".topology");
 
         generateTopologyModel(pkg);
-        generateTopologyProvider(pkg, modules);
-        generateTopologyController(pkg, modules);
+        generateTopologyProvider(pkg, modules, hasAuth);
+        generateTopologyController(pkg, modules, hasAuth);
 
         log.debug("Generated admin topology");
     }
@@ -54,7 +58,7 @@ class AdminTopologyGenerator {
         Files.writeString(pkg.resolve("TopologyGraph.java"), content);
     }
 
-    private void generateTopologyProvider(Path pkg, List<FractalModule> modules) throws IOException {
+    private void generateTopologyProvider(Path pkg, List<FractalModule> modules, boolean hasAuth) throws IOException {
         StringBuilder nodes = new StringBuilder();
         StringBuilder edges = new StringBuilder();
 
@@ -69,6 +73,9 @@ class AdminTopologyGenerator {
                         "        edges.add(new TopologyGraph.ServiceEdge(\"%s\", \"%s\", \"grpc\"));\n",
                         m.getServiceName(), target));
             }
+        }
+        if (hasAuth) {
+            nodes.append("        nodes.add(new TopologyGraph.ServiceNode(\"auth-service\",      \"Auth Service\",    8090, \"auth\"));\n");
         }
         nodes.append("        nodes.add(new TopologyGraph.ServiceNode(\"fractalx-gateway\",   \"API Gateway\",     9999, \"gateway\"));\n");
         nodes.append("        nodes.add(new TopologyGraph.ServiceNode(\"fractalx-registry\",  \"Service Registry\", 8761, \"registry\"));\n");
@@ -99,12 +106,15 @@ class AdminTopologyGenerator {
         Files.writeString(pkg.resolve("ServiceTopologyProvider.java"), content);
     }
 
-    private void generateTopologyController(Path pkg, List<FractalModule> modules) throws IOException {
+    private void generateTopologyController(Path pkg, List<FractalModule> modules, boolean hasAuth) throws IOException {
         StringBuilder healthChecks = new StringBuilder();
         for (FractalModule m : modules) {
             healthChecks.append(String.format(
                     "        summary.put(\"%s\", checkHealth(\"%s\", %d, \"/actuator/health\"));\n",
                     m.getServiceName(), m.getServiceName(), m.getPort()));
+        }
+        if (hasAuth) {
+            healthChecks.append("        summary.put(\"auth-service\",      checkHealth(\"auth-service\",    8090, \"/actuator/health\"));\n");
         }
         healthChecks.append("        summary.put(\"fractalx-registry\", checkHealth(\"fractalx-registry\", 8761, \"/services/health\"));\n");
         healthChecks.append("        summary.put(\"fractalx-gateway\",  checkHealth(\"fractalx-gateway\",  9999, \"/actuator/health\"));\n");
