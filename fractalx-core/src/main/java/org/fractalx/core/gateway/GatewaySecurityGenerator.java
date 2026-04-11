@@ -291,12 +291,12 @@ public class GatewaySecurityGenerator {
             }
         }
 
-        // Catch-all: authenticated if security was detected, otherwise open
-        if (profile.hasRouteRules() || profile.isAnyAuthDetected()) {
-            chain.append("                                .anyExchange().authenticated()");
-        } else {
-            chain.append("                                .anyExchange().permitAll()");
-        }
+        // Always permitAll at the Spring Security level.
+        // Auth is enforced by GlobalFilter beans (JwtBearerFilter, ApiKeyFilter,
+        // BasicAuthGatewayFilter) which run in the gateway filter chain.
+        // Those filters never set a Spring Security principal, so .authenticated()
+        // here would block every request with 401 before the filters see it.
+        chain.append("                                .anyExchange().permitAll()");
 
         return chain.toString();
     }
