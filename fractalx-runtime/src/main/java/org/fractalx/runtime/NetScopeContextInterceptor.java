@@ -146,11 +146,26 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
                                                 .map(r -> new org.springframework.security.core.authority
                                                         .SimpleGrantedAuthority("ROLE_" + r))
                                                 .collect(java.util.stream.Collectors.toList());
+
+                        // Extract extended claims forwarded by the gateway
+                        String username = claims.get("username", String.class);
+                        String email    = claims.get("email", String.class);
+                        java.util.Map<String, Object> attributes = new java.util.HashMap<>();
+                        java.util.Set<String> reserved = java.util.Set.of(
+                                "sub", "roles", "iss", "aud", "iat", "exp", "username", "email");
+                        claims.forEach((k, v) -> {
+                            if (!reserved.contains(k)) attributes.put(k, v);
+                        });
+
+                        GatewayPrincipal principal = new GatewayPrincipal(
+                                userId, username, email, auths,
+                                java.util.Collections.unmodifiableMap(attributes));
+
                         org.springframework.security.core.context.SecurityContextHolder
                                 .getContext()
                                 .setAuthentication(
                                         new org.springframework.security.authentication
-                                                .UsernamePasswordAuthenticationToken(userId, internalToken, auths));
+                                                .UsernamePasswordAuthenticationToken(principal, internalToken, auths));
                         log.debug("NetScope: established Authentication for user={} from x-internal-token", userId);
                     } catch (io.jsonwebtoken.ExpiredJwtException e) {
                         log.warn("NetScope: x-internal-token expired for subject={} — request proceeds without auth. " +
