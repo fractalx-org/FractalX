@@ -81,6 +81,7 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                 import jakarta.servlet.ServletException;
                 import jakarta.servlet.http.HttpServletRequest;
                 import jakarta.servlet.http.HttpServletResponse;
+                import org.fractalx.runtime.GatewayPrincipal;
                 import org.springframework.beans.factory.annotation.Value;
                 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
                 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -92,7 +93,11 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                 import java.io.IOException;
                 import java.nio.charset.StandardCharsets;
                 import java.util.Arrays;
+                import java.util.Collections;
+                import java.util.HashMap;
                 import java.util.List;
+                import java.util.Map;
+                import java.util.Set;
                 import java.util.stream.Collectors;
 
                 /**
@@ -102,13 +107,14 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                  * a short-lived HMAC-SHA256-signed JWT minted after the gateway successfully
                  * authenticated the external user's credential (Bearer JWT / OAuth2 / Basic / API Key).
                  *
-                 * <p>On successful validation, establishes a Spring {@link org.springframework.security.core.Authentication}
-                 * in {@link SecurityContextHolder}, making the user's identity available to:
+                 * <p>On successful validation, constructs an {@link GatewayPrincipal} and establishes
+                 * a Spring {@link org.springframework.security.core.Authentication} in
+                 * {@link SecurityContextHolder}. The principal is available via:
                  * <ul>
-                 *   <li>{@code @PreAuthorize} / {@code @Secured} / {@code @RolesAllowed} annotations</li>
-                 *   <li>{@code SecurityContextHolder.getContext().getAuthentication()}</li>
-                 *   <li>{@link org.fractalx.runtime.NetScopeContextInterceptor} — forwards the token
-                 *       via gRPC metadata for cross-service calls (fractalx-runtime)</li>
+                 *   <li>{@code @AuthenticationPrincipal GatewayPrincipal principal}</li>
+                 *   <li>{@code @PreAuthorize("principal.id == #userId")}</li>
+                 *   <li>{@code @PreAuthorize("principal.hasRole('ADMIN')")}</li>
+                 *   <li>{@code principal.getAttribute("customerId")} — for custom claims</li>
                  * </ul>
                  *
                  * <p>The internal token is verified with {@code fractalx.security.internal-jwt-secret}
@@ -119,6 +125,9 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                  * production. Direct access bypasses the gateway's authentication step entirely.
                  */
                 public class GatewayAuthHeaderFilter extends OncePerRequestFilter {
+
+                    private static final Set<String> RESERVED_CLAIMS = Set.of(
+                            "sub", "roles", "iss", "aud", "iat", "exp", "username", "email");
 
                     @Value("${fractalx.security.internal-jwt-secret:fractalx-internal-secret-change-in-prod-!!}")
                     private String internalJwtSecret;
@@ -149,10 +158,22 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                                                          .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
                                                          .collect(Collectors.toList());
 
+                                // Extract extended claims forwarded by the gateway
+                                String username = claims.get("username", String.class);
+                                String email    = claims.get("email", String.class);
+                                Map<String, Object> attributes = new HashMap<>();
+                                claims.forEach((k, v) -> {
+                                    if (!RESERVED_CLAIMS.contains(k)) attributes.put(k, v);
+                                });
+
+                                GatewayPrincipal principal = new GatewayPrincipal(
+                                        userId, username, email, authorities,
+                                        Collections.unmodifiableMap(attributes));
+
                                 // Store the raw token as credentials so NetScopeContextInterceptor
                                 // can forward it via gRPC metadata for cross-service calls.
                                 var auth = new UsernamePasswordAuthenticationToken(
-                                        userId, internalToken, authorities);
+                                        principal, internalToken, authorities);
                                 SecurityContextHolder.getContext().setAuthentication(auth);
 
                             } catch (Exception e) {

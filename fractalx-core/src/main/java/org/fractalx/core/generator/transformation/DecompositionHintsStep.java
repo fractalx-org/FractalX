@@ -306,6 +306,23 @@ public class DecompositionHintsStep implements ServiceFileGenerator {
             }
         }
 
+        // ── Gap 8e: @AuthenticationPrincipal with non-GatewayPrincipal type ────
+        for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
+            for (com.github.javaparser.ast.body.Parameter param : method.getParameters()) {
+                if (param.getAnnotationByName("AuthenticationPrincipal").isEmpty()) continue;
+                String typeName = param.getTypeAsString();
+                if ("GatewayPrincipal".equals(typeName)) continue;
+                findings.get("security_patterns").add(
+                        "`" + shortName + "` → `" + method.getNameAsString() + "()` had " +
+                        "`@AuthenticationPrincipal " + typeName + "` — FractalX has rewritten " +
+                        "this to `GatewayPrincipal`. If the method body calls `" + typeName +
+                        "`-specific methods (e.g. `getFirstName()`), replace them with " +
+                        "`principal.getAttribute(\"firstName\")` or add the claim to the " +
+                        "gateway's internal token forwarding. Standard accessors " +
+                        "(`getId()`, `getUsername()`, `getEmail()`, `getAuthorities()`) work as-is.");
+            }
+        }
+
         // ── Gap 9a: @Embedded / @Embeddable ───────────────────────────────────
         cu.findAll(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class).forEach(cls -> {
             if (cls.getAnnotationByName("Embeddable").isPresent()) {
@@ -546,11 +563,26 @@ public class DecompositionHintsStep implements ServiceFileGenerator {
                 verified user identity via `X-Internal-Token` and must **not** attempt to load
                 user credentials directly.
 
+                **`@AuthenticationPrincipal` rewrite (Gap 8e):**
+                FractalX rewrites `@AuthenticationPrincipal User user` (or any custom type) to
+                `@AuthenticationPrincipal GatewayPrincipal user`. The `GatewayPrincipal` class
+                (from `fractalx-runtime`) implements `UserDetails` and provides:
+                - `getId()` — user's unique identifier (JWT `sub` claim)
+                - `getUsername()` — display name (falls back to id)
+                - `getEmail()` — email address (when forwarded by gateway)
+                - `getAuthorities()` / `hasRole("ADMIN")` — role-based access
+                - `getAttribute("key")` — custom claims forwarded from the original JWT
+                If the original `User` type had domain-specific methods (e.g. `getCustomerId()`),
+                use `principal.getAttribute("customerId")` or add the claim to the gateway's
+                `InternalTokenMinter` call. SpEL: `@PreAuthorize("principal.id == #userId")`.
+
                 **Fix options summary:**
                 - Remove `@EnableWebSecurity` classes from non-auth services (they are replaced).
                 - Keep `@PreAuthorize` / `@Secured` — they work via the generated security config.
                 - Remove custom `OncePerRequestFilter` JWT validators from decomposed services.
                 - Move `UserDetailsService` / `AuthenticationProvider` to the auth/user service only.
+                - Review `@AuthenticationPrincipal` usages — replace domain-specific calls with
+                  `GatewayPrincipal.getAttribute()` or add claims to the internal token.
                 - Set `FRACTALX_INTERNAL_JWT_SECRET` to the same value for the gateway and all
                   services (default is insecure — **must** be changed in production).
                 """);

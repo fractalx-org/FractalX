@@ -24,12 +24,12 @@ import org.fractalx.core.generator.service.PomGenerator;
 import org.fractalx.core.generator.service.DbSummaryStep;
 import org.fractalx.core.generator.service.ServiceRegistrationStep;
 import org.fractalx.core.generator.transformation.AnnotationRemover;
+import org.fractalx.core.generator.transformation.AuthenticationPrincipalRewriterStep;
 import org.fractalx.core.generator.transformation.CodeCopier;
 import org.fractalx.core.generator.transformation.CodeTransformer;
 import org.fractalx.core.generator.transformation.SharedCodeCopier;
 import org.fractalx.core.generator.transformation.ServiceSecurityStep;
 import org.fractalx.core.generator.transformation.ValuePropertyDistributorStep;
-import org.fractalx.core.generator.transformation.ControllerCrudStep;
 import org.fractalx.core.generator.transformation.DecompositionHintsStep;
 import org.fractalx.core.gateway.SecurityAnalyzer;
 import org.fractalx.core.gateway.SecurityProfile;
@@ -200,6 +200,7 @@ public class ServiceGenerator {
                 new SharedCodeCopier(),
                 new ServiceSecurityStep(),           // Phase 2.5: generate per-service security config
                 new ValuePropertyDistributorStep(),  // distribute @Value/${} props from monolith config
+                new AuthenticationPrincipalRewriterStep(), // rewrite @AuthenticationPrincipal types → GatewayPrincipal
                 new CodeTransformer(
                         new AnnotationRemover(),
                         new org.fractalx.core.datamanagement.RelationshipDecoupler(),
@@ -210,7 +211,6 @@ public class ServiceGenerator {
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
-                new ControllerCrudStep(),            // add missing POST/PUT endpoints to @RestController classes
                 new DecompositionHintsStep(),        // detect @Transactional/cache/event/aspect/scheduler patterns
                 new SagaMethodTransformer(),    // replaces cross-service calls with outboxPublisher.publish()
                 context -> {

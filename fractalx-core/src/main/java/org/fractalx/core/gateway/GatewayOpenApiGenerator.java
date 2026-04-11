@@ -13,27 +13,19 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /**
- * Generates an OpenAPI 3.0.3 specification (openapi.yaml) and a
- * Postman Collection v2.1 (postman_collection.json) for all services
+ * Generates an OpenAPI 3.0.3 specification (openapi.yaml) for all services
  * routed through the FractalX API Gateway.
  *
- * Both files are written to fractalx-gateway/docs/ and can be imported
- * directly into Postman, Swagger UI, or any OpenAPI-compatible tooling.
+ * <p>The file is written to {@code fractalx-gateway/docs/} and can be imported
+ * directly into Swagger UI or any OpenAPI-compatible tooling.
  *
- * When a monolith source root is provided via
- * {@link #generate(Path, List, AuthPattern, Path)}, endpoints are derived
- * from actual controller annotations (package = module boundary), so
- * cross-resource routes (e.g. {@code GET /api/customers/{id}/orders} owned
- * by order-service) appear in the correct service folder. Without a source
- * root the generator falls back to name-heuristic CRUD paths.
- *
- * Each Postman request includes built-in test scripts that assert:
- *   - Correct HTTP status code
- *   - Response time under 2000 ms
- *   - application/json Content-Type header (where applicable)
+ * <p>Endpoints are derived from actual controller annotations in the monolith
+ * source (package = module boundary), so cross-resource routes
+ * (e.g. {@code GET /api/customers/{id}/orders} owned by order-service) appear
+ * in the correct service tag. Only endpoints that existed in the monolith's
+ * controllers are exposed — no synthetic CRUD defaults are generated.
  */
 public class GatewayOpenApiGenerator {
 
@@ -43,7 +35,7 @@ public class GatewayOpenApiGenerator {
     private final ControllerPathScanner scanner = new ControllerPathScanner();
 
     public void generate(Path gatewayRoot, List<FractalModule> modules) throws IOException {
-        generate(gatewayRoot, modules, AuthPattern.none());
+        generate(gatewayRoot, modules, AuthPattern.none(), null);
     }
 
     public void generate(Path gatewayRoot, List<FractalModule> modules, AuthPattern authPattern) throws IOException {
@@ -51,9 +43,10 @@ public class GatewayOpenApiGenerator {
     }
 
     /**
-     * Generates documentation using actual controller paths when {@code monolithSrc} is non-null.
+     * Generates documentation using actual controller paths from the monolith source.
      *
-     * @param monolithSrc path to the monolith's {@code src/main/java}; {@code null} → heuristic mode
+     * @param monolithSrc path to the monolith's {@code src/main/java}; when {@code null}
+     *                    or when no endpoints are found, no service paths are emitted
      */
     public void generate(Path gatewayRoot, List<FractalModule> modules,
                          AuthPattern authPattern, Path monolithSrc) throws IOException {
@@ -65,19 +58,12 @@ public class GatewayOpenApiGenerator {
 
         Files.writeString(docsDir.resolve("openapi.yaml"),
                 buildOpenApi(modules, authPattern, scanned));
-        Files.writeString(docsDir.resolve("postman_collection.json"),
-                buildPostmanCollection(modules, authPattern, scanned));
 
-        log.info("Generated openapi.yaml and postman_collection.json for {} services{}",
-                modules.size(), monolithSrc != null ? " (controller-scanning mode)" : "");
+        log.info("Generated openapi.yaml for {} services", modules.size());
     }
 
     // ── Controller scanning ───────────────────────────────────────────────────
 
-    /**
-     * Scans all modules. Returns an empty map (triggering heuristic fallback) when
-     * {@code monolithSrc} is null.
-     */
     private Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanAll(
             List<FractalModule> modules, Path monolithSrc) {
         Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> result = new LinkedHashMap<>();
@@ -138,10 +124,9 @@ public class GatewayOpenApiGenerator {
             appendAuthPaths(sb);
         }
         for (FractalModule m : modules) {
-            if (scanned.containsKey(m)) {
-                appendScannedServicePaths(sb, m, scanned.get(m));
-            } else {
-                appendServicePaths(sb, m);
+            Set<ControllerPathScanner.EndpointInfo> endpoints = scanned.get(m);
+            if (endpoints != null && !endpoints.isEmpty()) {
+                appendScannedServicePaths(sb, m, endpoints);
             }
         }
         appendGatewayHealthPath(sb);
@@ -167,19 +152,12 @@ public class GatewayOpenApiGenerator {
 
         for (Map.Entry<String, Set<ControllerPathScanner.EndpointInfo>> entry : byPath.entrySet()) {
             String path = entry.getKey();
-            String openapiPath = path; // already uses {id}
 
-            sb.append("  ").append(openapiPath).append(":\n");
+            sb.append("  ").append(path).append(":\n");
 
             // Path-level parameter block when path contains {id}
             if (path.contains("{")) {
                 sb.append("    parameters:\n");
-                // Count unique {id} occurrences — all normalised to {id} so just check once
-                int idCount = 0;
-                for (String seg : path.split("/")) {
-                    if (seg.startsWith("{") && seg.endsWith("}")) idCount++;
-                }
-                // Emit one param per distinct position — for simplicity emit the first one
                 sb.append("      - name: id\n");
                 sb.append("        in: path\n");
                 sb.append("        required: true\n");
@@ -190,7 +168,6 @@ public class GatewayOpenApiGenerator {
 
             for (ControllerPathScanner.EndpointInfo ep : entry.getValue()) {
                 String verb = ep.method().toLowerCase();
-                // Build a descriptive operationId from method + path segments
                 String opId = opPfx + "-" + verb + "-" + pathToOpSuffix(path);
 
                 sb.append("    ").append(verb).append(":\n");
@@ -230,7 +207,6 @@ public class GatewayOpenApiGenerator {
     /** Derives a human-readable summary from the endpoint method and path. */
     private String summaryFor(ControllerPathScanner.EndpointInfo ep) {
         String[] segs = ep.path().split("/");
-        // Last non-empty, non-variable segment is the resource name
         String resource = "Resource";
         for (int i = segs.length - 1; i >= 0; i--) {
             if (!segs[i].isEmpty() && !segs[i].startsWith("{")) {
@@ -293,95 +269,6 @@ public class GatewayOpenApiGenerator {
         sb.append("      responses:\n");
         sb.append("        '201': { description: User registered, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }\n");
         sb.append("        '409': { description: Username already taken }\n");
-    }
-
-    private void appendServicePaths(StringBuilder sb, FractalModule m) {
-        String base  = pathBase(m);
-        String tag   = m.getServiceName();
-        String opPfx = m.getServiceName();
-
-        // ---- Collection endpoint (/api/{base}) ----
-        sb.append("  /api/").append(base).append(":\n");
-
-        sb.append("    get:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"List ").append(displayName(m)).append(" resources\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-list\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
-        sb.append("        - {}\n");
-        sb.append("      responses:\n");
-        appendSuccessResponse(sb, "200");
-        appendErrorResponses(sb);
-
-        sb.append("    post:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"Create ").append(displayName(m)).append(" resource\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-create\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
-        sb.append("      requestBody:\n");
-        sb.append("        required: true\n");
-        sb.append("        content:\n");
-        sb.append("          application/json:\n");
-        sb.append("            schema:\n");
-        sb.append("              $ref: \"#/components/schemas/GenericRequest\"\n");
-        sb.append("      responses:\n");
-        appendSuccessResponse(sb, "201");
-        appendErrorResponses(sb);
-
-        // ---- Item endpoint (/api/{base}/{id}) ----
-        sb.append("  /api/").append(base).append("/{id}:\n");
-        sb.append("    parameters:\n");
-        sb.append("      - name: id\n");
-        sb.append("        in: path\n");
-        sb.append("        required: true\n");
-        sb.append("        description: \"Resource identifier\"\n");
-        sb.append("        schema:\n");
-        sb.append("          type: string\n");
-
-        sb.append("    get:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"Get ").append(displayName(m)).append(" by ID\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-get-by-id\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
-        sb.append("        - {}\n");
-        sb.append("      responses:\n");
-        appendSuccessResponse(sb, "200");
-        appendErrorResponses(sb);
-
-        sb.append("    put:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"Update ").append(displayName(m)).append(" by ID\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-update\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
-        sb.append("      requestBody:\n");
-        sb.append("        required: true\n");
-        sb.append("        content:\n");
-        sb.append("          application/json:\n");
-        sb.append("            schema:\n");
-        sb.append("              $ref: \"#/components/schemas/GenericRequest\"\n");
-        sb.append("      responses:\n");
-        appendSuccessResponse(sb, "200");
-        appendErrorResponses(sb);
-
-        sb.append("    delete:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"Delete ").append(displayName(m)).append(" by ID\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-delete\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
-        sb.append("      responses:\n");
-        sb.append("        \"204\":\n");
-        sb.append("          description: \"Deleted successfully\"\n");
-        appendErrorResponses(sb);
     }
 
     private void appendGatewayHealthPath(StringBuilder sb) {
@@ -448,354 +335,8 @@ public class GatewayOpenApiGenerator {
     }
 
     // -------------------------------------------------------------------------
-    // Postman Collection v2.1
-    // -------------------------------------------------------------------------
-
-    private String buildPostmanCollection(List<FractalModule> modules, AuthPattern authPattern,
-                                           Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanned) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\n");
-        sb.append("  \"info\": {\n");
-        sb.append("    \"_postman_id\": \"").append(UUID.randomUUID()).append("\",\n");
-        sb.append("    \"name\": \"FractalX Generated API\",\n");
-        sb.append("    \"description\": \"Auto-generated by FractalX decomposition framework. Import into Postman.\",\n");
-        sb.append("    \"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"\n");
-        sb.append("  },\n");
-
-        sb.append("  \"variable\": [\n");
-        sb.append("    { \"key\": \"gateway_url\", \"value\": \"http://localhost:").append(GATEWAY_PORT).append("\", \"type\": \"string\" },\n");
-        sb.append("    { \"key\": \"auth_token\",  \"value\": \"\",                         \"type\": \"string\" },\n");
-        sb.append("    { \"key\": \"id\",          \"value\": \"1\",                         \"type\": \"string\" }\n");
-        sb.append("  ],\n");
-
-        sb.append("  \"item\": [\n");
-
-        // Gateway health folder
-        sb.append("    {\n");
-        sb.append("      \"name\": \"Gateway\",\n");
-        sb.append("      \"item\": [\n");
-        appendPostmanRequest(sb, "Gateway Health", "GET", "{{gateway_url}}/actuator/health",
-                null, healthTests(), false);
-        sb.append("\n      ]\n");
-        sb.append("    }");
-
-        // Auth service folder (when detected)
-        if (authPattern.detected()) {
-            sb.append(",\n");
-            appendAuthFolder(sb);
-        }
-
-        for (FractalModule m : modules) {
-            sb.append(",\n");
-            if (scanned.containsKey(m)) {
-                appendScannedServiceFolder(sb, m, scanned.get(m));
-            } else {
-                appendServiceFolder(sb, m);
-            }
-        }
-
-        sb.append("\n  ]\n");
-        sb.append("}\n");
-        return sb.toString();
-    }
-
-    /**
-     * Emits a Postman folder for a service using actual scanned endpoints.
-     * Cross-resource endpoints (owned by this module but living under another service's URL prefix)
-     * are included in this folder so testers see them correctly attributed.
-     */
-    private void appendScannedServiceFolder(StringBuilder sb, FractalModule m,
-                                             Set<ControllerPathScanner.EndpointInfo> endpoints) {
-        String entity = m.getServiceName().replace("-service", "");
-        String name   = displayName(m);
-
-        sb.append("    {\n");
-        sb.append("      \"name\": \"").append(name).append("\",\n");
-        sb.append("      \"item\": [\n");
-
-        List<ControllerPathScanner.EndpointInfo> list = new java.util.ArrayList<>(endpoints);
-        for (int i = 0; i < list.size(); i++) {
-            ControllerPathScanner.EndpointInfo ep = list.get(i);
-            String url    = "{{gateway_url}}" + postmanPath(ep.path());
-            String body   = needsBody(ep.method()) ? buildSampleBody(entity) : null;
-            String reqName = summaryFor(ep);
-            boolean comma  = (i < list.size() - 1);
-            appendPostmanRequest(sb, reqName, ep.method(), url, body, testsFor(ep), comma);
-            if (i < list.size() - 1) sb.append("\n");
-        }
-
-        sb.append("\n      ]\n");
-        sb.append("    }");
-    }
-
-    /**
-     * Converts an OpenAPI-style path with {@code {id}} segments to a Postman
-     * path with {@code {{id}}} variable references.
-     */
-    private String postmanPath(String path) {
-        return path.replaceAll("\\{[^/]+\\}", "{{id}}");
-    }
-
-    private boolean needsBody(String method) {
-        return "POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method);
-    }
-
-    private String[] testsFor(ControllerPathScanner.EndpointInfo ep) {
-        return switch (ep.method()) {
-            case "POST"   -> createTests();
-            case "PUT"    -> updateTests();
-            case "DELETE" -> deleteTests();
-            case "PATCH"  -> updateTests();
-            default       -> ep.hasPathVar() ? getByIdTests() : listTests();
-        };
-    }
-
-    private void appendAuthFolder(StringBuilder sb) {
-        String loginBody = """
-                {
-                  "username": "alice",
-                  "password": "secret"
-                }""";
-        String registerBody = """
-                {
-                  "username": "alice",
-                  "password": "secret"
-                }""";
-        String[] loginTests = {
-            "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-            "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
-            "const json = pm.response.json();",
-            "pm.test('Token present', () => pm.expect(json.token).to.be.a('string').and.not.empty);",
-            "if (json.token) pm.collectionVariables.set('auth_token', json.token);"
-        };
-        String[] registerTests = {
-            "pm.test('Status is 201', () => pm.response.to.have.status(201));",
-            "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
-            "const json = pm.response.json();",
-            "pm.test('Token present', () => pm.expect(json.token).to.be.a('string').and.not.empty);"
-        };
-
-        sb.append("    {\n");
-        sb.append("      \"name\": \"Auth Service\",\n");
-        sb.append("      \"item\": [\n");
-        appendPostmanRequest(sb, "Login (obtain JWT)", "POST",
-                "{{gateway_url}}/api/auth/login", loginBody, loginTests, true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Register new user", "POST",
-                "{{gateway_url}}/api/auth/register", registerBody, registerTests, false);
-        sb.append("\n      ]\n");
-        sb.append("    }");
-    }
-
-    private void appendServiceFolder(StringBuilder sb, FractalModule m) {
-        String base   = pathBase(m);                                    // e.g. "orders"
-        String entity = m.getServiceName().replace("-service", "");     // e.g. "order"
-        String name   = displayName(m);
-        String body   = buildSampleBody(entity);
-
-        sb.append("    {\n");
-        sb.append("      \"name\": \"").append(name).append("\",\n");
-        sb.append("      \"item\": [\n");
-
-        appendPostmanRequest(sb, "List " + name, "GET",
-                "{{gateway_url}}/api/" + base, null, listTests(), true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Create " + name, "POST",
-                "{{gateway_url}}/api/" + base, body, createTests(), true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Get " + name + " by ID", "GET",
-                "{{gateway_url}}/api/" + base + "/{{id}}", null, getByIdTests(), true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Update " + name, "PUT",
-                "{{gateway_url}}/api/" + base + "/{{id}}", body, updateTests(), true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Delete " + name, "DELETE",
-                "{{gateway_url}}/api/" + base + "/{{id}}", null, deleteTests(), false);
-
-        sb.append("\n      ]\n");
-        sb.append("    }");
-    }
-
-    private void appendPostmanRequest(StringBuilder sb, String name, String method,
-                                       String url, String body, String[] testLines,
-                                       boolean trailingComma) {
-        sb.append("        {\n");
-        sb.append("          \"name\": \"").append(name).append("\",\n");
-
-        // Test event
-        sb.append("          \"event\": [{\n");
-        sb.append("            \"listen\": \"test\",\n");
-        sb.append("            \"script\": {\n");
-        sb.append("              \"type\": \"text/javascript\",\n");
-        sb.append("              \"exec\": [\n");
-        for (int i = 0; i < testLines.length; i++) {
-            sb.append("                \"").append(escapeJson(testLines[i])).append("\"");
-            if (i < testLines.length - 1) sb.append(",");
-            sb.append("\n");
-        }
-        sb.append("              ]\n");
-        sb.append("            }\n");
-        sb.append("          }],\n");
-
-        // Request
-        sb.append("          \"request\": {\n");
-        sb.append("            \"method\": \"").append(method).append("\",\n");
-        sb.append("            \"header\": [\n");
-        sb.append("              { \"key\": \"Authorization\", \"value\": \"Bearer {{auth_token}}\", \"type\": \"text\", \"disabled\": true },\n");
-        sb.append("              { \"key\": \"Content-Type\",  \"value\": \"application/json\",      \"type\": \"text\" }\n");
-        sb.append("            ]");
-
-        if (body != null) {
-            sb.append(",\n");
-            sb.append("            \"body\": {\n");
-            sb.append("              \"mode\": \"raw\",\n");
-            sb.append("              \"raw\": \"").append(escapeJson(body)).append("\",\n");
-            sb.append("              \"options\": { \"raw\": { \"language\": \"json\" } }\n");
-            sb.append("            }");
-        }
-
-        sb.append(",\n");
-        sb.append("            \"url\": \"").append(url).append("\"\n");
-        sb.append("          }\n");
-        sb.append("        }");
-        if (trailingComma) sb.append(",");
-    }
-
-    // -------------------------------------------------------------------------
-    // Postman test scripts (one line per array element)
-    // -------------------------------------------------------------------------
-
-    private String[] healthTests() {
-        return new String[]{
-            "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });"
-        };
-    }
-
-    private String[] listTests() {
-        return new String[]{
-            "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });",
-            "pm.test('Content-Type is JSON', function () {",
-            "    pm.response.to.have.header('Content-Type');",
-            "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
-            "});"
-        };
-    }
-
-    private String[] createTests() {
-        return new String[]{
-            "pm.test('Status code is 201 or 200', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });",
-            "pm.test('Content-Type is JSON', function () {",
-            "    pm.response.to.have.header('Content-Type');",
-            "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
-            "});"
-        };
-    }
-
-    private String[] getByIdTests() {
-        return new String[]{
-            "pm.test('Status code is 200 or 404', function () { pm.expect(pm.response.code).to.be.oneOf([200, 404]); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });"
-        };
-    }
-
-    private String[] updateTests() {
-        return new String[]{
-            "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });"
-        };
-    }
-
-    private String[] deleteTests() {
-        return new String[]{
-            "pm.test('Status code is 204 or 200', function () { pm.expect(pm.response.code).to.be.oneOf([200, 204]); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });"
-        };
-    }
-
-    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
-
-    /** Strips the "-service" suffix and pluralises for REST path conventions. */
-    private String pathBase(FractalModule m) {
-        String entity = m.getServiceName().replace("-service", "");
-        return pluralize(entity);
-    }
-
-    /** Simple English pluralisation sufficient for typical entity names. */
-    private String pluralize(String word) {
-        if (word.endsWith("ry"))  return word.substring(0, word.length() - 2) + "ries"; // inventory→inventories
-        if (word.endsWith("y"))   return word.substring(0, word.length() - 1) + "ies";  // category→categories
-        if (word.endsWith("s") || word.endsWith("x") || word.endsWith("z")
-                || word.endsWith("ch") || word.endsWith("sh"))
-            return word + "es";
-        return word + "s";
-    }
-
-    /**
-     * Builds a realistic JSON sample request body based on the entity name.
-     * Used in POST/PUT Postman requests so testers have a real starting point.
-     */
-    private String buildSampleBody(String entity) {
-        return switch (entity) {
-            case "order" -> """
-                    {
-                      "customerId": 1,
-                      "items": [
-                        { "productId": 1, "quantity": 2, "unitPrice": 29.99 }
-                      ],
-                      "shippingAddress": "123 Main St, Springfield",
-                      "notes": "Leave at door"
-                    }""";
-            case "payment" -> """
-                    {
-                      "orderId": 1,
-                      "amount": 59.98,
-                      "currency": "USD",
-                      "method": "CREDIT_CARD",
-                      "cardLast4": "4242"
-                    }""";
-            case "inventory", "product" -> """
-                    {
-                      "name": "Sample Product",
-                      "description": "A short product description",
-                      "sku": "SKU-0001",
-                      "quantity": 100,
-                      "price": 29.99
-                    }""";
-            case "budget" -> """
-                    {
-                      "name": "Q2 Operating Budget",
-                      "amount": 50000.00,
-                      "currency": "USD",
-                      "period": "2026-Q2",
-                      "category": "OPERATIONS"
-                    }""";
-            case "user", "customer" -> """
-                    {
-                      "firstName": "Jane",
-                      "lastName": "Doe",
-                      "email": "jane.doe@example.com",
-                      "phone": "+1-555-0100"
-                    }""";
-            case "notification" -> """
-                    {
-                      "recipientId": 1,
-                      "type": "EMAIL",
-                      "subject": "Your order has been processed",
-                      "body": "Thank you for your order."
-                    }""";
-            default -> """
-                    {
-                      "name": "Sample %s",
-                      "description": "Auto-generated placeholder — replace with real fields",
-                      "status": "ACTIVE"
-                    }""".formatted(capitalize(entity));
-        };
-    }
 
     private String capitalize(String s) {
         return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
@@ -811,13 +352,5 @@ public class GatewayOpenApiGenerator {
             }
         }
         return result.toString().trim();
-    }
-
-    private String escapeJson(String s) {
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\t", "\\t")
-                .replace("\n", "\\n")
-                .replace("\r", "");
     }
 }
