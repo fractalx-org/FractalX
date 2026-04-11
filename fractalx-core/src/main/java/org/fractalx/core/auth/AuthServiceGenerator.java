@@ -1,5 +1,6 @@
 package org.fractalx.core.auth;
 
+import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.config.FractalxConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,9 +87,8 @@ public class AuthServiceGenerator {
 
     private void generatePom(Path root, FractalxConfig cfg, AuthPattern pattern) throws IOException {
         String bootVersion = cfg.springBootVersion() != null ? cfg.springBootVersion() : "4.0.5";
-        boolean isBoot4 = Character.getNumericValue(bootVersion.charAt(0)) >= 4;
 
-        String runtimeDep = "<version>0.3.2</version>";
+        String runtimeDep = "<version>" + FractalxVersion.get() + "</version>";
 
         String content = """
                 <?xml version="1.0" encoding="UTF-8"?>
