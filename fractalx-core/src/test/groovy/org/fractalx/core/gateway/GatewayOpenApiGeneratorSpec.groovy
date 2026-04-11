@@ -1,5 +1,6 @@
 package org.fractalx.core.gateway
 
+import org.fractalx.core.auth.AuthPattern
 import org.fractalx.core.model.FractalModule
 import spock.lang.Specification
 import spock.lang.TempDir
@@ -30,17 +31,12 @@ class GatewayOpenApiGeneratorSpec extends Specification {
         Files.readString(gatewayRoot.resolve("docs/openapi.yaml"))
     }
 
-    private String postman() {
-        Files.readString(gatewayRoot.resolve("docs/postman_collection.json"))
-    }
-
-    def "generates docs directory with both output files"() {
+    def "generates docs directory with openapi.yaml"() {
         when:
         generator.generate(gatewayRoot, [order, payment])
 
         then:
         Files.exists(gatewayRoot.resolve("docs/openapi.yaml"))
-        Files.exists(gatewayRoot.resolve("docs/postman_collection.json"))
     }
 
     def "openapi.yaml uses OpenAPI 3.0.3"() {
@@ -77,21 +73,6 @@ class GatewayOpenApiGeneratorSpec extends Specification {
         openApi().contains("name: \"payment-service\"")
     }
 
-    def "openapi.yaml generates CRUD paths for each service"() {
-        when:
-        generator.generate(gatewayRoot, [order])
-
-        then:
-        def spec = openApi()
-        spec.contains("/api/orders:")
-        spec.contains("/api/orders/{id}:")
-        spec.contains("operationId: \"order-service-list\"")
-        spec.contains("operationId: \"order-service-create\"")
-        spec.contains("operationId: \"order-service-get-by-id\"")
-        spec.contains("operationId: \"order-service-update\"")
-        spec.contains("operationId: \"order-service-delete\"")
-    }
-
     def "openapi.yaml includes gateway health path"() {
         when:
         generator.generate(gatewayRoot, [order])
@@ -121,13 +102,46 @@ class GatewayOpenApiGeneratorSpec extends Specification {
         def spec = openApi()
         spec.contains("GenericRequest:")
         spec.contains("GenericResponse:")
-        spec.contains("\$ref: \"#/components/schemas/GenericRequest\"")
-        spec.contains("\$ref: \"#/components/schemas/GenericResponse\"")
     }
 
-    def "openapi.yaml includes standard error response codes"() {
+    def "no service paths emitted without monolith source"() {
         when:
         generator.generate(gatewayRoot, [order])
+
+        then:
+        def spec = openApi()
+        !spec.contains("/api/orders:")
+    }
+
+    // ── Controller-scanning mode (monolithSrc provided) ───────────────────────
+
+    @TempDir
+    Path monolithSrc
+
+    private void writeController(String pkg, String className, String classPath,
+                                 List<String[]> methods) {
+        Path dir = monolithSrc.resolve(pkg.replace('.', '/'))
+        Files.createDirectories(dir)
+        def sb = new StringBuilder("package ${pkg};\n")
+        sb.append("import org.springframework.web.bind.annotation.*;\n")
+        sb.append("@RestController\n")
+        sb.append("@RequestMapping(\"${classPath}\")\n")
+        sb.append("public class ${className} {\n")
+        methods.eachWithIndex { m, i ->
+            sb.append("  @${m[0]}Mapping(\"${m[1]}\")\n")
+            sb.append("  public Object method${i}() { return null; }\n")
+        }
+        sb.append("}\n")
+        Files.writeString(dir.resolve("${className}.java"), sb.toString())
+    }
+
+    def "scanning mode: includes standard error response codes"() {
+        given:
+        writeController("com.example.order", "OrderController", "/api/orders",
+            [["Get", ""], ["Post", ""]])
+
+        when:
+        generator.generate(gatewayRoot, [order], AuthPattern.none(), monolithSrc)
 
         then:
         def spec = openApi()
@@ -137,92 +151,70 @@ class GatewayOpenApiGeneratorSpec extends Specification {
         spec.contains('"500"')
     }
 
-    def "postman_collection.json is valid JSON structure with info block"() {
+    def "scanning mode: openapi uses actual scanned paths with correct HTTP methods"() {
+        given:
+        writeController("com.example.order", "OrderController", "/api/orders",
+            [["Get", ""], ["Post", ""], ["Get", "/{id}"], ["Put", "/{id}"], ["Delete", "/{id}"],
+             ["Patch", "/{id}/status"]])
+
+        when:
+        generator.generate(gatewayRoot, [order], AuthPattern.none(), monolithSrc)
+
+        then:
+        def spec = openApi()
+        spec.contains("/api/orders:")
+        spec.contains("/api/orders/{id}:")
+        spec.contains("/api/orders/{id}/status:")
+        spec.contains("    get:")
+        spec.contains("    post:")
+        spec.contains("    put:")
+        spec.contains("    delete:")
+        spec.contains("    patch:")
+    }
+
+    def "scanning mode: cross-resource endpoint appears under owning service tag"() {
+        given:
+        FractalModule customer = FractalModule.builder()
+            .serviceName("customer-service")
+            .packageName("com.example.customer")
+            .port(8083)
+            .build()
+
+        writeController("com.example.order", "OrderController", "/api/orders",
+            [["Get", ""], ["Post", ""], ["Get", "/{id}"]])
+        writeController("com.example.order", "OrderCrossController", "/api/customers/{customerId}",
+            [["Get", "/orders"]])
+        writeController("com.example.customer", "CustomerController", "/api/customers",
+            [["Get", ""], ["Post", ""], ["Get", "/{id}"]])
+
+        when:
+        generator.generate(gatewayRoot, [order, customer], AuthPattern.none(), monolithSrc)
+
+        then:
+        def spec = openApi()
+        spec.contains("/api/customers/{id}/orders")
+        spec.contains('tags: ["order-service"]')
+    }
+
+    def "scanning mode: no paths emitted when no controllers found in package"() {
+        given: "monolithSrc exists but module package dir does not"
+        Files.createDirectories(monolithSrc)
+
+        when:
+        generator.generate(gatewayRoot, [order], AuthPattern.none(), monolithSrc)
+
+        then: "no service paths are emitted"
+        def spec = openApi()
+        !spec.contains("/api/orders:")
+        // gateway health is still present
+        spec.contains("/actuator/health:")
+    }
+
+    def "does not generate postman_collection.json"() {
         when:
         generator.generate(gatewayRoot, [order])
 
         then:
-        def json = postman()
-        json.contains('"name": "FractalX Generated API"')
-        json.contains('"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"')
-        json.contains('"_postman_id"')
-    }
-
-    def "postman_collection.json declares gateway_url variable pointing to port 9999"() {
-        when:
-        generator.generate(gatewayRoot, [order])
-
-        then:
-        def json = postman()
-        json.contains('"gateway_url"')
-        json.contains('"http://localhost:9999"')
-    }
-
-    def "postman_collection.json contains a folder per service"() {
-        when:
-        generator.generate(gatewayRoot, [order, payment])
-
-        then:
-        def json = postman()
-        json.contains('"name": "Order Service"')
-        json.contains('"name": "Payment Service"')
-    }
-
-    def "postman_collection.json contains Gateway health request"() {
-        when:
-        generator.generate(gatewayRoot, [order])
-
-        then:
-        def json = postman()
-        json.contains('"name": "Gateway"')
-        json.contains('"name": "Gateway Health"')
-        json.contains('/actuator/health')
-    }
-
-    def "postman_collection.json generates CRUD requests per service"() {
-        when:
-        generator.generate(gatewayRoot, [order])
-
-        then:
-        def json = postman()
-        json.contains('"name": "List Order Service"')
-        json.contains('"name": "Create Order Service"')
-        json.contains('"name": "Get Order Service by ID"')
-        json.contains('"name": "Update Order Service"')
-        json.contains('"name": "Delete Order Service"')
-    }
-
-    def "postman requests include inline test scripts"() {
-        when:
-        generator.generate(gatewayRoot, [order])
-
-        then:
-        def json = postman()
-        json.contains('"listen": "test"')
-        json.contains('pm.test(')
-        json.contains('pm.response.responseTime')
-        json.contains('below(2000)')
-    }
-
-    def "postman requests include Authorization and Content-Type headers"() {
-        when:
-        generator.generate(gatewayRoot, [order])
-
-        then:
-        def json = postman()
-        json.contains('"Authorization"')
-        json.contains('"Bearer {{auth_token}}"')
-        json.contains('"Content-Type"')
-        json.contains('"application/json"')
-    }
-
-    def "postman POST and PUT requests include raw JSON body"() {
-        when:
-        generator.generate(gatewayRoot, [order])
-
-        then:
-        def json = postman()
-        json.contains('"mode": "raw"')
-        json.contains('"language": "json"')
+        !Files.exists(gatewayRoot.resolve("docs/postman_collection.json"))
     }
 }

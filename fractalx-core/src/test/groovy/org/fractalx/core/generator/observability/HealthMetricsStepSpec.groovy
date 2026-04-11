@@ -113,12 +113,14 @@ class HealthMetricsStepSpec extends Specification {
         content(order).contains("Health.up()")
     }
 
-    def "HealthIndicator reports Health.down on failure"() {
+    def "HealthIndicator reports Health.unknown on failure"() {
         when:
         step.generate(ctx(order, [order, payment]))
 
         then:
-        content(order).contains("Health.down()")
+        // UNKNOWN rather than DOWN so unreachable dependencies don't bring the
+        // overall /actuator/health status to DOWN (HTTP 503)
+        content(order).contains("Health.unknown()")
     }
 
     def "ServiceHealthConfig registers a Micrometer gauge for dependency health"() {

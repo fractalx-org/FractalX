@@ -28,6 +28,7 @@ public class ServiceRegistrationStep implements ServiceFileGenerator {
 
         generateRegistryClient(pkgPath, generatedPkg, module);
         generateAutoConfig(pkgPath, generatedPkg, module);
+        generateGrpcFaultTolerance(pkgPath, generatedPkg);
 
         log.debug("Generated service registration for {}", module.getServiceName());
     }
@@ -81,12 +82,14 @@ public class ServiceRegistrationStep implements ServiceFileGenerator {
                         }
                     }
 
-                    public void heartbeat(String name) {
+                    public boolean heartbeat(String name) {
                         try {
                             restTemplate.postForObject(registryUrl + "/services/" + name + "/heartbeat",
                                     null, Void.class);
+                            return true;
                         } catch (Exception e) {
                             log.trace("Heartbeat failed for {}: {}", name, e.getMessage());
+                            return false;
                         }
                     }
                 }
@@ -133,9 +136,12 @@ public class ServiceRegistrationStep implements ServiceFileGenerator {
                         registryClient.register(serviceName, serviceHost, httpPort, %d, healthUrl);
                     }
 
-                    @Scheduled(fixedDelay = 30_000)
+                    @Scheduled(fixedDelay = 5_000)
                     public void sendHeartbeat() {
-                        registryClient.heartbeat(serviceName);
+                        boolean ok = registryClient.heartbeat(serviceName);
+                        if (!ok) {
+                            onStartup();
+                        }
                     }
 
                     @PreDestroy
@@ -145,6 +151,84 @@ public class ServiceRegistrationStep implements ServiceFileGenerator {
                 }
                 """.formatted(pkg, module.getServiceName(), module.getPort(), grpcPort);
         Files.writeString(pkgPath.resolve("ServiceRegistrationAutoConfig.java"), content);
+    }
+
+    /**
+     * Generates a {@code BeanDefinitionRegistryPostProcessor} that silently removes the
+     * {@code netScopeGrpcServer} bean if its port is already in use.
+     *
+     * <p>Root cause: the smoke-test runner leaves per-service instances alive when it starts
+     * the integration phase. Both instances try to bind the same gRPC port, the second one
+     * throws {@code java.net.BindException}, which propagates as {@code BeanCreationException}
+     * and crashes the entire application context. This guard prevents that crash by removing
+     * the gRPC server bean before any beans are instantiated, allowing the service to start
+     * cleanly, self-register, and serve HTTP traffic without NetScope gRPC.
+     */
+    private void generateGrpcFaultTolerance(Path pkgPath, String pkg) throws IOException {
+        String content = """
+                package %s;
+
+                import org.slf4j.Logger;
+                import org.slf4j.LoggerFactory;
+                import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
+                import org.springframework.beans.factory.support.BeanDefinitionRegistry;
+                import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
+                import org.springframework.context.EnvironmentAware;
+                import org.springframework.context.annotation.Configuration;
+                import org.springframework.core.env.Environment;
+
+                import java.io.IOException;
+                import java.net.ServerSocket;
+
+                /**
+                 * Removes the {@code netScopeGrpcServer} bean if its gRPC port is already bound.
+                 * Prevents {@code BindException} from crashing the context when another instance
+                 * of this service is still alive (e.g. leftover from a per-service smoke-test run).
+                 */
+                @Configuration
+                public class NetScopeGrpcFaultTolerance
+                        implements BeanDefinitionRegistryPostProcessor, EnvironmentAware {
+
+                    private static final Logger log =
+                            LoggerFactory.getLogger(NetScopeGrpcFaultTolerance.class);
+                    private static final String GRPC_BEAN = "netScopeGrpcServer";
+
+                    private Environment environment;
+
+                    @Override
+                    public void setEnvironment(Environment environment) {
+                        this.environment = environment;
+                    }
+
+                    @Override
+                    public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
+                        int port = environment.getProperty(
+                                "netscope.server.grpc.port", Integer.class, 0);
+                        if (port <= 0 || isPortFree(port)) return;
+
+                        log.warn("gRPC port {} already in use — disabling {} bean to avoid " +
+                                 "BindException. This instance will serve HTTP only.", port, GRPC_BEAN);
+                        if (registry.containsBeanDefinition(GRPC_BEAN)) {
+                            registry.removeBeanDefinition(GRPC_BEAN);
+                        }
+                    }
+
+                    @Override
+                    public void postProcessBeanFactory(ConfigurableListableBeanFactory bf) {
+                        // no-op
+                    }
+
+                    private static boolean isPortFree(int port) {
+                        try (ServerSocket ss = new ServerSocket(port)) {
+                            ss.setReuseAddress(true);
+                            return true;
+                        } catch (IOException e) {
+                            return false;
+                        }
+                    }
+                }
+                """.formatted(pkg);
+        Files.writeString(pkgPath.resolve("NetScopeGrpcFaultTolerance.java"), content);
     }
 
     private Path resolvePackage(Path base, String pkg) throws IOException {

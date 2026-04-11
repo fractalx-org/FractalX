@@ -1,5 +1,8 @@
 package org.fractalx.core.generator;
 
+import org.fractalx.core.auth.AuthPattern;
+import org.fractalx.core.auth.AuthPatternDetector;
+import org.fractalx.core.auth.AuthServiceGenerator;
 import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.config.FractalxConfigReader;
 import org.fractalx.core.datamanagement.DistributedServiceHelper;
@@ -21,6 +24,7 @@ import org.fractalx.core.generator.service.PomGenerator;
 import org.fractalx.core.generator.service.DbSummaryStep;
 import org.fractalx.core.generator.service.ServiceRegistrationStep;
 import org.fractalx.core.generator.transformation.AnnotationRemover;
+import org.fractalx.core.generator.transformation.AuthenticationPrincipalRewriterStep;
 import org.fractalx.core.generator.transformation.CodeCopier;
 import org.fractalx.core.generator.transformation.CodeTransformer;
 import org.fractalx.core.generator.transformation.SharedCodeCopier;
@@ -196,6 +200,7 @@ public class ServiceGenerator {
                 new SharedCodeCopier(),
                 new ServiceSecurityStep(),           // Phase 2.5: generate per-service security config
                 new ValuePropertyDistributorStep(),  // distribute @Value/${} props from monolith config
+                new AuthenticationPrincipalRewriterStep(), // rewrite @AuthenticationPrincipal types → GatewayPrincipal
                 new CodeTransformer(
                         new AnnotationRemover(),
                         new org.fractalx.core.datamanagement.RelationshipDecoupler(),
@@ -212,7 +217,8 @@ public class ServiceGenerator {
                     if (context.getFractalxConfig().features().distributedData()) {
                         distributedServiceHelper.upgradeService(
                                 context.getModule(), context.getSourceRoot(), context.getServiceRoot(),
-                                context.getSagaDefinitions(), context.servicePackage());
+                                context.getSagaDefinitions(), context.servicePackage(),
+                                context.getFractalxConfig().springBootVersion());
                     }
                 },
                 new CorrelationIdGenerator(),    // generates logback-spring.xml with %X{correlationId}
@@ -276,6 +282,20 @@ public class ServiceGenerator {
             onStepComplete.accept(module.getServiceName());
         }
 
+        // Detect monolith auth pattern and optionally generate a standalone auth-service
+        AuthPattern authPattern = AuthPattern.none();
+        try {
+            authPattern = new AuthPatternDetector(projectRoot).detect();
+            if (authPattern.detected()) {
+                log.info("Auth pattern detected — generating auth-service");
+                onStepStart.accept("auth-service");
+                new AuthServiceGenerator().generate(outputRoot, authPattern, fractalxConfig);
+                onStepComplete.accept("auth-service");
+            }
+        } catch (Exception e) {
+            log.warn("Auth pattern detection/generation failed — skipping auth-service: {}", e.getMessage());
+        }
+
         if (fractalxConfig.features().logger()) {
             new LoggerServiceGenerator().generate(outputRoot, fractalxConfig);
         } else {
@@ -284,7 +304,7 @@ public class ServiceGenerator {
 
         if (modules.size() > 1 && generateGateway && fractalxConfig.features().gateway()) {
             onStepStart.accept("fractalx-gateway");
-            generateApiGateway(modules, fractalxConfig);
+            generateApiGateway(modules, fractalxConfig, authPattern);
             onStepComplete.accept("fractalx-gateway");
         } else if (!fractalxConfig.features().gateway()) {
             log.info("Feature 'gateway' disabled — skipping fractalx-gateway generation");
@@ -292,7 +312,7 @@ public class ServiceGenerator {
 
         if (generateAdmin && fractalxConfig.features().admin()) {
             onStepStart.accept("fractalx-admin");
-            adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions);
+            adminServiceGenerator.generateAdminService(modules, outputRoot, sourceRoot, fractalxConfig, sagaDefinitions, authPattern);
             onStepComplete.accept("fractalx-admin");
         } else if (!fractalxConfig.features().admin()) {
             log.info("Feature 'admin' disabled — skipping admin-service generation");
@@ -310,14 +330,14 @@ public class ServiceGenerator {
         if (generateDocker && fractalxConfig.features().docker()) {
             onStepStart.accept("docker-compose + scripts");
             dockerComposeGenerator.generate(modules, outputRoot, hasSagas, fractalxConfig);
-            generateStartScripts(modules, sagaDefinitions);
+            generateStartScripts(modules, sagaDefinitions, authPattern);
             onStepComplete.accept("docker-compose + scripts");
         } else {
             if (!fractalxConfig.features().docker()) {
                 log.info("Feature 'docker' disabled — skipping docker-compose generation");
             }
             onStepStart.accept("start scripts");
-            generateStartScripts(modules, sagaDefinitions);
+            generateStartScripts(modules, sagaDefinitions, authPattern);
             onStepComplete.accept("start scripts");
         }
 
@@ -353,9 +373,15 @@ public class ServiceGenerator {
 
     private void generateApiGateway(List<FractalModule> modules,
                                      FractalxConfig fractalxConfig) throws IOException {
+        generateApiGateway(modules, fractalxConfig, AuthPattern.none());
+    }
+
+    private void generateApiGateway(List<FractalModule> modules,
+                                     FractalxConfig fractalxConfig,
+                                     AuthPattern authPattern) throws IOException {
         log.debug("Generating API Gateway for {} services", modules.size());
         try {
-            new GatewayGenerator(sourceRoot, outputRoot, fractalxConfig).generateGateway(modules);
+            new GatewayGenerator(sourceRoot, outputRoot, fractalxConfig).generateGateway(modules, authPattern);
             log.debug("Generated API Gateway — http://localhost:{}", GATEWAY_PORT);
             updateReadmeWithGatewayInfo(modules);
         } catch (Exception e) {
@@ -366,10 +392,17 @@ public class ServiceGenerator {
 
     private void generateStartScripts(List<FractalModule> modules,
                                        List<SagaDefinition> sagaDefinitions) throws IOException {
+        generateStartScripts(modules, sagaDefinitions, AuthPattern.none());
+    }
+
+    private void generateStartScripts(List<FractalModule> modules,
+                                       List<SagaDefinition> sagaDefinitions,
+                                       AuthPattern authPattern) throws IOException {
         Path gatewayPath = outputRoot.resolve(GATEWAY_DIR);
         boolean hasSaga  = !sagaDefinitions.isEmpty();
+        boolean hasAuth  = authPattern != null && authPattern.detected();
 
-        generateStartScript(modules, gatewayPath, hasSaga);
+        generateStartScript(modules, gatewayPath, hasSaga, hasAuth);
         generateStopScript(gatewayPath, hasSaga);
         generateWindowsStartScript(modules, gatewayPath, hasSaga);
         generateWindowsStopScript(hasSaga);
@@ -380,6 +413,11 @@ public class ServiceGenerator {
 
     private void generateStartScript(List<FractalModule> modules, Path gatewayPath,
                                       boolean hasSagaOrchestrator) throws IOException {
+        generateStartScript(modules, gatewayPath, hasSagaOrchestrator, false);
+    }
+
+    private void generateStartScript(List<FractalModule> modules, Path gatewayPath,
+                                      boolean hasSagaOrchestrator, boolean hasAuthService) throws IOException {
         StringBuilder script = new StringBuilder();
         script.append("#!/bin/bash\n\n");
         script.append("echo \"Starting all FractalX microservices...\"\n\n");
@@ -399,6 +437,12 @@ public class ServiceGenerator {
             script.append("cd ..\n\n");
         }
 
+        if (hasAuthService) {
+            script.append("echo \"Starting auth-service on port 8090...\"\n");
+            script.append("cd auth-service && mvn spring-boot:run > ../auth-service.log 2>&1 &\n");
+            script.append("cd ..\n\n");
+        }
+
         if (hasSagaOrchestrator) {
             script.append("echo \"Starting Saga Orchestrator...\"\n");
             script.append("cd fractalx-saga-orchestrator && mvn spring-boot:run > ../fractalx-saga-orchestrator.log 2>&1 &\n");
@@ -414,6 +458,9 @@ public class ServiceGenerator {
 
         script.append("echo \"To stop all services, run: ./stop-all.sh\"\n\n");
         script.append("echo \"Service URLs:\"\n");
+        if (hasAuthService) {
+            script.append(String.format("echo \"  %-20s http://localhost:8090\"\n", "auth-service:"));
+        }
         for (FractalModule module : modules) {
             script.append(String.format("echo \"  %-20s http://localhost:%d\"\n",
                     module.getServiceName() + ":", module.getPort()));

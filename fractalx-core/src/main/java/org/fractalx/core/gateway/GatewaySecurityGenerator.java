@@ -291,12 +291,12 @@ public class GatewaySecurityGenerator {
             }
         }
 
-        // Catch-all: authenticated if security was detected, otherwise open
-        if (profile.hasRouteRules() || profile.isAnyAuthDetected()) {
-            chain.append("                                .anyExchange().authenticated()");
-        } else {
-            chain.append("                                .anyExchange().permitAll()");
-        }
+        // Always permitAll at the Spring Security level.
+        // Auth is enforced by GlobalFilter beans (JwtBearerFilter, ApiKeyFilter,
+        // BasicAuthGatewayFilter) which run in the gateway filter chain.
+        // Those filters never set a Spring Security principal, so .authenticated()
+        // here would block every request with 401 before the filters see it.
+        chain.append("                                .anyExchange().permitAll()");
 
         return chain.toString();
     }
@@ -312,6 +312,7 @@ public class GatewaySecurityGenerator {
                 import javax.crypto.SecretKey;
                 import java.nio.charset.StandardCharsets;
                 import java.util.Date;
+                import java.util.Map;
 
                 /**
                  * Utility for minting short-lived Internal Call Tokens forwarded by the gateway
@@ -324,11 +325,14 @@ public class GatewaySecurityGenerator {
                  *
                  * <p>Token claims:
                  * <ul>
-                 *   <li>{@code sub}   — user identifier (username, key prefix, or JWT subject)</li>
-                 *   <li>{@code roles} — comma-separated roles (may be empty for API key auth)</li>
-                 *   <li>{@code iss}   — "fractalx-gateway" (fixed; validated by services)</li>
-                 *   <li>{@code aud}   — "fractalx-internal" (fixed; validated by services)</li>
-                 *   <li>{@code exp}   — now + 30 seconds (short-lived to limit replay window)</li>
+                 *   <li>{@code sub}      — user identifier (username, key prefix, or JWT subject)</li>
+                 *   <li>{@code roles}    — comma-separated roles (may be empty for API key auth)</li>
+                 *   <li>{@code username} — display name / preferred_username from original token</li>
+                 *   <li>{@code email}    — email claim from original token (when present)</li>
+                 *   <li>{@code iss}      — "fractalx-gateway" (fixed; validated by services)</li>
+                 *   <li>{@code aud}      — "fractalx-internal" (fixed; validated by services)</li>
+                 *   <li>{@code exp}      — now + 30 seconds (short-lived to limit replay window)</li>
+                 *   <li>Any additional claims passed via {@code extraClaims}</li>
                  * </ul>
                  */
                 public final class InternalTokenMinter {
@@ -336,25 +340,37 @@ public class GatewaySecurityGenerator {
                     private InternalTokenMinter() {}
 
                     /**
-                     * Mints a signed internal call token.
-                     *
-                     * @param subject  user identifier forwarded as {@code sub} claim
-                     * @param roles    comma-separated role string forwarded as {@code roles} claim
-                     * @param secret   HMAC secret — must match {@code fractalx.security.internal-jwt-secret}
-                     *                 on all downstream services
-                     * @return compact JWT string
+                     * Mints a signed internal call token with standard claims only.
                      */
                     public static String mint(String subject, String roles, String secret) {
+                        return mint(subject, roles, secret, Map.of());
+                    }
+
+                    /**
+                     * Mints a signed internal call token with additional claims forwarded from
+                     * the original user credential (e.g. username, email, custom attributes).
+                     *
+                     * @param subject     user identifier forwarded as {@code sub} claim
+                     * @param roles       comma-separated role string forwarded as {@code roles} claim
+                     * @param secret      HMAC secret — must match {@code fractalx.security.internal-jwt-secret}
+                     *                    on all downstream services
+                     * @param extraClaims additional claims to include (e.g. username, email, tenantId)
+                     * @return compact JWT string
+                     */
+                    public static String mint(String subject, String roles, String secret,
+                                              Map<String, String> extraClaims) {
                         SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-                        return Jwts.builder()
+                        var builder = Jwts.builder()
                                 .setSubject(subject)
                                 .claim("roles", roles != null ? roles : "")
                                 .setIssuer("fractalx-gateway")
                                 .setAudience("fractalx-internal")
                                 .setIssuedAt(new Date())
-                                .setExpiration(new Date(System.currentTimeMillis() + 30_000L))
-                                .signWith(key, SignatureAlgorithm.HS256)
-                                .compact();
+                                .setExpiration(new Date(System.currentTimeMillis() + 30_000L));
+                        if (extraClaims != null) {
+                            extraClaims.forEach(builder::claim);
+                        }
+                        return builder.signWith(key, SignatureAlgorithm.HS256).compact();
                     }
                 }
                 """;
@@ -382,17 +398,26 @@ public class GatewaySecurityGenerator {
 
                 import javax.crypto.SecretKey;
                 import java.nio.charset.StandardCharsets;
+                import java.util.HashMap;
+                import java.util.Map;
+                import java.util.Set;
 
                 /**
                  * Validates Bearer JWT tokens signed with HMAC-SHA256.
                  * Active when {@code fractalx.gateway.security.bearer.enabled=true}.
-                 * Injects X-User-Id and X-User-Roles headers downstream on success.
+                 * Extracts user identity and extra claims (username, email, custom attributes)
+                 * from the original JWT and forwards them via the Internal Call Token so
+                 * downstream services can reconstruct a full {@code GatewayPrincipal}.
                  * Registered automatically by Spring Cloud Gateway as a GlobalFilter bean.
                  */
                 @Component
                 public class JwtBearerFilter implements GlobalFilter, Ordered {
 
                     private static final Logger log = LoggerFactory.getLogger(JwtBearerFilter.class);
+
+                    /** Standard JWT claims that are handled explicitly — everything else is forwarded. */
+                    private static final Set<String> STANDARD_CLAIMS = Set.of(
+                            "sub", "roles", "iss", "aud", "iat", "exp", "nbf", "jti");
 
                     private final GatewayAuthProperties props;
 
@@ -421,11 +446,39 @@ public class GatewaySecurityGenerator {
                                     .setSigningKey(key).build()
                                     .parseClaimsJws(token).getBody();
                             String roles = claims.get("roles", String.class);
+
+                            // Extract extra claims from the original JWT to forward downstream.
+                            // These are reconstructed into GatewayPrincipal by each service's
+                            // GatewayAuthHeaderFilter or the runtime's NetScopeContextInterceptor.
+                            Map<String, String> extraClaims = new HashMap<>();
+                            // Resolve username from common JWT claim names
+                            String username = claims.get("preferred_username", String.class);
+                            if (username == null) username = claims.get("name", String.class);
+                            if (username != null) extraClaims.put("username", username);
+                            String email = claims.get("email", String.class);
+                            if (email != null) extraClaims.put("email", email);
+                            // Forward all remaining non-standard claims as custom attributes.
+                            // Numeric and boolean values are converted to String so they survive
+                            // the Map<String,String> boundary and remain accessible via
+                            // GatewayPrincipal.getAttribute(name) in downstream services.
+                            claims.forEach((k, v) -> {
+                                if (!STANDARD_CLAIMS.contains(k)
+                                        && !k.equals("preferred_username") && !k.equals("name")
+                                        && !k.equals("email") && !k.equals("roles")
+                                        && v != null) {
+                                    if (v instanceof String s) {
+                                        extraClaims.put(k, s);
+                                    } else if (v instanceof Number || v instanceof Boolean) {
+                                        extraClaims.put(k, String.valueOf(v));
+                                    }
+                                }
+                            });
+
                             // Mint a short-lived Internal Call Token for downstream services.
                             // Services validate this token (not the original user JWT) to establish
                             // Authentication — prevents raw Bearer tokens from reaching internal services.
                             String internalToken = InternalTokenMinter.mint(
-                                    claims.getSubject(), roles, props.getInternalJwtSecret());
+                                    claims.getSubject(), roles, props.getInternalJwtSecret(), extraClaims);
                             ServerWebExchange mutated = exchange.mutate()
                                     .request(r -> r.headers(h -> {
                                         h.set("X-User-Id",        claims.getSubject());
@@ -538,6 +591,7 @@ public class GatewaySecurityGenerator {
 
                 import java.nio.charset.StandardCharsets;
                 import java.util.Base64;
+                import java.util.Map;
 
                 /**
                  * Validates HTTP Basic / Simple Auth credentials.
@@ -580,7 +634,8 @@ public class GatewaySecurityGenerator {
                                     && props.getBasic().getUsername().equals(parts[0])
                                     && props.getBasic().getPassword().equals(parts[1])) {
                                 String internalToken = InternalTokenMinter.mint(
-                                        parts[0], "ROLE_USER", props.getInternalJwtSecret());
+                                        parts[0], "ROLE_USER", props.getInternalJwtSecret(),
+                                        Map.of("username", parts[0]));
                                 ServerWebExchange mutated = exchange.mutate()
                                         .request(r -> r.headers(h -> {
                                             h.set("X-User-Id",        parts[0]);

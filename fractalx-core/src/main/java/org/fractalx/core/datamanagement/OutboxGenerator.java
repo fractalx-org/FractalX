@@ -295,6 +295,7 @@ public class OutboxGenerator {
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
                 import org.slf4j.MDC;
+                import org.springframework.beans.factory.ObjectProvider;
                 import org.springframework.context.ApplicationEventPublisher;
                 import org.springframework.stereotype.Component;
                 import org.springframework.transaction.support.TransactionSynchronization;
@@ -314,19 +315,20 @@ public class OutboxGenerator {
 
                     private static final Logger log = LoggerFactory.getLogger(OutboxPublisher.class);
 
-                    private final OutboxRepository         outboxRepository;
-                    private final ObjectMapper             objectMapper;
-                    private final Tracer                   tracer;
+                    private final OutboxRepository          outboxRepository;
+                    private final ObjectMapper              objectMapper;
                     private final ApplicationEventPublisher eventPublisher;
+                    /** Optional — present only when Micrometer Tracing is on the classpath. */
+                    private final Tracer                    tracer;
 
                     public OutboxPublisher(OutboxRepository outboxRepository,
                                            ObjectMapper objectMapper,
-                                           Tracer tracer,
-                                           ApplicationEventPublisher eventPublisher) {
+                                           ApplicationEventPublisher eventPublisher,
+                                           ObjectProvider<Tracer> tracerProvider) {
                         this.outboxRepository = outboxRepository;
                         this.objectMapper     = objectMapper;
-                        this.tracer           = tracer;
                         this.eventPublisher   = eventPublisher;
+                        this.tracer           = tracerProvider.getIfAvailable();
                     }
 
                     /**
@@ -352,7 +354,7 @@ public class OutboxGenerator {
                         // can forward it as an HTTP header. This links the saga-orchestrator's
                         // span to the original request trace in Jaeger.
                         try {
-                            io.micrometer.tracing.Span curSpan = tracer.currentSpan();
+                            io.micrometer.tracing.Span curSpan = (tracer != null) ? tracer.currentSpan() : null;
                             if (curSpan != null) {
                                 io.micrometer.tracing.TraceContext tc = curSpan.context();
                                 if (tc != null && tc.traceId() != null && tc.spanId() != null) {

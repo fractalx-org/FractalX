@@ -42,7 +42,7 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceSecurityStep.class);
 
-    private static final String JJWT_VERSION = "0.11.5";
+    private static final String JJWT_VERSION = "0.12.6";
 
     @Override
     public void generate(GenerationContext context) throws IOException {
@@ -81,17 +81,23 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                 import jakarta.servlet.ServletException;
                 import jakarta.servlet.http.HttpServletRequest;
                 import jakarta.servlet.http.HttpServletResponse;
+                import org.fractalx.runtime.GatewayPrincipal;
                 import org.springframework.beans.factory.annotation.Value;
                 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
                 import org.springframework.security.core.authority.SimpleGrantedAuthority;
                 import org.springframework.security.core.context.SecurityContextHolder;
                 import org.springframework.web.filter.OncePerRequestFilter;
 
+                import javax.crypto.SecretKey;
+
                 import java.io.IOException;
                 import java.nio.charset.StandardCharsets;
-                import java.security.Key;
                 import java.util.Arrays;
+                import java.util.Collections;
+                import java.util.HashMap;
                 import java.util.List;
+                import java.util.Map;
+                import java.util.Set;
                 import java.util.stream.Collectors;
 
                 /**
@@ -101,13 +107,14 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                  * a short-lived HMAC-SHA256-signed JWT minted after the gateway successfully
                  * authenticated the external user's credential (Bearer JWT / OAuth2 / Basic / API Key).
                  *
-                 * <p>On successful validation, establishes a Spring {@link org.springframework.security.core.Authentication}
-                 * in {@link SecurityContextHolder}, making the user's identity available to:
+                 * <p>On successful validation, constructs an {@link GatewayPrincipal} and establishes
+                 * a Spring {@link org.springframework.security.core.Authentication} in
+                 * {@link SecurityContextHolder}. The principal is available via:
                  * <ul>
-                 *   <li>{@code @PreAuthorize} / {@code @Secured} / {@code @RolesAllowed} annotations</li>
-                 *   <li>{@code SecurityContextHolder.getContext().getAuthentication()}</li>
-                 *   <li>{@link org.fractalx.runtime.NetScopeContextInterceptor} — forwards the token
-                 *       via gRPC metadata for cross-service calls (fractalx-runtime)</li>
+                 *   <li>{@code @AuthenticationPrincipal GatewayPrincipal principal}</li>
+                 *   <li>{@code @PreAuthorize("principal.id == #userId")}</li>
+                 *   <li>{@code @PreAuthorize("principal.hasRole('ADMIN')")}</li>
+                 *   <li>{@code principal.getAttribute("customerId")} — for custom claims</li>
                  * </ul>
                  *
                  * <p>The internal token is verified with {@code fractalx.security.internal-jwt-secret}
@@ -119,6 +126,9 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                  */
                 public class GatewayAuthHeaderFilter extends OncePerRequestFilter {
 
+                    private static final Set<String> RESERVED_CLAIMS = Set.of(
+                            "sub", "roles", "iss", "aud", "iat", "exp", "username", "email");
+
                     @Value("${fractalx.security.internal-jwt-secret:fractalx-internal-secret-change-in-prod-!!}")
                     private String internalJwtSecret;
 
@@ -129,13 +139,24 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                             throws ServletException, IOException {
 
                         String internalToken = request.getHeader("X-Internal-Token");
-                        if (internalToken != null && !internalToken.isBlank()) {
-                            try {
-                                Key key = Keys.hmacShaKeyFor(
+                        if (internalToken == null || internalToken.isBlank()) {
+                            // No internal token — only actuator endpoints are allowed without auth.
+                            // All other paths must come through the API Gateway which mints the token.
+                            if (!request.getServletPath().startsWith("/actuator")) {
+                                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                                response.setContentType("application/json");
+                                response.getWriter().write("{\\"error\\":\\"missing-internal-token\\"}");
+                                return;
+                            }
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+                        try {
+                                SecretKey key = Keys.hmacShaKeyFor(
                                         internalJwtSecret.getBytes(StandardCharsets.UTF_8));
-                                Claims claims = Jwts.parserBuilder()
-                                        .setSigningKey(key).build()
-                                        .parseClaimsJws(internalToken).getBody();
+                                Claims claims = Jwts.parser()
+                                        .verifyWith(key).build()
+                                        .parseSignedClaims(internalToken).getPayload();
 
                                 String userId   = claims.getSubject();
                                 String rolesStr = claims.get("roles", String.class);
@@ -148,19 +169,30 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                                                          .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
                                                          .collect(Collectors.toList());
 
+                                // Extract extended claims forwarded by the gateway
+                                String username = claims.get("username", String.class);
+                                String email    = claims.get("email", String.class);
+                                Map<String, Object> attributes = new HashMap<>();
+                                claims.forEach((k, v) -> {
+                                    if (!RESERVED_CLAIMS.contains(k)) attributes.put(k, v);
+                                });
+
+                                GatewayPrincipal principal = new GatewayPrincipal(
+                                        userId, username, email, authorities,
+                                        Collections.unmodifiableMap(attributes));
+
                                 // Store the raw token as credentials so NetScopeContextInterceptor
                                 // can forward it via gRPC metadata for cross-service calls.
                                 var auth = new UsernamePasswordAuthenticationToken(
-                                        userId, internalToken, authorities);
+                                        principal, internalToken, authorities);
                                 SecurityContextHolder.getContext().setAuthentication(auth);
 
-                            } catch (Exception e) {
-                                logger.warn("GatewayAuthHeaderFilter: invalid/expired X-Internal-Token — " + e.getMessage());
-                                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                                response.setContentType("application/json");
-                                response.getWriter().write("{\\"error\\":\\"invalid-internal-token\\"}");
-                                return;
-                            }
+                        } catch (Exception e) {
+                            logger.warn("GatewayAuthHeaderFilter: invalid/expired X-Internal-Token — " + e.getMessage());
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\\"error\\":\\"invalid-internal-token\\"}");
+                            return;
                         }
                         filterChain.doFilter(request, response);
                     }
@@ -244,15 +276,38 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
         if (!Files.exists(pomFile)) return;
 
         String pom = Files.readString(pomFile);
-        if (pom.contains("<artifactId>jjwt-api</artifactId>")) return; // already injected
 
-        String jjwtBlock = """
+        // Security dep must be added independently — jjwt may already be in the monolith pom
+        // (cloned from the monolith) but spring-boot-starter-security may still be missing.
+        boolean needsSecurity = !pom.contains("<artifactId>spring-boot-starter-security</artifactId>");
+        boolean needsJjwt     = !pom.contains("<artifactId>jjwt-api</artifactId>");
 
-                        <!-- FractalX Internal Call Token validation (generated by ServiceSecurityStep) -->
+        if (!needsSecurity && !needsJjwt) return; // nothing to inject
+
+        String securityBlock = needsSecurity ? """
+
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-starter-security</artifactId>
-                        </dependency>
+                        </dependency>""" : "";
+
+        if (!needsJjwt) {
+            // Only need the security dep — inject it and return
+            int lastClose = pom.lastIndexOf("</dependencies>");
+            if (lastClose < 0) {
+                log.warn("Could not find </dependencies> in pom.xml for {} — security dep not injected",
+                        context.getModule().getServiceName());
+                return;
+            }
+            pom = pom.substring(0, lastClose) + securityBlock + "\n                    </dependencies>"
+                    + pom.substring(lastClose + "</dependencies>".length());
+            Files.writeString(pomFile, pom);
+            return;
+        }
+
+        String jjwtBlock = securityBlock + """
+
+                        <!-- FractalX Internal Call Token validation (generated by ServiceSecurityStep) -->
                         <dependency>
                             <groupId>io.jsonwebtoken</groupId>
                             <artifactId>jjwt-api</artifactId>

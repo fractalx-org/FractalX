@@ -1,6 +1,7 @@
 package org.fractalx.core.generator.admin;
 
 import org.fractalx.core.FractalxVersion;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,7 +71,7 @@ class AdminPomGenerator {
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>fractalx-runtime</artifactId>
-                            <version>%s</version>
+                            <version>%s</version>%s
                         </dependency>
                         <dependency>
                             <groupId>org.springframework.boot</groupId>
@@ -162,8 +163,21 @@ class AdminPomGenerator {
                         </plugins>
                     </build>
                 </project>
-                """.formatted(config.effectiveBasePackage(), config.springBootVersion(), FractalxVersion.get());
+                """.formatted(config.effectiveBasePackage(), config.springBootVersion(), FractalxVersion.get(),
+                        SpringBootVersionUtil.isBoot4Plus(config.springBootVersion()) ? """
+
+                            <exclusions>
+                                <exclusion>
+                                    <groupId>org.springframework.cloud</groupId>
+                                    <artifactId>spring-cloud-context</artifactId>
+                                </exclusion>
+                                <exclusion>
+                                    <groupId>org.springframework.cloud</groupId>
+                                    <artifactId>spring-cloud-commons</artifactId>
+                                </exclusion>
+                            </exclusions>""" : "");
         Files.writeString(serviceRoot.resolve("pom.xml"), content);
         log.debug("Generated admin pom.xml");
     }
+
 }

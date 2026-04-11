@@ -195,7 +195,16 @@ public class RelationshipDecoupler {
                     }
                     String oldSegment = upperFirst(entry.getKey());   // e.g. "Payment"
                     String newSegment = upperFirst(entry.getValue()); // e.g. "PaymentId"
-                    renamedName = renamedName.replace(oldSegment, newSegment);
+                    // Avoid double-renaming: if oldSegment is already followed by the suffix
+                    // we're adding (e.g. "Customer" already followed by "Id"), don't rename.
+                    // e.g. findByCustomerId.replace("Customer","CustomerId") must NOT yield findByCustomerIdId
+                    if (newSegment.startsWith(oldSegment) && newSegment.length() > oldSegment.length()) {
+                        String suffix = java.util.regex.Pattern.quote(
+                                newSegment.substring(oldSegment.length()));
+                        renamedName = renamedName.replaceAll(oldSegment + "(?!" + suffix + ")", newSegment);
+                    } else {
+                        renamedName = renamedName.replace(oldSegment, newSegment);
+                    }
                 }
 
                 if (!renamedName.equals(originalName)) {
@@ -1330,15 +1339,36 @@ public class RelationshipDecoupler {
 
             String entityVarName = arg.asNameExpr().getNameAsString();
 
-            // Resolve the declared type of the entity variable within this method scope
+            // Resolve the declared type of the entity variable within this method scope.
+            // Also detect whether the variable was loaded from the repository (existing entity)
+            // vs newly created — only inject validation for new entities. Updating an existing
+            // entity (e.g. status change) should not re-validate foreign keys that were already
+            // validated at creation time; doing so causes unnecessary cross-service gRPC calls
+            // that fail when the remote service is temporarily unavailable.
             String entityType = null;
+            boolean fetchedFromRepository = false;
             for (VariableDeclarator vd : method.findAll(VariableDeclarator.class)) {
                 if (vd.getNameAsString().equals(entityVarName)) {
                     entityType = simpleTypeName(vd.getType());
+                    // Check if the initializer is a repository/service lookup
+                    if (vd.getInitializer().isPresent()) {
+                        String init = vd.getInitializer().get().toString().toLowerCase();
+                        fetchedFromRepository = init.contains("findbyid") || init.contains("findby")
+                                || init.contains("getbyid") || init.contains("getby")
+                                || init.contains("getorderbyid") || init.contains("getcustomerbyid")
+                                || init.contains("loadbyid") || init.contains("fetchbyid")
+                                || init.contains("findone") || init.contains("getone")
+                                || (init.contains("get") && init.contains("byid"))
+                                || (init.contains("find") && init.contains("byid"))
+                                || init.contains("orelsethrow") || init.contains("orelse");
+                    }
                     break;
                 }
             }
             if (entityType == null) continue;
+            // Skip validation for entities loaded from the repository — their foreign keys
+            // were validated at creation time and do not need to be re-checked on updates.
+            if (fetchedFromRepository) continue;
 
             RemoteFieldInfo info = entityRemoteIdFields.get(entityType);
             if (info == null || info.isEmpty()) continue;

@@ -3,12 +3,17 @@ package org.fractalx.core.generator.service;
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.yaml.snakeyaml.Yaml;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Generates application.yml for a microservice.
@@ -22,17 +27,22 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
         FractalModule module = context.getModule();
         log.debug("Generating application YAMLs for {}", module.getServiceName());
 
+        // Read per-service datasource from fractalx-config.yml in the monolith's resources.
+        // When present, the generated dev/docker profiles use the specified DB instead of H2.
+        Map<String, Object> monolithDs = readDatasourceFromMonolith(
+                module.getServiceName(), context.getSourceRoot());
+
         // Base config (profile-agnostic, references env vars)
         Files.writeString(context.getSrcMainResources().resolve("application.yml"),
                 buildBaseYml(module, context.getFractalxConfig()));
 
-        // Dev profile (localhost defaults sourced from FractalxConfig)
+        // Dev profile
         Files.writeString(context.getSrcMainResources().resolve("application-dev.yml"),
-                buildDevYml(module, context.getAllModules(), context.getFractalxConfig()));
+                buildDevYml(module, context.getAllModules(), context.getFractalxConfig(), monolithDs));
 
-        // Docker profile (all env-var driven, container-ready)
+        // Docker profile
         Files.writeString(context.getSrcMainResources().resolve("application-docker.yml"),
-                buildDockerYml(module, context.getAllModules()));
+                buildDockerYml(module, context.getAllModules(), monolithDs));
     }
 
     // -------------------------------------------------------------------------
@@ -46,6 +56,13 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                 ? "    otel:\n      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:%s}\n".formatted(cfg.otelEndpoint())
                 : "    otel:\n      enabled: false\n";
         String samplingProbability = tracingEnabled ? "1.0" : "0.0";
+        // Spring Boot 4.x: configure OTel exporter via management.otlp.tracing.endpoint instead of
+        // a custom OtelConfig bean (which conflicts with Boot 4.x's managed OTel dependency versions).
+        boolean isBoot4 = SpringBootVersionUtil.isBoot4Plus(cfg.springBootVersion());
+        String otlpEndpointBlock = (tracingEnabled && isBoot4)
+                ? "  otlp:\n    tracing:\n      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:"
+                    + cfg.otelEndpoint() + "}/v1/traces\n"
+                : "";
 
         return """
                 spring:
@@ -53,6 +70,12 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     name: %s
                   profiles:
                     active: ${SPRING_PROFILES_ACTIVE:dev}
+                  autoconfigure:
+                    exclude:
+                      - org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration
+                      # FractalX services use gRPC/NetScope, not Feign. Excluding prevents startup failure
+                      # when spring-cloud-context is not on the classpath (e.g. Spring Boot 4.x).
+                      - org.springframework.cloud.openfeign.FeignAutoConfiguration
 
                 server:
                   port: %d
@@ -93,7 +116,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   tracing:
                     sampling:
                       probability: %s
-
+                %s
                 logging:
                   level:
                     org.fractalx: DEBUG
@@ -101,12 +124,52 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                 """.formatted(module.getServiceName(), module.getPort(),
                 cfg.registryUrl(), cfg.sagaPort(), tracingEnabled,
                 cfg.loggerUrl().replaceAll("/api/logs$", ""),
-                otelBlock, module.grpcPort(), samplingProbability);
+                otelBlock, module.grpcPort(), samplingProbability, otlpEndpointBlock);
     }
 
-    /** application-dev.yml — localhost hardcoded, H2 in-memory, suitable for local dev. */
+    /** application-dev.yml — localhost, H2 by default or PostgreSQL from fractalx-config.yml. */
     private String buildDevYml(FractalModule module, List<FractalModule> allModules,
-                                org.fractalx.core.config.FractalxConfig cfg) {
+                                org.fractalx.core.config.FractalxConfig cfg,
+                                Map<String, Object> monolithDs) {
+        if (monolithDs != null) {
+            // Use the datasource specified in the monolith's fractalx-config.yml
+            String url      = (String) monolithDs.getOrDefault("url", "jdbc:h2:mem:" + module.getServiceName().replace("-", "_"));
+            String driver   = monolithDs.containsKey("driver-class-name")
+                    ? (String) monolithDs.get("driver-class-name")
+                    : deriveDriver(url);
+            String username = monolithDs.containsKey("username") ? String.valueOf(monolithDs.get("username")) : "postgres";
+            String password = monolithDs.containsKey("password") && monolithDs.get("password") != null
+                    ? String.valueOf(monolithDs.get("password")) : "";
+            log.info("  [Config] Using monolith datasource for {} dev profile: {}", module.getServiceName(), url);
+            return """
+                    # Dev profile — datasource from fractalx-config.yml
+                    spring:
+                      datasource:
+                        url: %s
+                        driver-class-name: %s
+                        username: %s
+                        password: %s
+                        hikari:
+                          maximum-pool-size: 10
+                          minimum-idle: 5
+                          connection-timeout: 30000
+                          idle-timeout: 600000
+                      jpa:
+                        hibernate:
+                          ddl-auto: validate
+                        show-sql: false
+                        properties:
+                          hibernate:
+                            format_sql: false
+                      flyway:
+                        enabled: true
+                        locations: classpath:db/migration
+                    %s
+                    """.formatted(url, driver, username, password,
+                    buildClientServersConfig(module, allModules));
+        }
+
+        // Default: H2 in-memory
         return """
                 # Dev profile — all services run on localhost
                 spring:
@@ -141,13 +204,28 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
     }
 
     /** application-docker.yml — all values driven by env vars, no hardcoded localhost. */
-    private String buildDockerYml(FractalModule module, List<FractalModule> allModules) {
+    private String buildDockerYml(FractalModule module, List<FractalModule> allModules,
+                                   Map<String, Object> monolithDs) {
         StringBuilder sb = new StringBuilder("# Docker profile — all values from environment variables\n");
         sb.append("spring:\n");
         sb.append("  datasource:\n");
-        sb.append("    url: ${DB_URL:jdbc:h2:mem:").append(module.getServiceName().replace("-", "_")).append("}\n");
-        sb.append("    username: ${DB_USERNAME:sa}\n");
-        sb.append("    password: ${DB_PASSWORD:}\n");
+        if (monolithDs != null) {
+            String devUrl   = (String) monolithDs.getOrDefault("url", "");
+            String driver   = monolithDs.containsKey("driver-class-name")
+                    ? (String) monolithDs.get("driver-class-name")
+                    : deriveDriver(devUrl);
+            String username = monolithDs.containsKey("username") ? String.valueOf(monolithDs.get("username")) : "postgres";
+            // Convert localhost URL to docker-compose service name (postgres) as the fallback default
+            String dockerUrl = toDockerUrl(devUrl, module.getServiceName());
+            sb.append("    url: ${DB_URL:").append(dockerUrl).append("}\n");
+            sb.append("    driver-class-name: ").append(driver).append("\n");
+            sb.append("    username: ${DB_USERNAME:").append(username).append("}\n");
+            sb.append("    password: ${DB_PASSWORD:}\n");
+        } else {
+            sb.append("    url: ${DB_URL:jdbc:h2:mem:").append(module.getServiceName().replace("-", "_")).append("}\n");
+            sb.append("    username: ${DB_USERNAME:sa}\n");
+            sb.append("    password: ${DB_PASSWORD:}\n");
+        }
         sb.append("  flyway:\n");
         sb.append("    enabled: true\n");
         sb.append("    locations: classpath:db/migration\n");
@@ -180,6 +258,60 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
             }
         }
         return sb.toString();
+    }
+
+    // -------------------------------------------------------------------------
+    // Monolith datasource reading
+    // -------------------------------------------------------------------------
+
+    /**
+     * Reads the {@code datasource} block for the given service from
+     * {@code fractalx-config.yml} in the monolith's {@code src/main/resources} directory.
+     * Returns {@code null} if no entry is found so callers can fall back to H2 defaults.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readDatasourceFromMonolith(String serviceName, Path sourceRoot) {
+        Path resourcesDir = sourceRoot.getParent().resolve("resources");
+        Path fractalxConfig = resourcesDir.resolve("fractalx-config.yml");
+        if (!Files.exists(fractalxConfig)) return null;
+        try (FileInputStream fis = new FileInputStream(fractalxConfig.toFile())) {
+            Map<String, Object> root = new Yaml().load(fis);
+            if (root == null) return null;
+            Map<String, Object> fractalx = (Map<String, Object>) root.get("fractalx");
+            if (fractalx == null) return null;
+            Map<String, Object> services = (Map<String, Object>) fractalx.get("services");
+            if (services == null || !services.containsKey(serviceName)) return null;
+            Map<String, Object> svc = (Map<String, Object>) services.get(serviceName);
+            if (svc == null) return null;
+            return (Map<String, Object>) svc.get("datasource");
+        } catch (Exception e) {
+            log.debug("Could not read fractalx-config.yml datasource for {}: {}", serviceName, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Derives the JDBC driver class from the URL scheme when not explicitly configured.
+     */
+    private static String deriveDriver(String url) {
+        if (url == null)                       return "org.h2.Driver";
+        if (url.contains(":postgresql:"))      return "org.postgresql.Driver";
+        if (url.contains(":mysql:"))           return "com.mysql.cj.jdbc.Driver";
+        if (url.contains(":mariadb:"))         return "org.mariadb.jdbc.Driver";
+        if (url.contains(":sqlserver:"))       return "com.microsoft.sqlserver.jdbc.SQLServerDriver";
+        return "org.h2.Driver";
+    }
+
+    /**
+     * Converts a dev datasource URL (with {@code localhost}) to its Docker equivalent by
+     * replacing {@code localhost} with {@code postgres} (the conventional docker-compose
+     * service name). Falls back to an H2 URL if the input is blank.
+     */
+    private static String toDockerUrl(String devUrl, String serviceName) {
+        if (devUrl == null || devUrl.isBlank()) {
+            return "jdbc:h2:mem:" + serviceName.replace("-", "_");
+        }
+        return devUrl.replace("//localhost:", "//postgres:");
     }
 
     /** Builds the legacy dev localhost {@code netscope.client.servers} block. */
@@ -216,4 +348,5 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
         }
         return sb.toString();
     }
+
 }

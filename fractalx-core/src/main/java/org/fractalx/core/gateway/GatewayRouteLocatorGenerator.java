@@ -7,28 +7,110 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Generates a dynamic RouteLocator that pulls live service locations from
  * fractalx-registry and falls back to static YAML routes if the registry
  * is unavailable.
+ *
+ * <p>When a monolith source root is provided, the generated static fallback
+ * routes include cross-resource routes derived from actual controller paths
+ * (e.g. {@code /api/customers/&#42;/orders} → order-service) — matching the
+ * YAML gateway config so neither locator shadows the other.
  */
 public class GatewayRouteLocatorGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(GatewayRouteLocatorGenerator.class);
 
+    private final ControllerPathScanner scanner = new ControllerPathScanner();
+
     public void generate(Path srcMainJava, List<FractalModule> modules) throws IOException {
+        generate(srcMainJava, modules, null);
+    }
+
+    /**
+     * @param monolithSrc path to monolith {@code src/main/java}; when non-null,
+     *                    cross-resource routes are scanned and emitted before general routes
+     */
+    public void generate(Path srcMainJava, List<FractalModule> modules, Path monolithSrc) throws IOException {
         Path pkg = createPkg(srcMainJava, "org/fractalx/gateway/routing");
 
-        generateDynamicRouteLocator(pkg, modules);
+        generateDynamicRouteLocator(pkg, modules, monolithSrc);
         generateRegistryRouteFetcher(pkg);
 
         log.info("Generated dynamic route locator");
     }
 
-    private void generateDynamicRouteLocator(Path pkg, List<FractalModule> modules) throws IOException {
+    private void generateDynamicRouteLocator(Path pkg, List<FractalModule> modules, Path monolithSrc) throws IOException {
         StringBuilder staticRoutesBuilder = new StringBuilder();
+
+        // Step 1: scan controller paths per module (when source available)
+        Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanned = new LinkedHashMap<>();
+        if (monolithSrc != null) {
+            for (FractalModule m : modules) {
+                Set<ControllerPathScanner.EndpointInfo> eps = scanner.scan(monolithSrc, m);
+                if (!eps.isEmpty()) scanned.put(m, eps);
+            }
+        }
+
+        // Step 2: build primary prefix for each module (based on package name)
+        Map<FractalModule, String> primaryPrefix = new LinkedHashMap<>();
+        for (FractalModule m : modules) {
+            String pkgName = m.getPackageName();
+            String lastSegment = pkgName != null && pkgName.contains(".")
+                    ? pkgName.substring(pkgName.lastIndexOf('.') + 1)
+                    : (pkgName != null ? pkgName : m.getServiceName().replace("-service", ""));
+            primaryPrefix.put(m, "/api/" + lastSegment);
+        }
+
+        // Step 3: emit cross-resource routes FIRST (so they take precedence over general wildcards)
+        for (FractalModule m : modules) {
+            Set<ControllerPathScanner.EndpointInfo> endpoints = scanned.get(m);
+            if (endpoints == null || endpoints.isEmpty()) continue;
+
+            String myPrefix    = primaryPrefix.get(m);
+            String myPluralPfx = myPrefix.endsWith("s") ? myPrefix : myPrefix + "s";
+
+            Set<String> foreignPredicates = new LinkedHashSet<>();
+            for (ControllerPathScanner.EndpointInfo ep : endpoints) {
+                String gwPath = ep.gatewayPath();
+                if (gwPath.startsWith(myPrefix) || gwPath.startsWith(myPluralPfx)) continue;
+                // Check whether path belongs to another module's prefix (cross-resource)
+                boolean foreign = modules.stream().filter(other -> other != m).anyMatch(other -> {
+                    String op = primaryPrefix.get(other);
+                    String opp = op.endsWith("s") ? op : op + "s";
+                    return gwPath.startsWith(op) || gwPath.startsWith(opp);
+                });
+                if (!foreign) continue;
+                foreignPredicates.add(gwPath);
+                if (!gwPath.endsWith("/**")) foreignPredicates.add(gwPath + "/**");
+            }
+
+            if (!foreignPredicates.isEmpty()) {
+                staticRoutesBuilder.append("        // ").append(m.getServiceName()).append(" cross-resource routes\n");
+                staticRoutesBuilder.append("        routeBuilder.route(\"").append(m.getServiceName()).append("-cross-static\",\n");
+                staticRoutesBuilder.append("                r -> r.path(");
+                boolean first = true;
+                for (String p : foreignPredicates) {
+                    if (!first) staticRoutesBuilder.append(", ");
+                    staticRoutesBuilder.append('"').append(p).append('"');
+                    first = false;
+                }
+                staticRoutesBuilder.append(")\n");
+                staticRoutesBuilder.append("                        .filters(f -> f.circuitBreaker(c -> c.setName(\"")
+                        .append(m.getServiceName()).append("\")\n");
+                staticRoutesBuilder.append("                                .setFallbackUri(\"forward:/fallback/")
+                        .append(m.getServiceName()).append("\")))\n");
+                staticRoutesBuilder.append("                        .uri(\"http://localhost:").append(m.getPort()).append("\"));\n\n");
+            }
+        }
+
+        // Step 4: emit general routes (name-heuristic preserved for backward compatibility)
         for (FractalModule m : modules) {
             String base = m.getServiceName().replace("-service", "");
             String plural;

@@ -38,7 +38,7 @@ class DataIsolationGeneratorSpec extends Specification {
 
     def "IsolationConfig.java is created at the correct path under the generated package"() {
         when:
-        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice")
+        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice", "3.2.0")
 
         then:
         def expected = srcMainJava
@@ -48,7 +48,7 @@ class DataIsolationGeneratorSpec extends Specification {
 
     def "IsolationConfig contains @EnableJpaRepositories with both generated and source packages"() {
         when:
-        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice")
+        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice", "3.2.0")
 
         then:
         def content = isolationConfigContent()
@@ -59,7 +59,7 @@ class DataIsolationGeneratorSpec extends Specification {
 
     def "IsolationConfig contains @EntityScan with both generated and source packages"() {
         when:
-        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice")
+        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice", "3.2.0")
 
         then:
         def content = isolationConfigContent()
@@ -77,7 +77,7 @@ class DataIsolationGeneratorSpec extends Specification {
             .build()
 
         when:
-        generator.generateIsolationConfig(hyphenated, srcMainJava, "org.fractalx.generated.mycomplexservice")
+        generator.generateIsolationConfig(hyphenated, srcMainJava, "org.fractalx.generated.mycomplexservice", "3.2.0")
 
         then:
         def config = srcMainJava
@@ -88,7 +88,7 @@ class DataIsolationGeneratorSpec extends Specification {
 
     def "IsolationConfig is annotated with @Configuration"() {
         when:
-        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice")
+        generator.generateIsolationConfig(module, srcMainJava, "org.fractalx.generated.orderservice", "3.2.0")
 
         then:
         isolationConfigContent().contains("@Configuration")

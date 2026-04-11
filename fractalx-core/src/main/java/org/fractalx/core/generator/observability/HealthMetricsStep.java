@@ -45,11 +45,15 @@ public class HealthMetricsStep implements ServiceFileGenerator {
         String pkg     = context.servicePackage();
         Path   pkgPath = resolvePackage(context.getSrcMainJava(), pkg);
 
+        String sbVersion = context.getFractalxConfig().springBootVersion();
+        boolean isBoot4Plus = sbVersion != null && !sbVersion.isBlank()
+                && Character.getNumericValue(sbVersion.charAt(0)) >= 4;
         Files.writeString(pkgPath.resolve("ServiceHealthConfig.java"),
-                buildContent(pkg, deps, context.getAllModules()));
+                buildContent(pkg, deps, context.getAllModules(), isBoot4Plus));
     }
 
-    private String buildContent(String pkg, List<String> deps, List<FractalModule> allModules) {
+    private String buildContent(String pkg, List<String> deps, List<FractalModule> allModules,
+                                boolean isBoot4Plus) {
         StringBuilder indicators = new StringBuilder();
         StringBuilder gauges     = new StringBuilder();
 
@@ -76,7 +80,11 @@ public class HealthMetricsStep implements ServiceFileGenerator {
                                             .withDetail("grpcPort", port)
                                             .build();
                                 } catch (Exception e) {
-                                    return Health.down()
+                                    // UNKNOWN rather than DOWN: a dependency being unreachable
+                                    // does not mean this service is broken. DOWN propagates to
+                                    // HTTP 503 on /actuator/health, which blocks smoke-test
+                                    // service registration and readiness probes.
+                                    return Health.unknown()
                                             .withDetail("service", "%s")
                                             .withDetail("error",   e.getMessage())
                                             .build();
@@ -102,6 +110,14 @@ public class HealthMetricsStep implements ServiceFileGenerator {
                     """.formatted(svcName, beanId, beanId, beanId, beanId, svcName, svcName));
         }
 
+        // Spring Boot 4.x moved HealthIndicator/Health from actuate to the health module
+        String healthImport     = isBoot4Plus
+                ? "import org.springframework.boot.health.contributor.Health;"
+                : "import org.springframework.boot.actuate.health.Health;";
+        String indicatorImport  = isBoot4Plus
+                ? "import org.springframework.boot.health.contributor.HealthIndicator;"
+                : "import org.springframework.boot.actuate.health.HealthIndicator;";
+
         return """
                 package %s;
 
@@ -110,8 +126,8 @@ public class HealthMetricsStep implements ServiceFileGenerator {
                 import io.micrometer.core.instrument.binder.MeterBinder;
                 import org.springframework.beans.factory.annotation.Qualifier;
                 import org.springframework.beans.factory.annotation.Value;
-                import org.springframework.boot.actuate.health.Health;
-                import org.springframework.boot.actuate.health.HealthIndicator;
+                %s
+                %s
                 import org.springframework.context.annotation.Bean;
                 import org.springframework.context.annotation.Configuration;
 
@@ -125,7 +141,7 @@ public class HealthMetricsStep implements ServiceFileGenerator {
                     %s
                     %s
                 }
-                """.formatted(pkg, indicators.toString(), gauges.toString());
+                """.formatted(pkg, healthImport, indicatorImport, indicators.toString(), gauges.toString());
     }
 
     private Path resolvePackage(Path base, String pkg) throws IOException {

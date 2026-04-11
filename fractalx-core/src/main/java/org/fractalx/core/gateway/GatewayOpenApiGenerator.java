@@ -1,5 +1,6 @@
 package org.fractalx.core.gateway;
 
+import org.fractalx.core.auth.AuthPattern;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,42 +8,82 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
+import java.util.Set;
 
 /**
- * Generates an OpenAPI 3.0.3 specification (openapi.yaml) and a
- * Postman Collection v2.1 (postman_collection.json) for all services
+ * Generates an OpenAPI 3.0.3 specification (openapi.yaml) for all services
  * routed through the FractalX API Gateway.
  *
- * Both files are written to fractalx-gateway/docs/ and can be imported
- * directly into Postman, Swagger UI, or any OpenAPI-compatible tooling.
+ * <p>The file is written to {@code fractalx-gateway/docs/} and can be imported
+ * directly into Swagger UI or any OpenAPI-compatible tooling.
  *
- * Each Postman request includes built-in test scripts that assert:
- *   - Correct HTTP status code
- *   - Response time under 2000 ms
- *   - application/json Content-Type header (where applicable)
+ * <p>Endpoints are derived from actual controller annotations in the monolith
+ * source (package = module boundary), so cross-resource routes
+ * (e.g. {@code GET /api/customers/{id}/orders} owned by order-service) appear
+ * in the correct service tag. Only endpoints that existed in the monolith's
+ * controllers are exposed — no synthetic CRUD defaults are generated.
  */
 public class GatewayOpenApiGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(GatewayOpenApiGenerator.class);
     private static final int GATEWAY_PORT = 9999;
 
+    private final ControllerPathScanner scanner = new ControllerPathScanner();
+
     public void generate(Path gatewayRoot, List<FractalModule> modules) throws IOException {
+        generate(gatewayRoot, modules, AuthPattern.none(), null);
+    }
+
+    public void generate(Path gatewayRoot, List<FractalModule> modules, AuthPattern authPattern) throws IOException {
+        generate(gatewayRoot, modules, authPattern, null);
+    }
+
+    /**
+     * Generates documentation using actual controller paths from the monolith source.
+     *
+     * @param monolithSrc path to the monolith's {@code src/main/java}; when {@code null}
+     *                    or when no endpoints are found, no service paths are emitted
+     */
+    public void generate(Path gatewayRoot, List<FractalModule> modules,
+                         AuthPattern authPattern, Path monolithSrc) throws IOException {
         Path docsDir = gatewayRoot.resolve("docs");
         Files.createDirectories(docsDir);
 
-        Files.writeString(docsDir.resolve("openapi.yaml"), buildOpenApi(modules));
-        Files.writeString(docsDir.resolve("postman_collection.json"), buildPostmanCollection(modules));
+        Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanned =
+                scanAll(modules, monolithSrc);
 
-        log.info("Generated openapi.yaml and postman_collection.json for {} services", modules.size());
+        Files.writeString(docsDir.resolve("openapi.yaml"),
+                buildOpenApi(modules, authPattern, scanned));
+
+        log.info("Generated openapi.yaml for {} services", modules.size());
+    }
+
+    // ── Controller scanning ───────────────────────────────────────────────────
+
+    private Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanAll(
+            List<FractalModule> modules, Path monolithSrc) {
+        Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> result = new LinkedHashMap<>();
+        if (monolithSrc == null) return result;
+        for (FractalModule m : modules) {
+            Set<ControllerPathScanner.EndpointInfo> endpoints = scanner.scan(monolithSrc, m);
+            if (!endpoints.isEmpty()) {
+                result.put(m, endpoints);
+                log.debug("Scanned {} endpoints for {}", endpoints.size(), m.getServiceName());
+            }
+        }
+        return result;
     }
 
     // -------------------------------------------------------------------------
     // OpenAPI 3.0.3
     // -------------------------------------------------------------------------
 
-    private String buildOpenApi(List<FractalModule> modules) {
+    private String buildOpenApi(List<FractalModule> modules, AuthPattern authPattern,
+                                Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanned) {
         StringBuilder sb = new StringBuilder();
 
         sb.append("openapi: \"3.0.3\"\n");
@@ -57,12 +98,20 @@ public class GatewayOpenApiGenerator {
         sb.append("servers:\n");
         sb.append("  - url: \"http://localhost:").append(GATEWAY_PORT).append("\"\n");
         sb.append("    description: \"API Gateway\"\n");
+        if (authPattern.detected()) {
+            sb.append("  - url: \"http://localhost:8090\"\n");
+            sb.append("    description: \"auth-service (direct)\"\n");
+        }
         for (FractalModule m : modules) {
             sb.append("  - url: \"http://localhost:").append(m.getPort()).append("\"\n");
             sb.append("    description: \"").append(displayName(m)).append(" (direct)\"\n");
         }
 
         sb.append("tags:\n");
+        if (authPattern.detected()) {
+            sb.append("  - name: \"auth-service\"\n");
+            sb.append("    description: \"Authentication — login and registration\"\n");
+        }
         for (FractalModule m : modules) {
             sb.append("  - name: \"").append(m.getServiceName()).append("\"\n");
             sb.append("    description: \"").append(displayName(m)).append(" API\"\n");
@@ -71,8 +120,14 @@ public class GatewayOpenApiGenerator {
         sb.append("    description: \"Gateway management endpoints\"\n");
 
         sb.append("paths:\n");
+        if (authPattern.detected()) {
+            appendAuthPaths(sb);
+        }
         for (FractalModule m : modules) {
-            appendServicePaths(sb, m);
+            Set<ControllerPathScanner.EndpointInfo> endpoints = scanned.get(m);
+            if (endpoints != null && !endpoints.isEmpty()) {
+                appendScannedServicePaths(sb, m, endpoints);
+            }
         }
         appendGatewayHealthPath(sb);
 
@@ -80,93 +135,140 @@ public class GatewayOpenApiGenerator {
         return sb.toString();
     }
 
-    private void appendServicePaths(StringBuilder sb, FractalModule m) {
-        String base  = pathBase(m);
+    /**
+     * Emits OpenAPI path entries derived from actual scanned controller endpoints.
+     * Paths with the same URL but different HTTP methods are merged under one path key.
+     */
+    private void appendScannedServicePaths(StringBuilder sb, FractalModule m,
+                                            Set<ControllerPathScanner.EndpointInfo> endpoints) {
         String tag   = m.getServiceName();
         String opPfx = m.getServiceName();
 
-        // ---- Collection endpoint (/api/{base}) ----
-        sb.append("  /api/").append(base).append(":\n");
+        // Group by path — preserve insertion order (LinkedHashMap)
+        Map<String, Set<ControllerPathScanner.EndpointInfo>> byPath = new LinkedHashMap<>();
+        for (ControllerPathScanner.EndpointInfo ep : endpoints) {
+            byPath.computeIfAbsent(ep.path(), k -> new LinkedHashSet<>()).add(ep);
+        }
 
-        sb.append("    get:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"List ").append(displayName(m)).append(" resources\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-list\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
-        sb.append("        - {}\n");
-        sb.append("      responses:\n");
-        appendSuccessResponse(sb, "200");
-        appendErrorResponses(sb);
+        for (Map.Entry<String, Set<ControllerPathScanner.EndpointInfo>> entry : byPath.entrySet()) {
+            String path = entry.getKey();
 
+            sb.append("  ").append(path).append(":\n");
+
+            // Path-level parameter block when path contains {id}
+            if (path.contains("{")) {
+                sb.append("    parameters:\n");
+                sb.append("      - name: id\n");
+                sb.append("        in: path\n");
+                sb.append("        required: true\n");
+                sb.append("        description: \"Resource identifier\"\n");
+                sb.append("        schema:\n");
+                sb.append("          type: string\n");
+            }
+
+            for (ControllerPathScanner.EndpointInfo ep : entry.getValue()) {
+                String verb = ep.method().toLowerCase();
+                String opId = opPfx + "-" + verb + "-" + pathToOpSuffix(path);
+
+                sb.append("    ").append(verb).append(":\n");
+                sb.append("      tags: [\"").append(tag).append("\"]\n");
+                sb.append("      summary: \"").append(summaryFor(ep)).append("\"\n");
+                sb.append("      operationId: \"").append(opId).append("\"\n");
+                sb.append("      security:\n");
+                sb.append("        - BearerAuth: []\n");
+                sb.append("        - ApiKeyAuth: []\n");
+                if ("GET".equals(ep.method()) || "DELETE".equals(ep.method())) {
+                    sb.append("        - {}\n");
+                }
+
+                if ("POST".equals(ep.method()) || "PUT".equals(ep.method()) || "PATCH".equals(ep.method())) {
+                    sb.append("      requestBody:\n");
+                    sb.append("        required: true\n");
+                    sb.append("        content:\n");
+                    sb.append("          application/json:\n");
+                    sb.append("            schema:\n");
+                    sb.append("              $ref: \"#/components/schemas/GenericRequest\"\n");
+                }
+
+                sb.append("      responses:\n");
+                switch (ep.method()) {
+                    case "POST"   -> { appendSuccessResponse(sb, "201"); appendErrorResponses(sb); }
+                    case "DELETE" -> {
+                        sb.append("        \"204\":\n");
+                        sb.append("          description: \"Deleted successfully\"\n");
+                        appendErrorResponses(sb);
+                    }
+                    default       -> { appendSuccessResponse(sb, "200"); appendErrorResponses(sb); }
+                }
+            }
+        }
+    }
+
+    /** Derives a human-readable summary from the endpoint method and path. */
+    private String summaryFor(ControllerPathScanner.EndpointInfo ep) {
+        String[] segs = ep.path().split("/");
+        String resource = "Resource";
+        for (int i = segs.length - 1; i >= 0; i--) {
+            if (!segs[i].isEmpty() && !segs[i].startsWith("{")) {
+                resource = capitalize(segs[i]);
+                break;
+            }
+        }
+        return switch (ep.method()) {
+            case "GET"    -> ep.hasPathVar() ? "Get " + resource : "List " + resource;
+            case "POST"   -> "Create " + resource;
+            case "PUT"    -> "Update " + resource;
+            case "DELETE" -> "Delete " + resource;
+            case "PATCH"  -> "Patch " + resource;
+            default       -> ep.method() + " " + resource;
+        };
+    }
+
+    /** Converts a path like {@code /api/customers/{id}/orders} to {@code customers-id-orders}. */
+    private String pathToOpSuffix(String path) {
+        return path.replaceAll("^/", "")
+                   .replaceAll("\\{[^/]+\\}", "id")
+                   .replace("/", "-");
+    }
+
+    private void appendAuthPaths(StringBuilder sb) {
+        sb.append("  /api/auth/login:\n");
         sb.append("    post:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"Create ").append(displayName(m)).append(" resource\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-create\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
+        sb.append("      tags: [\"auth-service\"]\n");
+        sb.append("      summary: \"Login and obtain a JWT\"\n");
+        sb.append("      operationId: \"auth-login\"\n");
         sb.append("      requestBody:\n");
         sb.append("        required: true\n");
         sb.append("        content:\n");
         sb.append("          application/json:\n");
         sb.append("            schema:\n");
-        sb.append("              $ref: \"#/components/schemas/GenericRequest\"\n");
+        sb.append("              type: object\n");
+        sb.append("              required: [username, password]\n");
+        sb.append("              properties:\n");
+        sb.append("                username: { type: string, example: alice }\n");
+        sb.append("                password: { type: string, example: secret }\n");
         sb.append("      responses:\n");
-        appendSuccessResponse(sb, "201");
-        appendErrorResponses(sb);
+        sb.append("        '200': { description: JWT issued, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }\n");
+        sb.append("        '401': { description: Bad credentials }\n");
 
-        // ---- Item endpoint (/api/{base}/{id}) ----
-        sb.append("  /api/").append(base).append("/{id}:\n");
-        sb.append("    parameters:\n");
-        sb.append("      - name: id\n");
-        sb.append("        in: path\n");
-        sb.append("        required: true\n");
-        sb.append("        description: \"Resource identifier\"\n");
-        sb.append("        schema:\n");
-        sb.append("          type: string\n");
-
-        sb.append("    get:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"Get ").append(displayName(m)).append(" by ID\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-get-by-id\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
-        sb.append("        - {}\n");
-        sb.append("      responses:\n");
-        appendSuccessResponse(sb, "200");
-        appendErrorResponses(sb);
-
-        sb.append("    put:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"Update ").append(displayName(m)).append(" by ID\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-update\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
+        sb.append("  /api/auth/register:\n");
+        sb.append("    post:\n");
+        sb.append("      tags: [\"auth-service\"]\n");
+        sb.append("      summary: \"Register a new user (role always USER)\"\n");
+        sb.append("      operationId: \"auth-register\"\n");
         sb.append("      requestBody:\n");
         sb.append("        required: true\n");
         sb.append("        content:\n");
         sb.append("          application/json:\n");
         sb.append("            schema:\n");
-        sb.append("              $ref: \"#/components/schemas/GenericRequest\"\n");
+        sb.append("              type: object\n");
+        sb.append("              required: [username, password]\n");
+        sb.append("              properties:\n");
+        sb.append("                username: { type: string, example: alice }\n");
+        sb.append("                password: { type: string, example: secret }\n");
         sb.append("      responses:\n");
-        appendSuccessResponse(sb, "200");
-        appendErrorResponses(sb);
-
-        sb.append("    delete:\n");
-        sb.append("      tags: [\"").append(tag).append("\"]\n");
-        sb.append("      summary: \"Delete ").append(displayName(m)).append(" by ID\"\n");
-        sb.append("      operationId: \"").append(opPfx).append("-delete\"\n");
-        sb.append("      security:\n");
-        sb.append("        - BearerAuth: []\n");
-        sb.append("        - ApiKeyAuth: []\n");
-        sb.append("      responses:\n");
-        sb.append("        \"204\":\n");
-        sb.append("          description: \"Deleted successfully\"\n");
-        appendErrorResponses(sb);
+        sb.append("        '201': { description: User registered, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }\n");
+        sb.append("        '409': { description: Username already taken }\n");
     }
 
     private void appendGatewayHealthPath(StringBuilder sb) {
@@ -207,6 +309,12 @@ public class GatewayOpenApiGenerator {
     private void appendComponents(StringBuilder sb) {
         sb.append("components:\n");
         sb.append("  schemas:\n");
+        sb.append("    AuthResponse:\n");
+        sb.append("      type: object\n");
+        sb.append("      properties:\n");
+        sb.append("        token:    { type: string, description: HMAC-SHA256 JWT }\n");
+        sb.append("        username: { type: string }\n");
+        sb.append("        role:     { type: string, example: USER }\n");
         sb.append("    GenericRequest:\n");
         sb.append("      type: object\n");
         sb.append("      additionalProperties: true\n");
@@ -227,255 +335,8 @@ public class GatewayOpenApiGenerator {
     }
 
     // -------------------------------------------------------------------------
-    // Postman Collection v2.1
-    // -------------------------------------------------------------------------
-
-    private String buildPostmanCollection(List<FractalModule> modules) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\n");
-        sb.append("  \"info\": {\n");
-        sb.append("    \"_postman_id\": \"").append(UUID.randomUUID()).append("\",\n");
-        sb.append("    \"name\": \"FractalX Generated API\",\n");
-        sb.append("    \"description\": \"Auto-generated by FractalX decomposition framework. Import into Postman.\",\n");
-        sb.append("    \"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"\n");
-        sb.append("  },\n");
-
-        sb.append("  \"variable\": [\n");
-        sb.append("    { \"key\": \"gateway_url\", \"value\": \"http://localhost:").append(GATEWAY_PORT).append("\", \"type\": \"string\" },\n");
-        sb.append("    { \"key\": \"auth_token\",  \"value\": \"\",                         \"type\": \"string\" },\n");
-        sb.append("    { \"key\": \"id\",          \"value\": \"1\",                         \"type\": \"string\" }\n");
-        sb.append("  ],\n");
-
-        sb.append("  \"item\": [\n");
-
-        // Gateway health folder
-        sb.append("    {\n");
-        sb.append("      \"name\": \"Gateway\",\n");
-        sb.append("      \"item\": [\n");
-        appendPostmanRequest(sb, "Gateway Health", "GET", "{{gateway_url}}/actuator/health",
-                null, healthTests(), false);
-        sb.append("\n      ]\n");
-        sb.append("    }");
-
-        for (FractalModule m : modules) {
-            sb.append(",\n");
-            appendServiceFolder(sb, m);
-        }
-
-        sb.append("\n  ]\n");
-        sb.append("}\n");
-        return sb.toString();
-    }
-
-    private void appendServiceFolder(StringBuilder sb, FractalModule m) {
-        String base   = pathBase(m);                                    // e.g. "orders"
-        String entity = m.getServiceName().replace("-service", "");     // e.g. "order"
-        String name   = displayName(m);
-        String body   = buildSampleBody(entity);
-
-        sb.append("    {\n");
-        sb.append("      \"name\": \"").append(name).append("\",\n");
-        sb.append("      \"item\": [\n");
-
-        appendPostmanRequest(sb, "List " + name, "GET",
-                "{{gateway_url}}/api/" + base, null, listTests(), true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Create " + name, "POST",
-                "{{gateway_url}}/api/" + base, body, createTests(), true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Get " + name + " by ID", "GET",
-                "{{gateway_url}}/api/" + base + "/{{id}}", null, getByIdTests(), true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Update " + name, "PUT",
-                "{{gateway_url}}/api/" + base + "/{{id}}", body, updateTests(), true);
-        sb.append("\n");
-        appendPostmanRequest(sb, "Delete " + name, "DELETE",
-                "{{gateway_url}}/api/" + base + "/{{id}}", null, deleteTests(), false);
-
-        sb.append("\n      ]\n");
-        sb.append("    }");
-    }
-
-    private void appendPostmanRequest(StringBuilder sb, String name, String method,
-                                       String url, String body, String[] testLines,
-                                       boolean trailingComma) {
-        sb.append("        {\n");
-        sb.append("          \"name\": \"").append(name).append("\",\n");
-
-        // Test event
-        sb.append("          \"event\": [{\n");
-        sb.append("            \"listen\": \"test\",\n");
-        sb.append("            \"script\": {\n");
-        sb.append("              \"type\": \"text/javascript\",\n");
-        sb.append("              \"exec\": [\n");
-        for (int i = 0; i < testLines.length; i++) {
-            sb.append("                \"").append(escapeJson(testLines[i])).append("\"");
-            if (i < testLines.length - 1) sb.append(",");
-            sb.append("\n");
-        }
-        sb.append("              ]\n");
-        sb.append("            }\n");
-        sb.append("          }],\n");
-
-        // Request
-        sb.append("          \"request\": {\n");
-        sb.append("            \"method\": \"").append(method).append("\",\n");
-        sb.append("            \"header\": [\n");
-        sb.append("              { \"key\": \"Authorization\", \"value\": \"Bearer {{auth_token}}\", \"type\": \"text\", \"disabled\": true },\n");
-        sb.append("              { \"key\": \"Content-Type\",  \"value\": \"application/json\",      \"type\": \"text\" }\n");
-        sb.append("            ]");
-
-        if (body != null) {
-            sb.append(",\n");
-            sb.append("            \"body\": {\n");
-            sb.append("              \"mode\": \"raw\",\n");
-            sb.append("              \"raw\": \"").append(escapeJson(body)).append("\",\n");
-            sb.append("              \"options\": { \"raw\": { \"language\": \"json\" } }\n");
-            sb.append("            }");
-        }
-
-        sb.append(",\n");
-        sb.append("            \"url\": \"").append(url).append("\"\n");
-        sb.append("          }\n");
-        sb.append("        }");
-        if (trailingComma) sb.append(",");
-    }
-
-    // -------------------------------------------------------------------------
-    // Postman test scripts (one line per array element)
-    // -------------------------------------------------------------------------
-
-    private String[] healthTests() {
-        return new String[]{
-            "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });"
-        };
-    }
-
-    private String[] listTests() {
-        return new String[]{
-            "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });",
-            "pm.test('Content-Type is JSON', function () {",
-            "    pm.response.to.have.header('Content-Type');",
-            "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
-            "});"
-        };
-    }
-
-    private String[] createTests() {
-        return new String[]{
-            "pm.test('Status code is 201 or 200', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });",
-            "pm.test('Content-Type is JSON', function () {",
-            "    pm.response.to.have.header('Content-Type');",
-            "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
-            "});"
-        };
-    }
-
-    private String[] getByIdTests() {
-        return new String[]{
-            "pm.test('Status code is 200 or 404', function () { pm.expect(pm.response.code).to.be.oneOf([200, 404]); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });"
-        };
-    }
-
-    private String[] updateTests() {
-        return new String[]{
-            "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });"
-        };
-    }
-
-    private String[] deleteTests() {
-        return new String[]{
-            "pm.test('Status code is 204 or 200', function () { pm.expect(pm.response.code).to.be.oneOf([200, 204]); });",
-            "pm.test('Response time < 2000ms', function () { pm.expect(pm.response.responseTime).to.be.below(2000); });"
-        };
-    }
-
-    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
-
-    /** Strips the "-service" suffix and pluralises for REST path conventions. */
-    private String pathBase(FractalModule m) {
-        String entity = m.getServiceName().replace("-service", "");
-        return pluralize(entity);
-    }
-
-    /** Simple English pluralisation sufficient for typical entity names. */
-    private String pluralize(String word) {
-        if (word.endsWith("ry"))  return word.substring(0, word.length() - 2) + "ries"; // inventory→inventories
-        if (word.endsWith("y"))   return word.substring(0, word.length() - 1) + "ies";  // category→categories
-        if (word.endsWith("s") || word.endsWith("x") || word.endsWith("z")
-                || word.endsWith("ch") || word.endsWith("sh"))
-            return word + "es";
-        return word + "s";
-    }
-
-    /**
-     * Builds a realistic JSON sample request body based on the entity name.
-     * Used in POST/PUT Postman requests so testers have a real starting point.
-     */
-    private String buildSampleBody(String entity) {
-        return switch (entity) {
-            case "order" -> """
-                    {
-                      "customerId": 1,
-                      "items": [
-                        { "productId": 1, "quantity": 2, "unitPrice": 29.99 }
-                      ],
-                      "shippingAddress": "123 Main St, Springfield",
-                      "notes": "Leave at door"
-                    }""";
-            case "payment" -> """
-                    {
-                      "orderId": 1,
-                      "amount": 59.98,
-                      "currency": "USD",
-                      "method": "CREDIT_CARD",
-                      "cardLast4": "4242"
-                    }""";
-            case "inventory", "product" -> """
-                    {
-                      "name": "Sample Product",
-                      "description": "A short product description",
-                      "sku": "SKU-0001",
-                      "quantity": 100,
-                      "price": 29.99
-                    }""";
-            case "budget" -> """
-                    {
-                      "name": "Q2 Operating Budget",
-                      "amount": 50000.00,
-                      "currency": "USD",
-                      "period": "2026-Q2",
-                      "category": "OPERATIONS"
-                    }""";
-            case "user", "customer" -> """
-                    {
-                      "firstName": "Jane",
-                      "lastName": "Doe",
-                      "email": "jane.doe@example.com",
-                      "phone": "+1-555-0100"
-                    }""";
-            case "notification" -> """
-                    {
-                      "recipientId": 1,
-                      "type": "EMAIL",
-                      "subject": "Your order has been processed",
-                      "body": "Thank you for your order."
-                    }""";
-            default -> """
-                    {
-                      "name": "Sample %s",
-                      "description": "Auto-generated placeholder — replace with real fields",
-                      "status": "ACTIVE"
-                    }""".formatted(capitalize(entity));
-        };
-    }
 
     private String capitalize(String s) {
         return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
@@ -491,13 +352,5 @@ public class GatewayOpenApiGenerator {
             }
         }
         return result.toString().trim();
-    }
-
-    private String escapeJson(String s) {
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\t", "\\t")
-                .replace("\n", "\\n")
-                .replace("\r", "");
     }
 }

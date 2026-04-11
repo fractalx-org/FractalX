@@ -1,6 +1,7 @@
 package org.fractalx.core.gateway;
 
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,20 +23,33 @@ public class GatewayObservabilityGenerator {
     private static final Logger log = LoggerFactory.getLogger(GatewayObservabilityGenerator.class);
 
     public void generate(Path srcMainJava, List<FractalModule> modules) throws IOException {
+        generate(srcMainJava, modules, null);
+    }
+
+    public void generate(Path srcMainJava, List<FractalModule> modules, String springBootVersion) throws IOException {
         Path pkg = createPkg(srcMainJava, "org/fractalx/gateway/observability");
 
         generateLoggingFilter(pkg);
         generateTracingFilter(pkg);
         generateMetricsFilter(pkg, modules);
-        generateOtelConfig(pkg);
+
+        boolean isBoot4Plus = SpringBootVersionUtil.isBoot4Plus(springBootVersion);
+        if (!isBoot4Plus) {
+            generateOtelConfig(pkg);
+        } else {
+            // OtelConfig uses OTel SDK directly which conflicts with Boot 4.x managed versions.
+            // Boot 4.x configures OTLP tracing via management.otlp.tracing.endpoint instead.
+            java.nio.file.Path stale = pkg.resolve("GatewayOtelConfig.java");
+            if (Files.exists(stale)) Files.delete(stale);
+        }
         generateTracingExclusion(pkg);
 
-        log.info("Generated gateway observability filters + OtelConfig");
+        log.info("Generated gateway observability filters{}", isBoot4Plus ? "" : " + OtelConfig");
     }
 
     /** Overload for callers that don't pass modules (backward compat). */
     public void generate(Path srcMainJava) throws IOException {
-        generate(srcMainJava, List.of());
+        generate(srcMainJava, List.of(), null);
     }
 
     // -------------------------------------------------------------------------
