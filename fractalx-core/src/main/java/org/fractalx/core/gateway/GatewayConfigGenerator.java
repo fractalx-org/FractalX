@@ -100,57 +100,21 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("    name: fractalx-gateway\n");
         ymlBuilder.append("  profiles:\n");
         ymlBuilder.append("    active: ${SPRING_PROFILES_ACTIVE:dev}\n");
-        ymlBuilder.append("  autoconfigure:\n");
-        ymlBuilder.append("    exclude:\n");
-        ymlBuilder.append("      - org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration\n");
-        ymlBuilder.append("      - org.springframework.cloud.autoconfigure.RefreshAutoConfiguration\n");
-        // FractalX gateway uses Spring Cloud Gateway (reactive), not Feign. Excluding prevents startup failure
-        // when spring-cloud-context is not on the classpath (Spring Boot 4.x).
-        ymlBuilder.append("      - org.springframework.cloud.openfeign.FeignAutoConfiguration\n");
-        boolean isBoot4 = SpringBootVersionUtil.isBoot4Plus(cfg.springBootVersion());
-        if (isBoot4) {
-            // spring-cloud-commons discovery auto-configurations use WebServerInitializedEvent from
-            // org.springframework.boot.web.context which moved to .web.server.context in Boot 4.x.
-            ymlBuilder.append("      - org.springframework.cloud.client.discovery.simple.SimpleDiscoveryClientAutoConfiguration\n");
-            ymlBuilder.append("      - org.springframework.cloud.client.discovery.simple.reactive.SimpleReactiveDiscoveryClientAutoConfiguration\n");
-            ymlBuilder.append("      - org.springframework.cloud.client.loadbalancer.LoadBalancerAutoConfiguration\n");
-        }
+        // NOTE: The gateway is pinned to Spring Boot 3.x (Spring Cloud 2024.x / Gateway 4.2.x).
+        // Spring Cloud Gateway 4.3.x has a binary incompatibility with Spring Framework 7.0.3+
+        // (HttpHeaders.containsKey(Object) removed). Boot 3.x uses Spring Framework 6.x which
+        // is unaffected. The gateway is a pure HTTP proxy so the version mismatch is safe.
         ymlBuilder.append("  main:\n");
         ymlBuilder.append("    web-application-type: reactive\n\n");
-        if (isBoot4) {
-            // Spring Cloud 2025.x compatibility verifier rejects Spring Boot 4.x as "incompatible"
-            // because it only knows about Boot 3.x. Disable the check since we handle compatibility manually.
-            ymlBuilder.append("  cloud:\n");
-            ymlBuilder.append("    compatibility-verifier:\n");
-            ymlBuilder.append("      enabled: false\n");
-        } else {
-            ymlBuilder.append("  cloud:\n");
-        }
-        if (isBoot4) {
-            // Spring Cloud 2025.x with Spring Boot 4.x renamed the gateway config namespace.
-            ymlBuilder.append("    gateway:\n");
-            ymlBuilder.append("      server:\n");
-            ymlBuilder.append("        webflux:\n");
-            ymlBuilder.append("          default-filters:\n");
-            ymlBuilder.append("            - name: Retry\n");
-            ymlBuilder.append("              args:\n");
-            ymlBuilder.append("                retries: 2\n");
-            ymlBuilder.append("                statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT\n");
-            ymlBuilder.append("          routes:\n");
-            // Routes config uses the same route format, indent 10 spaces
-            for (String line : routesConfig.toString().split("\n", -1)) {
-                ymlBuilder.append("    ").append(line).append("\n");
-            }
-        } else {
-            ymlBuilder.append("    gateway:\n");
-            ymlBuilder.append("      default-filters:\n");
-            ymlBuilder.append("        - name: Retry\n");
-            ymlBuilder.append("          args:\n");
-            ymlBuilder.append("            retries: 2\n");
-            ymlBuilder.append("            statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT\n");
-            ymlBuilder.append("      routes:\n");
-            ymlBuilder.append(routesConfig.toString());
-        }
+        ymlBuilder.append("  cloud:\n");
+        ymlBuilder.append("    gateway:\n");
+        ymlBuilder.append("      default-filters:\n");
+        ymlBuilder.append("        - name: Retry\n");
+        ymlBuilder.append("          args:\n");
+        ymlBuilder.append("            retries: 2\n");
+        ymlBuilder.append("            statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT\n");
+        ymlBuilder.append("      routes:\n");
+        ymlBuilder.append(routesConfig.toString());
         ymlBuilder.append("\n");
 
         // Security defaults driven by detected monolith security profile

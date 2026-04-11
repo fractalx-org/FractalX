@@ -116,10 +116,10 @@ public class GatewayGenerator {
         // Step 13: OpenAPI 3.0.3 spec + Postman Collection v2.1 (with inline tests)
         new GatewayOpenApiGenerator().generate(gatewayRoot, modules, authPattern);
 
-        // Step 14: Boot 4.x compatibility shims for spring-cloud-gateway 4.3.x
-        if (SpringBootVersionUtil.isBoot4Plus(fractalxConfig.springBootVersion())) {
-            generateBoot4GatewayCompatibility(srcMainJava);
-        }
+        // Step 14: Boot 4.x compatibility shims — intentionally skipped.
+        // The gateway is pinned to Spring Boot 3.4.x (Spring Cloud 2024.0.x / Gateway 4.2.x)
+        // even when services target Boot 4.x, to avoid HttpHeaders.containsKey(Object) NoSuchMethodError
+        // in Spring Cloud Gateway 4.3.x vs Spring Framework 7.0.3+. No shims needed for Boot 3.x.
 
         log.info("✓ API Gateway generated at: {}", gatewayRoot.toAbsolutePath());
     }
