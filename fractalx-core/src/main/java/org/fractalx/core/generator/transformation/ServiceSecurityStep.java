@@ -139,8 +139,19 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                             throws ServletException, IOException {
 
                         String internalToken = request.getHeader("X-Internal-Token");
-                        if (internalToken != null && !internalToken.isBlank()) {
-                            try {
+                        if (internalToken == null || internalToken.isBlank()) {
+                            // No internal token — only actuator endpoints are allowed without auth.
+                            // All other paths must come through the API Gateway which mints the token.
+                            if (!request.getServletPath().startsWith("/actuator")) {
+                                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                                response.setContentType("application/json");
+                                response.getWriter().write("{\\"error\\":\\"missing-internal-token\\"}");
+                                return;
+                            }
+                            filterChain.doFilter(request, response);
+                            return;
+                        }
+                        try {
                                 SecretKey key = Keys.hmacShaKeyFor(
                                         internalJwtSecret.getBytes(StandardCharsets.UTF_8));
                                 Claims claims = Jwts.parser()
@@ -176,13 +187,12 @@ public class ServiceSecurityStep implements ServiceFileGenerator {
                                         principal, internalToken, authorities);
                                 SecurityContextHolder.getContext().setAuthentication(auth);
 
-                            } catch (Exception e) {
-                                logger.warn("GatewayAuthHeaderFilter: invalid/expired X-Internal-Token — " + e.getMessage());
-                                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                                response.setContentType("application/json");
-                                response.getWriter().write("{\\"error\\":\\"invalid-internal-token\\"}");
-                                return;
-                            }
+                        } catch (Exception e) {
+                            logger.warn("GatewayAuthHeaderFilter: invalid/expired X-Internal-Token — " + e.getMessage());
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\\"error\\":\\"invalid-internal-token\\"}");
+                            return;
                         }
                         filterChain.doFilter(request, response);
                     }

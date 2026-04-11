@@ -324,7 +324,12 @@ public class NetScopeClientGenerator implements ServiceFileGenerator {
                 || simpleName.endsWith("Module")
                 || simpleName.endsWith("Config")
                 || simpleName.endsWith("Configuration")
-                || simpleName.endsWith("Application");
+                || simpleName.endsWith("Application")
+                || simpleName.endsWith("Listener")
+                || simpleName.endsWith("Filter")
+                || simpleName.endsWith("Interceptor")
+                || simpleName.endsWith("Aspect")
+                || simpleName.endsWith("Handler");
     }
 
     // -------------------------------------------------------------------------
