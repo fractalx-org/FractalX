@@ -457,13 +457,20 @@ public class GatewaySecurityGenerator {
                             if (username != null) extraClaims.put("username", username);
                             String email = claims.get("email", String.class);
                             if (email != null) extraClaims.put("email", email);
-                            // Forward all remaining non-standard String claims as custom attributes
+                            // Forward all remaining non-standard claims as custom attributes.
+                            // Numeric and boolean values are converted to String so they survive
+                            // the Map<String,String> boundary and remain accessible via
+                            // GatewayPrincipal.getAttribute(name) in downstream services.
                             claims.forEach((k, v) -> {
                                 if (!STANDARD_CLAIMS.contains(k)
                                         && !k.equals("preferred_username") && !k.equals("name")
                                         && !k.equals("email") && !k.equals("roles")
-                                        && v instanceof String s) {
-                                    extraClaims.put(k, s);
+                                        && v != null) {
+                                    if (v instanceof String s) {
+                                        extraClaims.put(k, s);
+                                    } else if (v instanceof Number || v instanceof Boolean) {
+                                        extraClaims.put(k, String.valueOf(v));
+                                    }
                                 }
                             });
 
