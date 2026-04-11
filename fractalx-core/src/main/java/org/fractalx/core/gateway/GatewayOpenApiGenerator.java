@@ -1,5 +1,6 @@
 package org.fractalx.core.gateway;
 
+import org.fractalx.core.auth.AuthPattern;
 import org.fractalx.core.model.FractalModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,11 +30,15 @@ public class GatewayOpenApiGenerator {
     private static final int GATEWAY_PORT = 9999;
 
     public void generate(Path gatewayRoot, List<FractalModule> modules) throws IOException {
+        generate(gatewayRoot, modules, AuthPattern.none());
+    }
+
+    public void generate(Path gatewayRoot, List<FractalModule> modules, AuthPattern authPattern) throws IOException {
         Path docsDir = gatewayRoot.resolve("docs");
         Files.createDirectories(docsDir);
 
-        Files.writeString(docsDir.resolve("openapi.yaml"), buildOpenApi(modules));
-        Files.writeString(docsDir.resolve("postman_collection.json"), buildPostmanCollection(modules));
+        Files.writeString(docsDir.resolve("openapi.yaml"), buildOpenApi(modules, authPattern));
+        Files.writeString(docsDir.resolve("postman_collection.json"), buildPostmanCollection(modules, authPattern));
 
         log.info("Generated openapi.yaml and postman_collection.json for {} services", modules.size());
     }
@@ -42,7 +47,7 @@ public class GatewayOpenApiGenerator {
     // OpenAPI 3.0.3
     // -------------------------------------------------------------------------
 
-    private String buildOpenApi(List<FractalModule> modules) {
+    private String buildOpenApi(List<FractalModule> modules, AuthPattern authPattern) {
         StringBuilder sb = new StringBuilder();
 
         sb.append("openapi: \"3.0.3\"\n");
@@ -57,12 +62,20 @@ public class GatewayOpenApiGenerator {
         sb.append("servers:\n");
         sb.append("  - url: \"http://localhost:").append(GATEWAY_PORT).append("\"\n");
         sb.append("    description: \"API Gateway\"\n");
+        if (authPattern.detected()) {
+            sb.append("  - url: \"http://localhost:8090\"\n");
+            sb.append("    description: \"auth-service (direct)\"\n");
+        }
         for (FractalModule m : modules) {
             sb.append("  - url: \"http://localhost:").append(m.getPort()).append("\"\n");
             sb.append("    description: \"").append(displayName(m)).append(" (direct)\"\n");
         }
 
         sb.append("tags:\n");
+        if (authPattern.detected()) {
+            sb.append("  - name: \"auth-service\"\n");
+            sb.append("    description: \"Authentication — login and registration\"\n");
+        }
         for (FractalModule m : modules) {
             sb.append("  - name: \"").append(m.getServiceName()).append("\"\n");
             sb.append("    description: \"").append(displayName(m)).append(" API\"\n");
@@ -71,6 +84,9 @@ public class GatewayOpenApiGenerator {
         sb.append("    description: \"Gateway management endpoints\"\n");
 
         sb.append("paths:\n");
+        if (authPattern.detected()) {
+            appendAuthPaths(sb);
+        }
         for (FractalModule m : modules) {
             appendServicePaths(sb, m);
         }
@@ -78,6 +94,46 @@ public class GatewayOpenApiGenerator {
 
         appendComponents(sb);
         return sb.toString();
+    }
+
+    private void appendAuthPaths(StringBuilder sb) {
+        sb.append("  /api/auth/login:\n");
+        sb.append("    post:\n");
+        sb.append("      tags: [\"auth-service\"]\n");
+        sb.append("      summary: \"Login and obtain a JWT\"\n");
+        sb.append("      operationId: \"auth-login\"\n");
+        sb.append("      requestBody:\n");
+        sb.append("        required: true\n");
+        sb.append("        content:\n");
+        sb.append("          application/json:\n");
+        sb.append("            schema:\n");
+        sb.append("              type: object\n");
+        sb.append("              required: [username, password]\n");
+        sb.append("              properties:\n");
+        sb.append("                username: { type: string, example: alice }\n");
+        sb.append("                password: { type: string, example: secret }\n");
+        sb.append("      responses:\n");
+        sb.append("        '200': { description: JWT issued, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }\n");
+        sb.append("        '401': { description: Bad credentials }\n");
+
+        sb.append("  /api/auth/register:\n");
+        sb.append("    post:\n");
+        sb.append("      tags: [\"auth-service\"]\n");
+        sb.append("      summary: \"Register a new user (role always USER)\"\n");
+        sb.append("      operationId: \"auth-register\"\n");
+        sb.append("      requestBody:\n");
+        sb.append("        required: true\n");
+        sb.append("        content:\n");
+        sb.append("          application/json:\n");
+        sb.append("            schema:\n");
+        sb.append("              type: object\n");
+        sb.append("              required: [username, password]\n");
+        sb.append("              properties:\n");
+        sb.append("                username: { type: string, example: alice }\n");
+        sb.append("                password: { type: string, example: secret }\n");
+        sb.append("      responses:\n");
+        sb.append("        '201': { description: User registered, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }\n");
+        sb.append("        '409': { description: Username already taken }\n");
     }
 
     private void appendServicePaths(StringBuilder sb, FractalModule m) {
@@ -207,6 +263,12 @@ public class GatewayOpenApiGenerator {
     private void appendComponents(StringBuilder sb) {
         sb.append("components:\n");
         sb.append("  schemas:\n");
+        sb.append("    AuthResponse:\n");
+        sb.append("      type: object\n");
+        sb.append("      properties:\n");
+        sb.append("        token:    { type: string, description: HMAC-SHA256 JWT }\n");
+        sb.append("        username: { type: string }\n");
+        sb.append("        role:     { type: string, example: USER }\n");
         sb.append("    GenericRequest:\n");
         sb.append("      type: object\n");
         sb.append("      additionalProperties: true\n");
@@ -230,7 +292,7 @@ public class GatewayOpenApiGenerator {
     // Postman Collection v2.1
     // -------------------------------------------------------------------------
 
-    private String buildPostmanCollection(List<FractalModule> modules) {
+    private String buildPostmanCollection(List<FractalModule> modules, AuthPattern authPattern) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
         sb.append("  \"info\": {\n");
@@ -257,6 +319,12 @@ public class GatewayOpenApiGenerator {
         sb.append("\n      ]\n");
         sb.append("    }");
 
+        // Auth service folder (when detected)
+        if (authPattern.detected()) {
+            sb.append(",\n");
+            appendAuthFolder(sb);
+        }
+
         for (FractalModule m : modules) {
             sb.append(",\n");
             appendServiceFolder(sb, m);
@@ -265,6 +333,43 @@ public class GatewayOpenApiGenerator {
         sb.append("\n  ]\n");
         sb.append("}\n");
         return sb.toString();
+    }
+
+    private void appendAuthFolder(StringBuilder sb) {
+        String loginBody = """
+                {
+                  "username": "alice",
+                  "password": "secret"
+                }""";
+        String registerBody = """
+                {
+                  "username": "alice",
+                  "password": "secret"
+                }""";
+        String[] loginTests = {
+            "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+            "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+            "const json = pm.response.json();",
+            "pm.test('Token present', () => pm.expect(json.token).to.be.a('string').and.not.empty);",
+            "if (json.token) pm.collectionVariables.set('auth_token', json.token);"
+        };
+        String[] registerTests = {
+            "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+            "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+            "const json = pm.response.json();",
+            "pm.test('Token present', () => pm.expect(json.token).to.be.a('string').and.not.empty);"
+        };
+
+        sb.append("    {\n");
+        sb.append("      \"name\": \"Auth Service\",\n");
+        sb.append("      \"item\": [\n");
+        appendPostmanRequest(sb, "Login (obtain JWT)", "POST",
+                "{{gateway_url}}/api/auth/login", loginBody, loginTests, true);
+        sb.append("\n");
+        appendPostmanRequest(sb, "Register new user", "POST",
+                "{{gateway_url}}/api/auth/register", registerBody, registerTests, false);
+        sb.append("\n      ]\n");
+        sb.append("    }");
     }
 
     private void appendServiceFolder(StringBuilder sb, FractalModule m) {

@@ -3,6 +3,7 @@ package org.fractalx.core.gateway;
 import org.fractalx.core.auth.AuthPattern;
 import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -113,13 +114,10 @@ public class GatewayGenerator {
         new GatewayObservabilityGenerator().generate(srcMainJava, modules, fractalxConfig.springBootVersion());
 
         // Step 13: OpenAPI 3.0.3 spec + Postman Collection v2.1 (with inline tests)
-        new GatewayOpenApiGenerator().generate(gatewayRoot, modules);
+        new GatewayOpenApiGenerator().generate(gatewayRoot, modules, authPattern);
 
         // Step 14: Boot 4.x compatibility shims for spring-cloud-gateway 4.3.x
-        boolean isBoot4Plus = fractalxConfig.springBootVersion() != null
-                && !fractalxConfig.springBootVersion().isBlank()
-                && Character.getNumericValue(fractalxConfig.springBootVersion().charAt(0)) >= 4;
-        if (isBoot4Plus) {
+        if (SpringBootVersionUtil.isBoot4Plus(fractalxConfig.springBootVersion())) {
             generateBoot4GatewayCompatibility(srcMainJava);
         }
 
