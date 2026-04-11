@@ -37,12 +37,6 @@ public class ControllerCrudStep implements ServiceFileGenerator {
     private static final Pattern GET_LIST_WITH_PATH = Pattern.compile(
             "@GetMapping\\(\"(/[^\"{}]+)\"\\)\\s*(?:\\n\\s*(?:@[^\\n]+\\n\\s*)*)?public\\s+List<(\\w+)>\\s+\\w+\\s*\\(\\s*\\)");
 
-    // Detect @PostMapping with any argument (including sub-paths) — ANY post mapping present
-    private static final Pattern ANY_POST = Pattern.compile("@PostMapping\\b");
-
-    // Detect @PutMapping with any argument
-    private static final Pattern ANY_PUT = Pattern.compile("@PutMapping\\b");
-
     // Detect a service field: "final XService xService"
     private static final Pattern SERVICE_FIELD = Pattern.compile(
             "(?:private\\s+)?final\\s+(\\w+Service)\\s+(\\w+)");
@@ -78,9 +72,13 @@ public class ControllerCrudStep implements ServiceFileGenerator {
         String resourcePath = glm.group(1); // e.g. "/orders"
         String entityType   = glm.group(2); // e.g. "Order"
 
-        // If ANY @PostMapping or @PutMapping already exists, the monolith already
-        // defined write operations — do not add duplicates.
-        if (ANY_POST.matcher(src).find() && ANY_PUT.matcher(src).find()) return;
+        // Path-specific checks: a nested @PostMapping("/customers/{id}/orders") does NOT
+        // count as a flat @PostMapping("/orders"). Only exact-path matches are treated as
+        // "already present" — otherwise we'd leave the flat route unreachable (405).
+        boolean hasFlatPost = hasMapping(src, "PostMapping", resourcePath);
+        boolean hasFlatPut  = hasMapping(src, "PutMapping",  resourcePath + "/{");
+
+        if (hasFlatPost && hasFlatPut) return;
 
         // Find service field
         Matcher sfm = SERVICE_FIELD.matcher(src);
@@ -96,8 +94,8 @@ public class ControllerCrudStep implements ServiceFileGenerator {
 
         boolean changed = false;
 
-        // Add @PostMapping("/resourcePath") if no POST exists at all
-        if (!ANY_POST.matcher(src).find()) {
+        // Add @PostMapping("/resourcePath") when no flat POST to that path exists
+        if (!hasFlatPost) {
             src = ensureImport(src, "org.springframework.web.bind.annotation.PostMapping");
             src = ensureImport(src, "org.springframework.http.HttpStatus");
             src = ensureImport(src, "org.springframework.web.bind.annotation.ResponseStatus");
@@ -107,8 +105,8 @@ public class ControllerCrudStep implements ServiceFileGenerator {
             changed = true;
         }
 
-        // Add @PutMapping("/resourcePath/{id}") if no PUT exists at all
-        if (!ANY_PUT.matcher(src).find()) {
+        // Add @PutMapping("/resourcePath/{id}") when no flat PUT to that path exists
+        if (!hasFlatPut) {
             src = ensureImport(src, "org.springframework.web.bind.annotation.PutMapping");
             src = ensureImport(src, "org.springframework.web.bind.annotation.PathVariable");
             src = ensureImport(src, "org.springframework.web.bind.annotation.RequestBody");
@@ -118,6 +116,20 @@ public class ControllerCrudStep implements ServiceFileGenerator {
         }
 
         if (changed) Files.writeString(file, src);
+    }
+
+    /**
+     * Returns true if the source contains an {@code @<annotation>("<pathPrefix>...")} whose
+     * path starts with {@code pathPrefix}. Used to distinguish flat routes from nested ones.
+     * <p>Example: {@code hasMapping(src, "PostMapping", "/orders")} matches
+     * {@code @PostMapping("/orders")} but NOT {@code @PostMapping("/customers/{id}/orders")}.
+     */
+    private boolean hasMapping(String src, String annotation, String pathPrefix) {
+        // Match: @PostMapping( "/orders" ...) or @PostMapping(value = "/orders" ...)
+        // The value must START with pathPrefix (avoids matching nested paths).
+        Pattern p = Pattern.compile(
+                "@" + annotation + "\\(\\s*(?:value\\s*=\\s*|path\\s*=\\s*)?\"(" + Pattern.quote(pathPrefix) + "[^\"]*)\"");
+        return p.matcher(src).find();
     }
 
     /**

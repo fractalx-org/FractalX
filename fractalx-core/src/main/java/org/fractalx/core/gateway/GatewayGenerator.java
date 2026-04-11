@@ -88,15 +88,22 @@ public class GatewayGenerator {
                 securityProfile.authType(), securityProfile.routeRules().size());
 
         // Step 5: Generate configuration (security profile drives YAML defaults + resilience4j)
-        GatewayConfigGenerator configGen = new GatewayConfigGenerator();
-        configGen.generateConfig(srcMainResources, modules, allRoutes, fractalxConfig, securityProfile, authPattern);
+        // Pass sourceRoot so routes are derived from actual controller paths — this is how
+        // cross-resource endpoints (e.g. GET /api/customers/{id}/orders owned by order-service)
+        // get correctly routed instead of being shadowed by the customer-service wildcard.
+        GatewayConfigGenerator configGen = new GatewayConfigGenerator(sourceRoot);
+        configGen.generateConfig(srcMainResources, modules, allRoutes, fractalxConfig,
+                                  securityProfile, authPattern, sourceRoot);
 
         // Step 6: Generate documentation
         ApiDocumentationGenerator docGen = new ApiDocumentationGenerator();
         docGen.generateDocumentation(gatewayRoot, modules, allRoutes);
 
         // Step 7: Dynamic route locator (registry-backed with static fallback)
-        new GatewayRouteLocatorGenerator().generate(srcMainJava, modules);
+        // Pass sourceRoot so the generated buildStaticRoutes() includes cross-resource
+        // Java-bean routes matching the YAML config; otherwise the name-heuristic static
+        // fallback shadows cross-resource YAML routes (e.g. /api/customers/* /orders → 404).
+        new GatewayRouteLocatorGenerator().generate(srcMainJava, modules, sourceRoot);
 
         // Step 8: Multi-mechanism security — mirrors monolith auth type and route rules
         new GatewaySecurityGenerator().generate(srcMainJava, modules, securityProfile);
@@ -114,7 +121,10 @@ public class GatewayGenerator {
         new GatewayObservabilityGenerator().generate(srcMainJava, modules, fractalxConfig.springBootVersion());
 
         // Step 13: OpenAPI 3.0.3 spec + Postman Collection v2.1 (with inline tests)
-        new GatewayOpenApiGenerator().generate(gatewayRoot, modules, authPattern);
+        // Passing sourceRoot enables controller-scanning: the Postman collection and OpenAPI
+        // spec reflect actual controller paths (including cross-resource endpoints such as
+        // GET /api/customers/{id}/orders in the order-service folder).
+        new GatewayOpenApiGenerator().generate(gatewayRoot, modules, authPattern, sourceRoot);
 
         // Step 14: Boot 4.x compatibility shims — intentionally skipped.
         // The gateway is pinned to Spring Boot 3.4.x (Spring Cloud 2024.0.x / Gateway 4.2.x)
