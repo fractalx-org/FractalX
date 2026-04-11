@@ -4,7 +4,7 @@
 [![Maven Central](https://img.shields.io/badge/maven--central-0.3.2-blue)](https://central.sonatype.com/artifact/org.fractalx/fractalx-annotations)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Java](https://img.shields.io/badge/java-17%2B-orange)](https://adoptium.net/)
-[![Spring Boot](https://img.shields.io/badge/spring--boot-3.2.0-brightgreen)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/spring--boot-3.2%2B%20%7C%204.x-brightgreen)](https://spring.io/projects/spring-boot)
 
 **Static decomposition framework — converts modular monolithic Spring Boot applications into production-ready microservice deployments via AST analysis and code generation.**
 
@@ -793,7 +793,7 @@ fractalx-output/
 
 | Component | Description |
 |---|---|
-| `pom.xml` | Spring Boot 3.2, netscope-server, netscope-client, Resilience4j, Flyway, Actuator, Micrometer |
+| `pom.xml` | Spring Boot 3.2+ / 4.x, netscope-server, netscope-client, Resilience4j, Flyway, Actuator, Micrometer |
 | Main class | `@EnableNetScopeServer` + `@EnableNetScopeClient` |
 | `application.yml` | Registry URL, gRPC port, OTEL endpoint, logger URL (with env-var overrides) |
 | `application-dev.yml` | Localhost defaults, H2 DB + `@Value` properties migrated from monolith |
@@ -801,7 +801,7 @@ fractalx-output/
 | Shared utility classes | Non-module classes referenced by module code (e.g. `shared/`, `common/`) copied by `SharedCodeCopier` |
 | `OtelConfig.java` | OpenTelemetry SDK -- OTLP/gRPC to Jaeger, W3C traceparent propagation |
 | `ServiceHealthConfig.java` | One Spring `HealthIndicator` + Micrometer gauge per gRPC dependency |
-| `ServiceRegistrationAutoConfig` | Self-register on startup; heartbeat every 30s; deregister on shutdown |
+| `ServiceRegistrationAutoConfig` | Self-register on startup; heartbeat every 5s with automatic re-registration on registry restart; deregister on shutdown |
 | `NetScopeRegistryBridgeStep` | Dynamic gRPC host resolution from registry at startup; all peers resolved in parallel; configurable retries (`fractalx.registry.max-retries`, default 10); 2 s connect / 3 s read timeout on registry HTTP calls |
 | Resilience4j YAML | CircuitBreaker + Retry + TimeLimiter per dependency |
 | `Dockerfile` | Multi-stage (build + runtime), non-root user |
@@ -935,7 +935,7 @@ Routes are resolved **dynamically** from `fractalx-registry` at startup and refr
 Each generated service includes `ServiceRegistrationAutoConfig`:
 
 1. **On startup** -- POST `{name, host, port, grpcPort, healthUrl}` to the registry
-2. **Every 30 seconds** -- heartbeat to refresh `lastSeen`
+2. **Every 5 seconds** -- heartbeat to refresh `lastSeen`; if the heartbeat fails (e.g. registry restarted), the service immediately re-registers
 3. **On shutdown** -- deregister gracefully
 
 The registry polls each service's `/actuator/health` every 15 seconds and evicts services unresponsive for 90 seconds.
@@ -1920,11 +1920,18 @@ secrets, and add production-grade monitoring before deploying.
 
 ### Security constraints
 
-**No auth-service / login endpoint generated**
-FractalX generates the token-validation side of security (`GatewayAuthHeaderFilter`,
-`ServiceSecurityConfig`, Internal Call Token minting in the gateway). It does not generate a
-user registration, login, or JWT-issuance service. An external IdP (Keycloak, Auth0, Okta) or
-a custom auth service must be provided separately.
+**Auth-service auto-generated when auth pattern is detected**
+FractalX scans the monolith for JWT configuration (`jwt.secret` / `jwt-secret` property), a
+`UserDetails`-implementing JPA entity, and auth controller endpoints. When all three are found,
+it generates a standalone `auth-service` (port 8090) that serves `POST /api/auth/login` and
+`POST /api/auth/register`, issues HMAC-SHA256 JWTs, and pre-wires a gateway route to it.
+All new registrations are assigned the `USER` role — elevated roles require a separate admin
+workflow. If the monolith has no auth pattern, no auth-service is generated and an external IdP
+(Keycloak, Auth0, Okta) or a custom auth service must be provided.
+
+> **Security note:** The JWT secret used by the generated auth-service defaults to a placeholder
+> value at development time. Set the `JWT_SECRET` environment variable before any production
+> deployment — the service will log a loud warning at startup if the default is still in use.
 
 **Internal Call Token has a 30-second TTL**
 The signed JWT forwarded from the gateway to downstream services expires in 30 seconds. Long-running
