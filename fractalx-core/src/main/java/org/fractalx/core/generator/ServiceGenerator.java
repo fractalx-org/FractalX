@@ -29,6 +29,7 @@ import org.fractalx.core.generator.transformation.CodeTransformer;
 import org.fractalx.core.generator.transformation.SharedCodeCopier;
 import org.fractalx.core.generator.transformation.ServiceSecurityStep;
 import org.fractalx.core.generator.transformation.ValuePropertyDistributorStep;
+import org.fractalx.core.generator.transformation.ControllerCrudStep;
 import org.fractalx.core.generator.transformation.DecompositionHintsStep;
 import org.fractalx.core.gateway.SecurityAnalyzer;
 import org.fractalx.core.gateway.SecurityProfile;
@@ -209,6 +210,7 @@ public class ServiceGenerator {
                 new NetScopeServerAnnotationStep(),
                 new NetScopeClientGenerator(),
                 new NetScopeClientWiringStep(),
+                new ControllerCrudStep(),            // add missing POST/PUT endpoints to @RestController classes
                 new DecompositionHintsStep(),        // detect @Transactional/cache/event/aspect/scheduler patterns
                 new SagaMethodTransformer(),    // replaces cross-service calls with outboxPublisher.publish()
                 context -> {
