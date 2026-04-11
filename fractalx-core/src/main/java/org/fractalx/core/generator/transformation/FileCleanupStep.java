@@ -8,13 +8,18 @@ import org.fractalx.core.generator.ServiceFileGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.fractalx.core.model.FractalModule;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -52,13 +57,21 @@ public class FileCleanupStep implements ServiceFileGenerator {
 
     @Override
     public void generate(GenerationContext context) throws IOException {
-        List<String> targets = (filesToDelete != null) ? filesToDelete : detectStubs(context);
+        List<String> targets;
+        if (filesToDelete != null) {
+            targets = filesToDelete;
+        } else {
+            targets = new ArrayList<>(detectStubs(context));
+            targets.addAll(detectMisplacedComponents(context));
+            targets.addAll(detectCrossModuleEventListeners(context));
+        }
         if (targets.isEmpty()) {
             return;
         }
+        Set<String> targetSet = new HashSet<>(targets);
         try (Stream<Path> paths = Files.walk(context.getServiceRoot())) {
             paths.filter(Files::isRegularFile)
-                    .filter(p -> targets.contains(p.getFileName().toString()))
+                    .filter(p -> targetSet.contains(p.getFileName().toString()))
                     .forEach(this::deleteQuietly);
         }
     }
@@ -104,6 +117,126 @@ public class FileCleanupStep implements ServiceFileGenerator {
                  });
         }
         return stubs;
+    }
+
+    private static final Set<String> COMPONENT_ANNOTATIONS = Set.of(
+            "Component", "Service", "Repository", "Controller", "RestController",
+            "Configuration", "EventListener", "TransactionalEventListener"
+    );
+
+    /**
+     * Detects Spring component files that were copied into this service but whose package
+     * belongs to a different module's namespace. These are misplaced files — for example,
+     * an {@code @EventListener} class in {@code com.example.demo.order} that ended up in
+     * customer-service because it transitively imported a customer-module type.
+     *
+     * <p>Only component-annotated classes are removed this way; plain DTOs and enums that
+     * live in another module's package are kept because they may be legitimately shared
+     * (e.g., a request/response DTO used by a generated NetScope client).
+     */
+    private List<String> detectMisplacedComponents(GenerationContext context) throws IOException {
+        Set<String> otherModulePkgs = context.getAllModules().stream()
+                .filter(m -> !m.equals(context.getModule()))
+                .map(FractalModule::getPackageName)
+                .filter(Objects::nonNull)
+                .filter(p -> !p.isBlank())
+                .collect(Collectors.toSet());
+
+        if (otherModulePkgs.isEmpty()) return List.of();
+
+        JavaParser parser = new JavaParser();
+        List<String> misplaced = new ArrayList<>();
+
+        try (Stream<Path> paths = Files.walk(context.getSrcMainJava())) {
+            paths.filter(Files::isRegularFile)
+                 .filter(p -> p.toString().endsWith(".java"))
+                 .forEach(javaFile -> {
+                     try {
+                         CompilationUnit cu = parser.parse(javaFile).getResult().orElse(null);
+                         if (cu == null) return;
+
+                         String filePkg = cu.getPackageDeclaration()
+                                 .map(pd -> pd.getNameAsString())
+                                 .orElse("");
+
+                         boolean inOtherModulePkg = otherModulePkgs.stream()
+                                 .anyMatch(pkg -> filePkg.equals(pkg) || filePkg.startsWith(pkg + "."));
+                         if (!inOtherModulePkg) return;
+
+                         boolean isComponent = cu.findAll(ClassOrInterfaceDeclaration.class).stream()
+                                 .anyMatch(c -> c.getAnnotations().stream()
+                                         .anyMatch(a -> COMPONENT_ANNOTATIONS.contains(a.getNameAsString())));
+                         if (isComponent) {
+                             misplaced.add(javaFile.getFileName().toString());
+                             log.debug("Detected misplaced component in foreign module package: {}", javaFile.getFileName());
+                         }
+                     } catch (Exception e) {
+                         log.debug("Skipping {} during misplaced-component detection", javaFile);
+                     }
+                 });
+        }
+        return misplaced;
+    }
+
+    /**
+     * Detects Spring component files that contain {@code @EventListener} or
+     * {@code @TransactionalEventListener} methods whose event-parameter type is imported
+     * from another module's package. Such listeners relied on in-process Spring events
+     * that no longer work across JVM boundaries after decomposition; they are dead code
+     * in the generated service.
+     */
+    private List<String> detectCrossModuleEventListeners(GenerationContext context) throws IOException {
+        Set<String> otherModulePkgs = context.getAllModules().stream()
+                .filter(m -> !m.equals(context.getModule()))
+                .map(FractalModule::getPackageName)
+                .filter(Objects::nonNull)
+                .filter(p -> !p.isBlank())
+                .collect(Collectors.toSet());
+
+        if (otherModulePkgs.isEmpty()) return List.of();
+
+        JavaParser parser = new JavaParser();
+        List<String> listeners = new ArrayList<>();
+
+        try (Stream<Path> paths = Files.walk(context.getSrcMainJava())) {
+            paths.filter(Files::isRegularFile)
+                 .filter(p -> p.toString().endsWith(".java"))
+                 .forEach(javaFile -> {
+                     try {
+                         CompilationUnit cu = parser.parse(javaFile).getResult().orElse(null);
+                         if (cu == null) return;
+
+                         // Build a map: simple class name → FQN for all non-static imports
+                         Map<String, String> importMap = new java.util.HashMap<>();
+                         cu.getImports().stream()
+                           .filter(i -> !i.isStatic() && !i.isAsterisk())
+                           .forEach(i -> {
+                               String fqn = i.getNameAsString();
+                               importMap.put(fqn.substring(fqn.lastIndexOf('.') + 1), fqn);
+                           });
+
+                         boolean hasCrossModuleListener = cu.findAll(
+                                 com.github.javaparser.ast.body.MethodDeclaration.class).stream()
+                             .filter(m -> m.getAnnotationByName("EventListener").isPresent()
+                                       || m.getAnnotationByName("TransactionalEventListener").isPresent())
+                             .anyMatch(m -> m.getParameters().stream()
+                                 .anyMatch(param -> {
+                                     String fqn = importMap.get(param.getTypeAsString());
+                                     if (fqn == null) return false;
+                                     return otherModulePkgs.stream()
+                                             .anyMatch(pkg -> fqn.startsWith(pkg + "."));
+                                 }));
+
+                         if (hasCrossModuleListener) {
+                             listeners.add(javaFile.getFileName().toString());
+                             log.debug("Detected cross-module event listener for cleanup: {}", javaFile.getFileName());
+                         }
+                     } catch (Exception e) {
+                         log.debug("Skipping {} during cross-module listener detection", javaFile);
+                     }
+                 });
+        }
+        return listeners;
     }
 
     private void deleteQuietly(Path path) {
