@@ -279,7 +279,7 @@ public class GatewayGenerator {
                 }
                 """);
 
-        // Shim 6: WebFluxAutoConfiguration placeholder at old package path
+        // Shim 6b: WebFluxAutoConfiguration placeholder at old package path
         Files.writeString(reactiveWebDir.resolve("WebFluxAutoConfiguration.java"), """
                 package org.springframework.boot.autoconfigure.web.reactive;
 

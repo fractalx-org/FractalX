@@ -4,6 +4,7 @@ import org.fractalx.core.auth.AuthPattern;
 import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.gateway.RouteDefinition;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,7 +107,7 @@ public class GatewayConfigGenerator {
         // FractalX gateway uses Spring Cloud Gateway (reactive), not Feign. Excluding prevents startup failure
         // when spring-cloud-context is not on the classpath (Spring Boot 4.x).
         ymlBuilder.append("      - org.springframework.cloud.openfeign.FeignAutoConfiguration\n");
-        boolean isBoot4 = isBoot4Plus(cfg.springBootVersion());
+        boolean isBoot4 = SpringBootVersionUtil.isBoot4Plus(cfg.springBootVersion());
         if (isBoot4) {
             // spring-cloud-commons discovery auto-configurations use WebServerInitializedEvent from
             // org.springframework.boot.web.context which moved to .web.server.context in Boot 4.x.
@@ -231,7 +232,7 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("      exposure:\n");
         ymlBuilder.append("        include: health,info,gateway,routes,metrics\n");
         ymlBuilder.append("  endpoint:\n");
-        if (!isBoot4Plus(cfg.springBootVersion())) {
+        if (!SpringBootVersionUtil.isBoot4Plus(cfg.springBootVersion())) {
             // management.endpoint.gateway.enabled was removed in Spring Boot 4.x
             ymlBuilder.append("    gateway:\n");
             ymlBuilder.append("      enabled: true\n");
@@ -241,7 +242,7 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("  tracing:\n");
         ymlBuilder.append("    sampling:\n");
         ymlBuilder.append("      probability: 1.0\n");
-        if (isBoot4Plus(cfg.springBootVersion())) {
+        if (SpringBootVersionUtil.isBoot4Plus(cfg.springBootVersion())) {
             // Spring Boot 4.x: configure OTel exporter via management.otlp.tracing.endpoint
             // (custom OtelConfig bean conflicts with Boot 4.x managed OTel dependency versions)
             ymlBuilder.append("  otlp:\n");
@@ -305,11 +306,6 @@ public class GatewayConfigGenerator {
         // do NOT add RequestRateLimiter here; that factory requires Redis and is not registered.
 
         return route.toString();
-    }
-
-    private static boolean isBoot4Plus(String version) {
-        return version != null && !version.isBlank()
-                && Character.getNumericValue(version.charAt(0)) >= 4;
     }
 
     private int resolvePortConflict(int requestedPort, String serviceName) {

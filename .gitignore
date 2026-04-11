@@ -21,6 +21,11 @@ Thumbs.db
 # Generated
 generated-services/
 
+# Build artifacts / compiled classes at repo root (should never be committed)
+*.class
+/org/
+/logs/
+
 .idea
 /lib
 /fractalx-maven-plugin/.flattened-pom.xml
