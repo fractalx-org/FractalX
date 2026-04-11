@@ -1,6 +1,7 @@
 package org.fractalx.core.generator.admin;
 
 import org.fractalx.core.FractalxVersion;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -163,7 +164,7 @@ class AdminPomGenerator {
                     </build>
                 </project>
                 """.formatted(config.effectiveBasePackage(), config.springBootVersion(), FractalxVersion.get(),
-                        isBoot4Plus(config.springBootVersion()) ? """
+                        SpringBootVersionUtil.isBoot4Plus(config.springBootVersion()) ? """
 
                             <exclusions>
                                 <exclusion>
@@ -179,8 +180,4 @@ class AdminPomGenerator {
         log.debug("Generated admin pom.xml");
     }
 
-    private static boolean isBoot4Plus(String version) {
-        return version != null && !version.isBlank()
-                && Character.getNumericValue(version.charAt(0)) >= 4;
-    }
 }

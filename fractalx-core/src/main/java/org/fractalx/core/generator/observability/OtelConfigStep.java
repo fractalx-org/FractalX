@@ -3,6 +3,7 @@ package org.fractalx.core.generator.observability;
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,7 +44,7 @@ public class OtelConfigStep implements ServiceFileGenerator {
         String pkg     = context.servicePackage();
         Path   pkgPath = resolvePackage(context.getSrcMainJava(), pkg);
 
-        boolean isBoot4Plus = isBoot4Plus(context.getFractalxConfig().springBootVersion());
+        boolean isBoot4Plus = SpringBootVersionUtil.isBoot4Plus(context.getFractalxConfig().springBootVersion());
         if (!isBoot4Plus) {
             // OtelConfig.java uses the OTel SDK directly (OtlpGrpcSpanExporter, SdkTracerProvider, etc.)
             // which conflicts with Spring Boot 4.x's managed OTel versions. On Boot 4.x, Spring Boot
@@ -249,11 +250,6 @@ public class OtelConfigStep implements ServiceFileGenerator {
         for (String part : pkg.split("\\.")) p = p.resolve(part);
         Files.createDirectories(p);
         return p;
-    }
-
-    private static boolean isBoot4Plus(String version) {
-        return version != null && !version.isBlank()
-                && Character.getNumericValue(version.charAt(0)) >= 4;
     }
 
     private String toJavaId(String serviceName) {

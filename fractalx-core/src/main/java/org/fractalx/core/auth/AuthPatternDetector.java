@@ -70,13 +70,12 @@ public class AuthPatternDetector {
 
         AtomicReference<String> authPkg        = new AtomicReference<>();
         AtomicReference<String> userDetailsPkg = new AtomicReference<>();
-        boolean[] hasUserDetailsService = {false};
 
         JavaParser parser = new JavaParser();
 
         try (Stream<Path> paths = Files.walk(srcMain)) {
             paths.filter(p -> p.toString().endsWith(".java"))
-                 .forEach(p -> scan(p, parser, authPkg, userDetailsPkg, hasUserDetailsService));
+                 .forEach(p -> scan(p, parser, authPkg, userDetailsPkg));
         }
 
         boolean detected = jwtSecret != null
@@ -95,8 +94,7 @@ public class AuthPatternDetector {
 
     private void scan(Path javaFile, JavaParser parser,
                       AtomicReference<String> authPkg,
-                      AtomicReference<String> userDetailsPkg,
-                      boolean[] hasUDS) {
+                      AtomicReference<String> userDetailsPkg) {
         try {
             CompilationUnit cu = parser.parse(javaFile).getResult().orElse(null);
             if (cu == null) return;
@@ -130,12 +128,7 @@ public class AuthPatternDetector {
                     }
                 }
 
-                // ── Detect UserDetailsService impl ──────────────────────────
-                if (!hasUDS[0]) {
-                    boolean implementsUDS = cls.getImplementedTypes().stream()
-                            .anyMatch(t -> t.getNameAsString().equals("UserDetailsService"));
-                    if (implementsUDS) hasUDS[0] = true;
-                }
+                // ── Detect UserDetailsService impl (tracked via userDetailsPkg) ──
             }
         } catch (Exception e) {
             log.trace("Could not parse {} for auth pattern: {}", javaFile.getFileName(), e.getMessage());

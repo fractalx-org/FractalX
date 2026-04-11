@@ -2,6 +2,7 @@ package org.fractalx.core.generator.saga;
 
 import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.config.FractalxConfig;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.fractalx.core.datamanagement.DataReadmeGenerator;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.MethodParam;
@@ -243,7 +244,7 @@ public class SagaOrchestratorGenerator {
                         .replace("__FX_VERSION__", FractalxVersion.get())
                         .replace("__BASE_GROUP__", config.effectiveBasePackage())
                         .replace("__SB_VERSION__", config.springBootVersion())
-                        .replace("__CLOUD_EXCLUSIONS__", isBoot4Plus(config.springBootVersion())
+                        .replace("__CLOUD_EXCLUSIONS__", SpringBootVersionUtil.isBoot4Plus(config.springBootVersion())
                                 ? "\n                            <exclusions>\n"
                                 + "                                <exclusion>\n"
                                 + "                                    <groupId>org.springframework.cloud</groupId>\n"
@@ -1568,8 +1569,4 @@ public class SagaOrchestratorGenerator {
         Files.writeString(dir.resolve(filename), content);
     }
 
-    private static boolean isBoot4Plus(String version) {
-        return version != null && !version.isBlank()
-                && Character.getNumericValue(version.charAt(0)) >= 4;
-    }
 }

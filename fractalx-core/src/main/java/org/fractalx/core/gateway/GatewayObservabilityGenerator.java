@@ -1,6 +1,7 @@
 package org.fractalx.core.gateway;
 
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,7 +33,7 @@ public class GatewayObservabilityGenerator {
         generateTracingFilter(pkg);
         generateMetricsFilter(pkg, modules);
 
-        boolean isBoot4Plus = isBoot4Plus(springBootVersion);
+        boolean isBoot4Plus = SpringBootVersionUtil.isBoot4Plus(springBootVersion);
         if (!isBoot4Plus) {
             generateOtelConfig(pkg);
         } else {
@@ -358,11 +359,6 @@ public class GatewayObservabilityGenerator {
                 }
                 """;
         Files.writeString(pkg.resolve("GatewayTracingExclusionConfig.java"), content);
-    }
-
-    private static boolean isBoot4Plus(String version) {
-        return version != null && !version.isBlank()
-                && Character.getNumericValue(version.charAt(0)) >= 4;
     }
 
     private Path createPkg(Path base, String pkg) throws IOException {

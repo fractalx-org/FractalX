@@ -3,6 +3,7 @@ package org.fractalx.core.generator.service;
 import org.fractalx.core.generator.GenerationContext;
 import org.fractalx.core.generator.ServiceFileGenerator;
 import org.fractalx.core.model.FractalModule;
+import org.fractalx.core.util.SpringBootVersionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +49,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
         String samplingProbability = tracingEnabled ? "1.0" : "0.0";
         // Spring Boot 4.x: configure OTel exporter via management.otlp.tracing.endpoint instead of
         // a custom OtelConfig bean (which conflicts with Boot 4.x's managed OTel dependency versions).
-        boolean isBoot4 = isBoot4Plus(cfg.springBootVersion());
+        boolean isBoot4 = SpringBootVersionUtil.isBoot4Plus(cfg.springBootVersion());
         String otlpEndpointBlock = (tracingEnabled && isBoot4)
                 ? "  otlp:\n    tracing:\n      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:"
                     + cfg.otelEndpoint() + "}/v1/traces\n"
@@ -230,8 +231,4 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
         return sb.toString();
     }
 
-    private static boolean isBoot4Plus(String version) {
-        return version != null && !version.isBlank()
-                && Character.getNumericValue(version.charAt(0)) >= 4;
-    }
 }

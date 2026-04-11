@@ -295,7 +295,7 @@ public class OutboxGenerator {
                 import org.slf4j.Logger;
                 import org.slf4j.LoggerFactory;
                 import org.slf4j.MDC;
-                import org.springframework.beans.factory.annotation.Autowired;
+                import org.springframework.beans.factory.ObjectProvider;
                 import org.springframework.context.ApplicationEventPublisher;
                 import org.springframework.stereotype.Component;
                 import org.springframework.transaction.support.TransactionSynchronization;
@@ -318,17 +318,17 @@ public class OutboxGenerator {
                     private final OutboxRepository          outboxRepository;
                     private final ObjectMapper              objectMapper;
                     private final ApplicationEventPublisher eventPublisher;
-
-                    /** Optional — not auto-configured by Spring Boot 4.x unless tracing is on the classpath. */
-                    @Autowired(required = false)
-                    private Tracer tracer;
+                    /** Optional — present only when Micrometer Tracing is on the classpath. */
+                    private final Tracer                    tracer;
 
                     public OutboxPublisher(OutboxRepository outboxRepository,
                                            ObjectMapper objectMapper,
-                                           ApplicationEventPublisher eventPublisher) {
+                                           ApplicationEventPublisher eventPublisher,
+                                           ObjectProvider<Tracer> tracerProvider) {
                         this.outboxRepository = outboxRepository;
                         this.objectMapper     = objectMapper;
                         this.eventPublisher   = eventPublisher;
+                        this.tracer           = tracerProvider.getIfAvailable();
                     }
 
                     /**

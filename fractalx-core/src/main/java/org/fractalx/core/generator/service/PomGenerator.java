@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.fractalx.core.util.SpringBootVersionUtil;
 
 /**
  * Generates pom.xml for a microservice by cloning the monolith pom and applying
@@ -129,8 +130,7 @@ public class PomGenerator implements ServiceFileGenerator {
             removePluginByArtifact(doc, "fractalx-maven-plugin");
             // spring-boot-starter-aop removed from Spring Boot 4.x; strip it so it doesn't
             // appear without a managed version in the generated pom
-            boolean isBoot4Plus = cfg.springBootVersion() != null && !cfg.springBootVersion().isBlank()
-                    && Character.getNumericValue(cfg.springBootVersion().charAt(0)) >= 4;
+            boolean isBoot4Plus = SpringBootVersionUtil.isBoot4Plus(cfg.springBootVersion());
             if (isBoot4Plus) removeDependencyByArtifact(doc, "spring-boot-starter-aop");
             pruneAndResolveUnusedDeps(doc, module.getDetectedImports(), monolithProps,
                     module.getServiceName());
@@ -165,8 +165,7 @@ public class PomGenerator implements ServiceFileGenerator {
      * monolith pom cannot be found or parsed.
      */
     private String buildPomFromScratch(FractalModule module, FractalxConfig cfg) {
-        boolean isBoot4Plus = cfg.springBootVersion() != null && !cfg.springBootVersion().isBlank()
-                && Character.getNumericValue(cfg.springBootVersion().charAt(0)) >= 4;
+        boolean isBoot4Plus = SpringBootVersionUtil.isBoot4Plus(cfg.springBootVersion());
 
         // spring-boot-starter-aop removed from Spring Boot 4.x
         String aopDep = isBoot4Plus ? "" : """
@@ -481,8 +480,7 @@ public class PomGenerator implements ServiceFileGenerator {
      * (copied from monolith or previously added).
      */
     private void addFractalxDeps(Document doc, String springBootVersion) {
-        boolean isBoot4Plus = springBootVersion != null && !springBootVersion.isBlank()
-                && Character.getNumericValue(springBootVersion.charAt(0)) >= 4;
+        boolean isBoot4Plus = SpringBootVersionUtil.isBoot4Plus(springBootVersion);
         Element depsEl = ensureDependenciesElement(doc);
         addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-web",        null,                    null);
         addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-validation", null,                    null);
