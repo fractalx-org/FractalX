@@ -4,6 +4,7 @@ import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.config.FractalxConfigReader;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.validation.rules.CircularDependencyRule;
+import org.fractalx.core.validation.rules.ControllerOwnershipConflictRule;
 import org.fractalx.core.validation.rules.DuplicatePortRule;
 import org.fractalx.core.validation.rules.DuplicateServiceNameRule;
 import org.fractalx.core.validation.rules.InfrastructurePortConflictRule;
@@ -111,6 +112,7 @@ public class DecompositionValidator {
                 // Source-tree analysis — requires I/O
                 new LombokConstructorRule(),
                 new RepositoryBoundaryRule(),
+                new ControllerOwnershipConflictRule(),
                 new SagaIntegrityRule()
         );
     }
