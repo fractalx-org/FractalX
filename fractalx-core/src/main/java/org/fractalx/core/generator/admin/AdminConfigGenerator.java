@@ -40,6 +40,10 @@ class AdminConfigGenerator {
                       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
                       - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
                       - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+                      - org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration
+                      # FractalX services use gRPC/NetScope, not Feign. Excluding prevents startup failure
+                      # when spring-cloud-context is not on the classpath (e.g. Spring Boot 4.x).
+                      - org.springframework.cloud.openfeign.FeignAutoConfiguration
                   data:
                     jpa:
                       repositories:

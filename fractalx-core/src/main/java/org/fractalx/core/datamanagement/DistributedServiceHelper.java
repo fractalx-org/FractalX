@@ -57,7 +57,8 @@ public class DistributedServiceHelper {
      * @param basePackage     the generated base package (e.g. "com.acme.generated.orderservice")
      */
     public void upgradeService(FractalModule module, Path sourceRoot, Path serviceRoot,
-                               List<SagaDefinition> sagaDefinitions, String basePackage) throws IOException {
+                               List<SagaDefinition> sagaDefinitions, String basePackage,
+                               String springBootVersion) throws IOException {
         Path srcMainJava      = serviceRoot.resolve("src/main/java");
         Path srcMainResources = serviceRoot.resolve("src/main/resources");
 
@@ -65,7 +66,7 @@ public class DistributedServiceHelper {
 
         // 1. Enforce data isolation (dual-package @EntityScan + @EnableJpaRepositories)
         if (hasJpaContent(module)) {
-            isolationGen.generateIsolationConfig(module, srcMainJava, basePackage);
+            isolationGen.generateIsolationConfig(module, srcMainJava, basePackage, springBootVersion);
         } else {
             log.info("   ⏭ No JPA entities in {} — skipping IsolationConfig", module.getServiceName());
         }

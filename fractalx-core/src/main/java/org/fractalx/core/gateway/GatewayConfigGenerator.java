@@ -1,5 +1,6 @@
 package org.fractalx.core.gateway;
 
+import org.fractalx.core.auth.AuthPattern;
 import org.fractalx.core.config.FractalxConfig;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.gateway.RouteDefinition;
@@ -48,20 +49,40 @@ public class GatewayConfigGenerator {
                                List<RouteDefinition> routes,
                                FractalxConfig cfg,
                                SecurityProfile securityProfile) throws IOException {
+        generateConfig(srcMainResources, modules, routes, cfg, securityProfile, null);
+    }
+
+    public void generateConfig(Path srcMainResources,
+                               List<FractalModule> modules,
+                               List<RouteDefinition> routes,
+                               FractalxConfig cfg,
+                               SecurityProfile securityProfile,
+                               AuthPattern authPattern) throws IOException {
         log.debug("Generating gateway configuration");
         Files.writeString(srcMainResources.resolve("application.yml"),
-                generateApplicationYml(modules, cfg, securityProfile));
+                generateApplicationYml(modules, cfg, securityProfile, authPattern));
         log.info("✓ Generated gateway configuration");
     }
 
     private String generateApplicationYml(List<FractalModule> modules, FractalxConfig cfg,
                                            SecurityProfile securityProfile) {
+        return generateApplicationYml(modules, cfg, securityProfile, null);
+    }
+
+    private String generateApplicationYml(List<FractalModule> modules, FractalxConfig cfg,
+                                           SecurityProfile securityProfile, AuthPattern authPattern) {
         if (modules == null || modules.isEmpty()) {
             log.warn("No modules provided for gateway configuration");
             modules = new ArrayList<>(); // Use empty list to avoid NPE
         }
 
         StringBuilder routesConfig = new StringBuilder();
+
+        // Prepend auth-service route when the monolith auth pattern was detected
+        if (authPattern != null && authPattern.detected()) {
+            routesConfig.append(generateAuthServiceRoute());
+            log.info("Prepending auth-service route (/api/auth/**) to gateway configuration");
+        }
 
         for (FractalModule module : modules) {
             routesConfig.append(generateServiceRoute(module));
@@ -76,17 +97,59 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("spring:\n");
         ymlBuilder.append("  application:\n");
         ymlBuilder.append("    name: fractalx-gateway\n");
+        ymlBuilder.append("  profiles:\n");
+        ymlBuilder.append("    active: ${SPRING_PROFILES_ACTIVE:dev}\n");
+        ymlBuilder.append("  autoconfigure:\n");
+        ymlBuilder.append("    exclude:\n");
+        ymlBuilder.append("      - org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration\n");
+        ymlBuilder.append("      - org.springframework.cloud.autoconfigure.RefreshAutoConfiguration\n");
+        // FractalX gateway uses Spring Cloud Gateway (reactive), not Feign. Excluding prevents startup failure
+        // when spring-cloud-context is not on the classpath (Spring Boot 4.x).
+        ymlBuilder.append("      - org.springframework.cloud.openfeign.FeignAutoConfiguration\n");
+        boolean isBoot4 = isBoot4Plus(cfg.springBootVersion());
+        if (isBoot4) {
+            // spring-cloud-commons discovery auto-configurations use WebServerInitializedEvent from
+            // org.springframework.boot.web.context which moved to .web.server.context in Boot 4.x.
+            ymlBuilder.append("      - org.springframework.cloud.client.discovery.simple.SimpleDiscoveryClientAutoConfiguration\n");
+            ymlBuilder.append("      - org.springframework.cloud.client.discovery.simple.reactive.SimpleReactiveDiscoveryClientAutoConfiguration\n");
+            ymlBuilder.append("      - org.springframework.cloud.client.loadbalancer.LoadBalancerAutoConfiguration\n");
+        }
         ymlBuilder.append("  main:\n");
         ymlBuilder.append("    web-application-type: reactive\n\n");
-        ymlBuilder.append("  cloud:\n");
-        ymlBuilder.append("    gateway:\n");
-        ymlBuilder.append("      default-filters:\n");
-        ymlBuilder.append("        - name: Retry\n");
-        ymlBuilder.append("          args:\n");
-        ymlBuilder.append("            retries: 2\n");
-        ymlBuilder.append("            statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT\n");
-        ymlBuilder.append("      routes:\n");
-        ymlBuilder.append(routesConfig.toString());
+        if (isBoot4) {
+            // Spring Cloud 2025.x compatibility verifier rejects Spring Boot 4.x as "incompatible"
+            // because it only knows about Boot 3.x. Disable the check since we handle compatibility manually.
+            ymlBuilder.append("  cloud:\n");
+            ymlBuilder.append("    compatibility-verifier:\n");
+            ymlBuilder.append("      enabled: false\n");
+        } else {
+            ymlBuilder.append("  cloud:\n");
+        }
+        if (isBoot4) {
+            // Spring Cloud 2025.x with Spring Boot 4.x renamed the gateway config namespace.
+            ymlBuilder.append("    gateway:\n");
+            ymlBuilder.append("      server:\n");
+            ymlBuilder.append("        webflux:\n");
+            ymlBuilder.append("          default-filters:\n");
+            ymlBuilder.append("            - name: Retry\n");
+            ymlBuilder.append("              args:\n");
+            ymlBuilder.append("                retries: 2\n");
+            ymlBuilder.append("                statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT\n");
+            ymlBuilder.append("          routes:\n");
+            // Routes config uses the same route format, indent 10 spaces
+            for (String line : routesConfig.toString().split("\n", -1)) {
+                ymlBuilder.append("    ").append(line).append("\n");
+            }
+        } else {
+            ymlBuilder.append("    gateway:\n");
+            ymlBuilder.append("      default-filters:\n");
+            ymlBuilder.append("        - name: Retry\n");
+            ymlBuilder.append("          args:\n");
+            ymlBuilder.append("            retries: 2\n");
+            ymlBuilder.append("            statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT\n");
+            ymlBuilder.append("      routes:\n");
+            ymlBuilder.append(routesConfig.toString());
+        }
         ymlBuilder.append("\n");
 
         // Security defaults driven by detected monolith security profile
@@ -94,8 +157,11 @@ public class GatewayConfigGenerator {
         boolean bearerOn    = securityProfile.authType() == SecurityProfile.AuthType.BEARER_JWT;
         boolean oauth2On    = securityProfile.authType() == SecurityProfile.AuthType.OAUTH2;
         boolean basicOn     = securityProfile.authType() == SecurityProfile.AuthType.BASIC;
-        String  jwtSecret   = securityProfile.jwtSecret()   != null ? securityProfile.jwtSecret()
-                              : "fractalx-default-secret-change-in-prod-min-32chars!!";
+        // Prefer: (1) security profile secret, (2) auth-pattern detected secret, (3) default
+        String  jwtSecret   = securityProfile.jwtSecret() != null ? securityProfile.jwtSecret()
+                              : (authPattern != null && authPattern.detected())
+                                    ? authPattern.effectiveSecret()
+                                    : "fractalx-default-secret-change-in-prod-min-32chars!!";
         String  jwkUri      = securityProfile.jwkSetUri()   != null ? securityProfile.jwkSetUri()
                               : securityProfile.issuerUri() != null ? securityProfile.issuerUri()
                               : cfg.oauth2JwksUri();
@@ -165,13 +231,23 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("      exposure:\n");
         ymlBuilder.append("        include: health,info,gateway,routes,metrics\n");
         ymlBuilder.append("  endpoint:\n");
-        ymlBuilder.append("    gateway:\n");
-        ymlBuilder.append("      enabled: true\n");
+        if (!isBoot4Plus(cfg.springBootVersion())) {
+            // management.endpoint.gateway.enabled was removed in Spring Boot 4.x
+            ymlBuilder.append("    gateway:\n");
+            ymlBuilder.append("      enabled: true\n");
+        }
         ymlBuilder.append("    health:\n");
         ymlBuilder.append("      show-details: always\n");
         ymlBuilder.append("  tracing:\n");
         ymlBuilder.append("    sampling:\n");
         ymlBuilder.append("      probability: 1.0\n");
+        if (isBoot4Plus(cfg.springBootVersion())) {
+            // Spring Boot 4.x: configure OTel exporter via management.otlp.tracing.endpoint
+            // (custom OtelConfig bean conflicts with Boot 4.x managed OTel dependency versions)
+            ymlBuilder.append("  otlp:\n");
+            ymlBuilder.append("    tracing:\n");
+            ymlBuilder.append("      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}/v1/traces\n");
+        }
         ymlBuilder.append("\n");
 
         ymlBuilder.append("logging:\n");
@@ -183,6 +259,18 @@ public class GatewayConfigGenerator {
         ymlBuilder.append("    com.netflix.discovery: OFF\n");
 
         return ymlBuilder.toString();
+    }
+
+    private String generateAuthServiceRoute() {
+        // auth-service runs on port 8090 and handles /api/auth/** — no circuit breaker needed
+        // because auth failures are intentional (wrong credentials) and should reach the client.
+        return "        # auth-service (generated by FractalX — handles login + registration)\n"
+             + "        - id: auth-service\n"
+             + "          uri: http://localhost:8090\n"
+             + "          predicates:\n"
+             + "            - Path=/api/auth/**\n"
+             + "          filters:\n"
+             + "            - StripPrefix=0\n";
     }
 
     private String generateServiceRoute(FractalModule module) {
@@ -217,6 +305,11 @@ public class GatewayConfigGenerator {
         // do NOT add RequestRateLimiter here; that factory requires Redis and is not registered.
 
         return route.toString();
+    }
+
+    private static boolean isBoot4Plus(String version) {
+        return version != null && !version.isBlank()
+                && Character.getNumericValue(version.charAt(0)) >= 4;
     }
 
     private int resolvePortConflict(int requestedPort, String serviceName) {

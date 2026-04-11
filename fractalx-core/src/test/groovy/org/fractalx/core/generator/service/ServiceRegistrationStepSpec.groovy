@@ -81,7 +81,7 @@ class ServiceRegistrationStepSpec extends Specification {
         def c = client()
         c.contains("public void register(")
         c.contains("public void deregister(")
-        c.contains("public void heartbeat(")
+        c.contains("public boolean heartbeat(")
     }
 
     def "ServiceRegistrationAutoConfig is @ConditionalOnProperty fractalx.registry.enabled"() {
@@ -111,14 +111,15 @@ class ServiceRegistrationStepSpec extends Specification {
         autoConfig().contains("onShutdown()")
     }
 
-    def "ServiceRegistrationAutoConfig sends heartbeat via @Scheduled every 30s"() {
+    def "ServiceRegistrationAutoConfig sends heartbeat via @Scheduled every 5s with re-register on failure"() {
         when:
         step.generate(ctx(module))
 
         then:
         autoConfig().contains("@Scheduled")
-        autoConfig().contains("30_000")
+        autoConfig().contains("5_000")
         autoConfig().contains("sendHeartbeat()")
+        autoConfig().contains("onStartup()")
     }
 
     def "ServiceRegistrationAutoConfig bakes in the correct default HTTP port"() {

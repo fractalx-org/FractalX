@@ -186,7 +186,7 @@ public class SagaOrchestratorGenerator {
                         <dependency>
                             <groupId>org.fractalx</groupId>
                             <artifactId>fractalx-runtime</artifactId>
-                            <version>__FX_VERSION__</version>
+                            <version>__FX_VERSION__</version>__CLOUD_EXCLUSIONS__
                         </dependency>
                         <dependency>
                             <groupId>com.h2database</groupId>
@@ -242,7 +242,19 @@ public class SagaOrchestratorGenerator {
                 sb.toString()
                         .replace("__FX_VERSION__", FractalxVersion.get())
                         .replace("__BASE_GROUP__", config.effectiveBasePackage())
-                        .replace("__SB_VERSION__", config.springBootVersion()));
+                        .replace("__SB_VERSION__", config.springBootVersion())
+                        .replace("__CLOUD_EXCLUSIONS__", isBoot4Plus(config.springBootVersion())
+                                ? "\n                            <exclusions>\n"
+                                + "                                <exclusion>\n"
+                                + "                                    <groupId>org.springframework.cloud</groupId>\n"
+                                + "                                    <artifactId>spring-cloud-context</artifactId>\n"
+                                + "                                </exclusion>\n"
+                                + "                                <exclusion>\n"
+                                + "                                    <groupId>org.springframework.cloud</groupId>\n"
+                                + "                                    <artifactId>spring-cloud-commons</artifactId>\n"
+                                + "                                </exclusion>\n"
+                                + "                            </exclusions>"
+                                : ""));
     }
 
     private void writeApplicationClass(Path srcMainJava, String basePackage) throws IOException {
@@ -327,6 +339,12 @@ public class SagaOrchestratorGenerator {
                 "spring:\n"
                 + "  application:\n"
                 + "    name: fractalx-saga-orchestrator\n"
+                + "  autoconfigure:\n"
+                + "    exclude:\n"
+                + "      - org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration\n"
+                + "      # FractalX services use gRPC/NetScope, not Feign. Excluding prevents startup failure\n"
+                + "      # when spring-cloud-context is not on the classpath (e.g. Spring Boot 4.x).\n"
+                + "      - org.springframework.cloud.openfeign.FeignAutoConfiguration\n"
                 + "  datasource:\n"
                 + "    url: jdbc:h2:mem:saga_db\n"
                 + "    driver-class-name: org.h2.Driver\n"
@@ -1548,5 +1566,10 @@ public class SagaOrchestratorGenerator {
     private void writeFile(Path dir, String filename, String content) throws IOException {
         Files.createDirectories(dir);
         Files.writeString(dir.resolve(filename), content);
+    }
+
+    private static boolean isBoot4Plus(String version) {
+        return version != null && !version.isBlank()
+                && Character.getNumericValue(version.charAt(0)) >= 4;
     }
 }

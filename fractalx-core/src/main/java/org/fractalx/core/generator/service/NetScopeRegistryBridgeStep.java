@@ -56,14 +56,12 @@ public class NetScopeRegistryBridgeStep implements ServiceFileGenerator {
         }
 
         String peerLoops = """
+                        // Resolve peers in background — do NOT block the startup thread so that
+                        // self-registration (ServiceRegistrationAutoConfig) can proceed immediately.
                         ExecutorService executor = Executors.newFixedThreadPool(%d);
-                        try {
-                            CompletableFuture.allOf(
+                        CompletableFuture.allOf(
                 %s
-                            ).join();
-                        } finally {
-                            executor.shutdown();
-                        }
+                        ).whenComplete((v, ex) -> executor.shutdown());
                 """.formatted(dependencies.size(), futuresStr);
 
         String content = """
