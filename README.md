@@ -1,6 +1,5 @@
 # FractalX
 
-[![Build](https://github.com/Project-FractalX/FractalX/actions/workflows/ci.yml/badge.svg)](https://github.com/Project-FractalX/FractalX/actions)
 [![Maven Central](https://img.shields.io/badge/maven--central-0.3.2-blue)](https://central.sonatype.com/artifact/org.fractalx/fractalx-annotations)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Java](https://img.shields.io/badge/java-17%2B-orange)](https://adoptium.net/)
