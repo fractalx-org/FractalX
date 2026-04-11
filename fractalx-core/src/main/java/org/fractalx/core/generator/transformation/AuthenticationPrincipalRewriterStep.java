@@ -6,10 +6,13 @@ import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
+import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.CastExpr;
+import com.github.javaparser.ast.expr.ConditionalExpr;
 import com.github.javaparser.ast.expr.EnclosedExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.NullLiteralExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import org.fractalx.core.generator.GenerationContext;
@@ -214,13 +217,28 @@ public class AuthenticationPrincipalRewriterStep implements ServiceFileGenerator
                     new NodeList<>(new StringLiteralExpr(attrKey)));
 
             if (returnType != null && isNumberType(returnType)) {
-                // Safe numeric conversion: ((Number) principal.getAttribute("key")).longValue()
-                String convMethod = toLongConversion(returnType);
-                MethodCallExpr converted = new MethodCallExpr(
-                        new EnclosedExpr(new CastExpr(
-                                new ClassOrInterfaceType(null, "Number"), getAttrCall)),
-                        convMethod);
-                call.replace(converted);
+                // Claims are stored as Strings in the JWT (see AuthServiceGenerator / JwtBearerFilter).
+                // Use String.valueOf() before parsing so this handles both String and Number attributes.
+                // Wrap in a null check so missing claims return null rather than throwing NPE/NFE:
+                //   principal.getAttribute("customerId") != null
+                //       ? Long.parseLong(String.valueOf(principal.getAttribute("customerId")))
+                //       : null
+                MethodCallExpr getAttrForCheck = new MethodCallExpr(
+                        new NameExpr(paramName), "getAttribute",
+                        new NodeList<>(new StringLiteralExpr(attrKey)));
+                MethodCallExpr stringValueOf = new MethodCallExpr(
+                        new NameExpr("String"), "valueOf", new NodeList<>(getAttrCall));
+                MethodCallExpr parsed = new MethodCallExpr(
+                        new NameExpr(toParseClass(returnType)),
+                        toParseMethod(returnType),
+                        new NodeList<>(stringValueOf));
+                ConditionalExpr nullSafe = new ConditionalExpr(
+                        new EnclosedExpr(new BinaryExpr(
+                                getAttrForCheck, new NullLiteralExpr(),
+                                BinaryExpr.Operator.NOT_EQUALS)),
+                        parsed,
+                        new NullLiteralExpr());
+                call.replace(nullSafe);
             } else if (returnType != null) {
                 call.replace(new EnclosedExpr(
                         new CastExpr(new ClassOrInterfaceType(null, returnType), getAttrCall)));
@@ -254,13 +272,21 @@ public class AuthenticationPrincipalRewriterStep implements ServiceFileGenerator
         };
     }
 
-    private static String toLongConversion(String type) {
+    private static String toParseClass(String type) {
         return switch (type) {
-            case "Long", "long"     -> "longValue";
-            case "Integer", "int"   -> "intValue";
-            case "Double", "double" -> "doubleValue";
-            case "Float", "float"   -> "floatValue";
-            default                 -> "longValue";
+            case "Integer", "int"   -> "Integer";
+            case "Double", "double" -> "Double";
+            case "Float", "float"   -> "Float";
+            default                 -> "Long";
+        };
+    }
+
+    private static String toParseMethod(String type) {
+        return switch (type) {
+            case "Integer", "int"   -> "parseInt";
+            case "Double", "double" -> "parseDouble";
+            case "Float", "float"   -> "parseFloat";
+            default                 -> "parseLong";
         };
     }
 
