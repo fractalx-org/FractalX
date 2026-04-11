@@ -1,0 +1,371 @@
+2026-04-11T06:47:03.746+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] c.f.g.o.OrderServiceApplication          : Starting OrderServiceApplication v0.0.1-SNAPSHOT using Java 22.0.2 with PID 66965 (/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar started by sathnindu in /Users/sathnindu/Develop/fractalx/FractalX)
+2026-04-11T06:47:03.748+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] c.f.g.o.OrderServiceApplication          : The following 1 profile is active: "dev"
+2026-04-11T06:47:03.830+05:30 [NO_CORR] INFO  66965 --- [demo] [kground-preinit] o.h.validator.internal.util.Version      : HV000001: Hibernate Validator 9.0.1.Final
+2026-04-11T06:47:04.102+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: scanning packages [com.fractalx.generated.orderservice, com.example.demo.order, org.fractalx.runtime] for @NetScopeClient interfaces
+2026-04-11T06:47:04.105+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/AggregateExistsClient.class]
+2026-04-11T06:47:04.105+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/CorrelationExistsClient.class]
+2026-04-11T06:47:04.105+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/CustomerExistsClient.class]
+2026-04-11T06:47:04.106+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'aggregateExistsClient' for com.fractalx.generated.orderservice.validation.AggregateExistsClient
+2026-04-11T06:47:04.106+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'correlationExistsClient' for com.fractalx.generated.orderservice.validation.CorrelationExistsClient
+2026-04-11T06:47:04.106+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'customerExistsClient' for com.fractalx.generated.orderservice.validation.CustomerExistsClient
+2026-04-11T06:47:04.106+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/example/demo/order/CustomerServiceClient.class]
+2026-04-11T06:47:04.106+05:30 [NO_CORR] DEBUG 66965 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'customerServiceClient' for com.example.demo.order.CustomerServiceClient
+2026-04-11T06:47:04.336+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] o.f.r.NetScopeGrpcServerBeanOverrider    : NetScopeGrpcServerBeanOverrider: replaced 'netScopeGrpcServer' with CorrelationAwareNetScopeGrpcServer
+2026-04-11T06:47:04.508+05:30 [NO_CORR] WARN  66965 --- [demo] [           main] trationDelegate$BeanPostProcessorChecker : Bean 'fractalXRuntimeAutoConfiguration' of type [org.fractalx.runtime.FractalXRuntimeAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). The currently created BeanPostProcessor [netScopeGrpcInterceptorConfigurer] is declared through a non-static factory method on that class; consider declaring it as static instead.
+2026-04-11T06:47:04.519+05:30 [NO_CORR] WARN  66965 --- [demo] [           main] trationDelegate$BeanPostProcessorChecker : Bean 'netScopeContextInterceptor' of type [org.fractalx.runtime.NetScopeContextInterceptor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [netScopeGrpcInterceptorConfigurer]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+2026-04-11T06:47:04.697+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] o.a.coyote.http11.Http11NioProtocol      : Initializing ProtocolHandler ["http-nio-8082"]
+2026-04-11T06:47:04.698+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-04-11T06:47:04.698+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.20]
+2026-04-11T06:47:04.958+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] org.hibernate.orm.jpa                    : HHH008540: Processing PersistenceUnitInfo [name: default]
+2026-04-11T06:47:04.988+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] org.hibernate.orm.core                   : HHH000001: Hibernate ORM core version 7.2.7.Final
+2026-04-11T06:47:05.187+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-04-11T06:47:05.237+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@429dde4d
+2026-04-11T06:47:05.237+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-04-11T06:47:05.266+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [jdbc:postgresql://localhost:5432/frx_1]
+	Database driver: PostgreSQL JDBC Driver
+	Database dialect: PostgreSQLDialect
+	Database version: 16.6
+	Default catalog/schema: frx_1/public
+	Autocommit mode: undefined/unknown
+	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+	JDBC fetch size: none
+	Pool: DataSourceConnectionProvider
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-04-11T06:47:05.691+05:30 [NO_CORR] INFO  66965 --- [demo] [           main] org.hibernate.orm.core                   : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-04-11T06:47:05.736+05:30 [NO_CORR] WARN  66965 --- [demo] [           main] o.h.t.s.i.ExceptionHandlerLoggedImpl     : GenerationTarget encountered exception accepting command : Error executing DDL "alter table if exists orders alter column customer_id set data type varchar(255)" via JDBC [ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.]
+org.hibernate.tool.schema.spi.CommandAcceptanceException: Error executing DDL "alter table if exists orders alter column customer_id set data type varchar(255)" via JDBC [ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.]
+	at org.hibernate.tool.schema.internal.exec.GenerationTargetToDatabase.accept(GenerationTargetToDatabase.java:81)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.applySqlString(AbstractSchemaMigrator.java:566)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.applySqlStrings(AbstractSchemaMigrator.java:506)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.migrateTable(AbstractSchemaMigrator.java:324)
+	at org.hibernate.tool.schema.internal.GroupedSchemaMigratorImpl.performTablesMigration(GroupedSchemaMigratorImpl.java:84)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.performMigration(AbstractSchemaMigrator.java:220)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.doMigration(AbstractSchemaMigrator.java:96)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.performDatabaseAction(SchemaManagementToolCoordinator.java:269)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.lambda$process$1(SchemaManagementToolCoordinator.java:101)
+	at java.base/java.util.HashMap.forEach(HashMap.java:1429)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.process(SchemaManagementToolCoordinator.java:100)
+	at org.hibernate.boot.internal.SessionFactoryObserverForSchemaExport.sessionFactoryCreated(SessionFactoryObserverForSchemaExport.java:35)
+	at org.hibernate.internal.SessionFactoryObserverChain.sessionFactoryCreated(SessionFactoryObserverChain.java:33)
+	at org.hibernate.internal.SessionFactoryImpl.<init>(SessionFactoryImpl.java:323)
+	at org.hibernate.internal.SessionFactoryRegistry.instantiateSessionFactory(SessionFactoryRegistry.java:64)
+	at org.hibernate.boot.internal.SessionFactoryBuilderImpl.build(SessionFactoryBuilderImpl.java:437)
+	at org.hibernate.jpa.boot.internal.EntityManagerFactoryBuilderImpl.build(EntityManagerFactoryBuilderImpl.java:1456)
+	at org.springframework.orm.jpa.vendor.SpringHibernateJpaPersistenceProvider.createContainerEntityManagerFactory(SpringHibernateJpaPersistenceProvider.java:93)
+	at org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean.createNativeEntityManagerFactory(LocalContainerEntityManagerFactoryBean.java:443)
+	at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.buildNativeEntityManagerFactory(AbstractEntityManagerFactoryBean.java:436)
+	at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.afterPropertiesSet(AbstractEntityManagerFactoryBean.java:411)
+	at org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean.afterPropertiesSet(LocalContainerEntityManagerFactoryBean.java:419)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.invokeInitMethods(AbstractAutowireCapableBeanFactory.java:1864)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1813)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:603)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:331)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:201)
+	at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:977)
+	at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:621)
+	at org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContext.refresh(ServletWebServerApplicationContext.java:143)
+	at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:756)
+	at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:445)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:321)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1365)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1354)
+	at com.fractalx.generated.orderservice.OrderServiceApplication.main(OrderServiceApplication.java:20)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.springframework.boot.loader.launch.Launcher.launch(Launcher.java:106)
+	at org.springframework.boot.loader.launch.Launcher.launch(Launcher.java:64)
+	at org.springframework.boot.loader.launch.JarLauncher.main(JarLauncher.java:40)
+Caused by: org.postgresql.util.PSQLException: ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.
+	at org.postgresql.core.v3.QueryExecutorImpl.receiveErrorResponse(QueryExecutorImpl.java:2875)
+	at org.postgresql.core.v3.QueryExecutorImpl.processResults(QueryExecutorImpl.java:2560)
+	at org.postgresql.core.v3.QueryExecutorImpl.execute(QueryExecutorImpl.java:429)
+	at org.postgresql.jdbc.PgStatement.executeInternal(PgStatement.java:526)
+	at org.postgresql.jdbc.PgStatement.execute(PgStatement.java:436)
+	at org.postgresql.jdbc.PgStatement.executeWithFlags(PgStatement.java:358)
+	at org.postgresql.jdbc.PgStatement.executeCachedSql(PgStatement.java:343)
+	at org.postgresql.jdbc.PgStatement.executeWithFlags(PgStatement.java:319)
+	at org.postgresql.jdbc.PgStatement.execute(PgStatement.java:314)
+	at com.zaxxer.hikari.pool.ProxyStatement.execute(ProxyStatement.java:95)
+	at com.zaxxer.hikari.pool.HikariProxyStatement.execute(HikariProxyStatement.java)
+	at org.hibernate.tool.schema.internal.exec.GenerationTargetToDatabase.accept(GenerationTargetToDatabase.java:76)
+	... 43 common frames omitted
+2026-04-11T06:47:05.797+05:30 [NO_CORR] WARN  66965 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 1/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T06:47:06.101+05:30 [NO_CORR] WARN  66965 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 2/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T06:47:06.707+05:30 [NO_CORR] WARN  66965 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 3/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T06:47:07.909+05:30 [NO_CORR] WARN  66965 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 4/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T06:47:10.316+05:30 [NO_CORR] WARN  66965 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 5/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T06:47:15.123+05:30 [NO_CORR] WARN  66965 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 6/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T06:47:20.126+05:30 [NO_CORR] WARN  66965 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 7/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T06:47:25.133+05:30 [NO_CORR] WARN  66965 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 8/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:20.674+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] c.f.g.o.OrderServiceApplication          : Starting OrderServiceApplication v0.0.1-SNAPSHOT using Java 22.0.2 with PID 90383 (/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar started by sathnindu in /Users/sathnindu/Develop/fractalx/FractalX)
+2026-04-11T08:24:20.676+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] c.f.g.o.OrderServiceApplication          : The following 1 profile is active: "dev"
+2026-04-11T08:24:20.779+05:30 [NO_CORR] INFO  90383 --- [demo] [kground-preinit] o.h.validator.internal.util.Version      : HV000001: Hibernate Validator 9.0.1.Final
+2026-04-11T08:24:21.068+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: scanning packages [com.fractalx.generated.orderservice, com.example.demo.order, org.fractalx.runtime] for @NetScopeClient interfaces
+2026-04-11T08:24:21.068+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/AggregateExistsClient.class]
+2026-04-11T08:24:21.069+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/CorrelationExistsClient.class]
+2026-04-11T08:24:21.069+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/CustomerExistsClient.class]
+2026-04-11T08:24:21.069+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'aggregateExistsClient' for com.fractalx.generated.orderservice.validation.AggregateExistsClient
+2026-04-11T08:24:21.070+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'correlationExistsClient' for com.fractalx.generated.orderservice.validation.CorrelationExistsClient
+2026-04-11T08:24:21.070+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'customerExistsClient' for com.fractalx.generated.orderservice.validation.CustomerExistsClient
+2026-04-11T08:24:21.070+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/example/demo/order/CustomerServiceClient.class]
+2026-04-11T08:24:21.070+05:30 [NO_CORR] DEBUG 90383 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'customerServiceClient' for com.example.demo.order.CustomerServiceClient
+2026-04-11T08:24:21.365+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] o.f.r.NetScopeGrpcServerBeanOverrider    : NetScopeGrpcServerBeanOverrider: replaced 'netScopeGrpcServer' with CorrelationAwareNetScopeGrpcServer
+2026-04-11T08:24:21.582+05:30 [NO_CORR] WARN  90383 --- [demo] [           main] trationDelegate$BeanPostProcessorChecker : Bean 'fractalXRuntimeAutoConfiguration' of type [org.fractalx.runtime.FractalXRuntimeAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). The currently created BeanPostProcessor [netScopeGrpcInterceptorConfigurer] is declared through a non-static factory method on that class; consider declaring it as static instead.
+2026-04-11T08:24:21.594+05:30 [NO_CORR] WARN  90383 --- [demo] [           main] trationDelegate$BeanPostProcessorChecker : Bean 'netScopeContextInterceptor' of type [org.fractalx.runtime.NetScopeContextInterceptor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [netScopeGrpcInterceptorConfigurer]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+2026-04-11T08:24:21.783+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] o.a.coyote.http11.Http11NioProtocol      : Initializing ProtocolHandler ["http-nio-8082"]
+2026-04-11T08:24:21.784+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-04-11T08:24:21.784+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.20]
+2026-04-11T08:24:22.063+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] org.hibernate.orm.jpa                    : HHH008540: Processing PersistenceUnitInfo [name: default]
+2026-04-11T08:24:22.083+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] org.hibernate.orm.core                   : HHH000001: Hibernate ORM core version 7.2.7.Final
+2026-04-11T08:24:22.267+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-04-11T08:24:22.314+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@41092c8
+2026-04-11T08:24:22.315+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-04-11T08:24:22.339+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [jdbc:postgresql://localhost:5432/frx_1]
+	Database driver: PostgreSQL JDBC Driver
+	Database dialect: PostgreSQLDialect
+	Database version: 16.6
+	Default catalog/schema: frx_1/public
+	Autocommit mode: undefined/unknown
+	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+	JDBC fetch size: none
+	Pool: DataSourceConnectionProvider
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-04-11T08:24:22.702+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] org.hibernate.orm.core                   : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-04-11T08:24:22.729+05:30 [NO_CORR] WARN  90383 --- [demo] [           main] o.h.t.s.i.ExceptionHandlerLoggedImpl     : GenerationTarget encountered exception accepting command : Error executing DDL "alter table if exists orders alter column customer_id set data type varchar(255)" via JDBC [ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.]
+org.hibernate.tool.schema.spi.CommandAcceptanceException: Error executing DDL "alter table if exists orders alter column customer_id set data type varchar(255)" via JDBC [ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.]
+	at org.hibernate.tool.schema.internal.exec.GenerationTargetToDatabase.accept(GenerationTargetToDatabase.java:81)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.applySqlString(AbstractSchemaMigrator.java:566)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.applySqlStrings(AbstractSchemaMigrator.java:506)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.migrateTable(AbstractSchemaMigrator.java:324)
+	at org.hibernate.tool.schema.internal.GroupedSchemaMigratorImpl.performTablesMigration(GroupedSchemaMigratorImpl.java:84)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.performMigration(AbstractSchemaMigrator.java:220)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.doMigration(AbstractSchemaMigrator.java:96)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.performDatabaseAction(SchemaManagementToolCoordinator.java:269)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.lambda$process$1(SchemaManagementToolCoordinator.java:101)
+	at java.base/java.util.HashMap.forEach(HashMap.java:1429)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.process(SchemaManagementToolCoordinator.java:100)
+	at org.hibernate.boot.internal.SessionFactoryObserverForSchemaExport.sessionFactoryCreated(SessionFactoryObserverForSchemaExport.java:35)
+	at org.hibernate.internal.SessionFactoryObserverChain.sessionFactoryCreated(SessionFactoryObserverChain.java:33)
+	at org.hibernate.internal.SessionFactoryImpl.<init>(SessionFactoryImpl.java:323)
+	at org.hibernate.internal.SessionFactoryRegistry.instantiateSessionFactory(SessionFactoryRegistry.java:64)
+	at org.hibernate.boot.internal.SessionFactoryBuilderImpl.build(SessionFactoryBuilderImpl.java:437)
+	at org.hibernate.jpa.boot.internal.EntityManagerFactoryBuilderImpl.build(EntityManagerFactoryBuilderImpl.java:1456)
+	at org.springframework.orm.jpa.vendor.SpringHibernateJpaPersistenceProvider.createContainerEntityManagerFactory(SpringHibernateJpaPersistenceProvider.java:93)
+	at org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean.createNativeEntityManagerFactory(LocalContainerEntityManagerFactoryBean.java:443)
+	at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.buildNativeEntityManagerFactory(AbstractEntityManagerFactoryBean.java:436)
+	at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.afterPropertiesSet(AbstractEntityManagerFactoryBean.java:411)
+	at org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean.afterPropertiesSet(LocalContainerEntityManagerFactoryBean.java:419)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.invokeInitMethods(AbstractAutowireCapableBeanFactory.java:1864)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1813)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:603)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:331)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:201)
+	at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:977)
+	at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:621)
+	at org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContext.refresh(ServletWebServerApplicationContext.java:143)
+	at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:756)
+	at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:445)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:321)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1365)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1354)
+	at com.fractalx.generated.orderservice.OrderServiceApplication.main(OrderServiceApplication.java:20)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.springframework.boot.loader.launch.Launcher.launch(Launcher.java:106)
+	at org.springframework.boot.loader.launch.Launcher.launch(Launcher.java:64)
+	at org.springframework.boot.loader.launch.JarLauncher.main(JarLauncher.java:40)
+Caused by: org.postgresql.util.PSQLException: ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.
+	at org.postgresql.core.v3.QueryExecutorImpl.receiveErrorResponse(QueryExecutorImpl.java:2875)
+	at org.postgresql.core.v3.QueryExecutorImpl.processResults(QueryExecutorImpl.java:2560)
+	at org.postgresql.core.v3.QueryExecutorImpl.execute(QueryExecutorImpl.java:429)
+	at org.postgresql.jdbc.PgStatement.executeInternal(PgStatement.java:526)
+	at org.postgresql.jdbc.PgStatement.execute(PgStatement.java:436)
+	at org.postgresql.jdbc.PgStatement.executeWithFlags(PgStatement.java:358)
+	at org.postgresql.jdbc.PgStatement.executeCachedSql(PgStatement.java:343)
+	at org.postgresql.jdbc.PgStatement.executeWithFlags(PgStatement.java:319)
+	at org.postgresql.jdbc.PgStatement.execute(PgStatement.java:314)
+	at com.zaxxer.hikari.pool.ProxyStatement.execute(ProxyStatement.java:95)
+	at com.zaxxer.hikari.pool.HikariProxyStatement.execute(HikariProxyStatement.java)
+	at org.hibernate.tool.schema.internal.exec.GenerationTargetToDatabase.accept(GenerationTargetToDatabase.java:76)
+	... 43 common frames omitted
+2026-04-11T08:24:22.794+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 1/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:23.098+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 2/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:23.711+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 3/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:24.921+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 4/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:27.332+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 5/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:32.136+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 6/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:37.148+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 7/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:42.161+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 8/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:47.170+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 9/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:52.176+05:30 [NO_CORR] WARN  90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 10/10): I/O error on GET request for "http://localhost:8761/services/customer-service": Connection refused
+2026-04-11T08:24:57.186+05:30 [NO_CORR] ERROR 90383 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Could not resolve customer-service from registry after 10 attempts — using static YAML fallback. Check registry health and FRACTALX_REGISTRY_URL env var.
+2026-04-11T08:24:57.205+05:30 [NO_CORR] WARN  90383 --- [demo] [           main] c.f.g.o.FractalRegistryClient            : Could not register with fractalx-registry at 'http://localhost:8761': I/O error on POST request for "http://localhost:8761/services": Connection refused — verify that 'fractalx.registry.url' is correctly set in application.yml and that fractalx-registry is running.
+2026-04-11T08:24:57.369+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] .f.n.c.c.NetScopeClientAutoConfiguration : NetScope Client Auto-Configuration initialized
+2026-04-11T08:24:57.391+05:30 [NO_CORR] WARN  90383 --- [demo] [           main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'outboxPublisher' defined in URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/outbox/OutboxPublisher.class]: Unsatisfied dependency expressed through constructor parameter 2: No qualifying bean of type 'io.micrometer.tracing.Tracer' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+2026-04-11T08:24:57.391+05:30 [NO_CORR] WARN  90383 --- [demo] [           main] c.f.g.o.FractalRegistryClient            : Could not deregister from fractalx-registry: I/O error on DELETE request for "http://localhost:8761/services/demo/deregister": Connection refused
+2026-04-11T08:24:57.392+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-04-11T08:24:57.393+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+2026-04-11T08:24:57.395+05:30 [NO_CORR] INFO  90383 --- [demo] [           main] o.apache.catalina.core.StandardService   : Stopping service [Tomcat]
+2026-04-11T08:24:57.408+05:30 [NO_CORR] ERROR 90383 --- [demo] [           main] o.s.b.d.LoggingFailureAnalysisReporter   : 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Parameter 2 of constructor in com.fractalx.generated.orderservice.outbox.OutboxPublisher required a bean of type 'io.micrometer.tracing.Tracer' that could not be found.
+
+
+Action:
+
+Consider defining a bean of type 'io.micrometer.tracing.Tracer' in your configuration.
+
+2026-04-11T08:25:32.955+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] c.f.g.o.OrderServiceApplication          : Starting OrderServiceApplication v0.0.1-SNAPSHOT using Java 22.0.2 with PID 90500 (/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar started by sathnindu in /Users/sathnindu/Develop/fractalx/FractalX)
+2026-04-11T08:25:32.956+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] c.f.g.o.OrderServiceApplication          : The following 1 profile is active: "dev"
+2026-04-11T08:25:33.034+05:30 [NO_CORR] INFO  90500 --- [demo] [kground-preinit] o.h.validator.internal.util.Version      : HV000001: Hibernate Validator 9.0.1.Final
+2026-04-11T08:25:33.308+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: scanning packages [com.fractalx.generated.orderservice, com.example.demo.order, org.fractalx.runtime] for @NetScopeClient interfaces
+2026-04-11T08:25:33.309+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/AggregateExistsClient.class]
+2026-04-11T08:25:33.309+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/CorrelationExistsClient.class]
+2026-04-11T08:25:33.309+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/validation/CustomerExistsClient.class]
+2026-04-11T08:25:33.310+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'aggregateExistsClient' for com.fractalx.generated.orderservice.validation.AggregateExistsClient
+2026-04-11T08:25:33.310+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'correlationExistsClient' for com.fractalx.generated.orderservice.validation.CorrelationExistsClient
+2026-04-11T08:25:33.310+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'customerExistsClient' for com.fractalx.generated.orderservice.validation.CustomerExistsClient
+2026-04-11T08:25:33.310+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.c.NetScopeClientRegistrar$1      : Identified candidate component class: URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/example/demo/order/CustomerServiceClient.class]
+2026-04-11T08:25:33.310+05:30 [NO_CORR] DEBUG 90500 --- [demo] [           main] o.f.n.c.config.NetScopeClientRegistrar   : NetScope client: registering proxy bean 'customerServiceClient' for com.example.demo.order.CustomerServiceClient
+2026-04-11T08:25:33.547+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] o.f.r.NetScopeGrpcServerBeanOverrider    : NetScopeGrpcServerBeanOverrider: replaced 'netScopeGrpcServer' with CorrelationAwareNetScopeGrpcServer
+2026-04-11T08:25:33.719+05:30 [NO_CORR] WARN  90500 --- [demo] [           main] trationDelegate$BeanPostProcessorChecker : Bean 'fractalXRuntimeAutoConfiguration' of type [org.fractalx.runtime.FractalXRuntimeAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). The currently created BeanPostProcessor [netScopeGrpcInterceptorConfigurer] is declared through a non-static factory method on that class; consider declaring it as static instead.
+2026-04-11T08:25:33.734+05:30 [NO_CORR] WARN  90500 --- [demo] [           main] trationDelegate$BeanPostProcessorChecker : Bean 'netScopeContextInterceptor' of type [org.fractalx.runtime.NetScopeContextInterceptor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [netScopeGrpcInterceptorConfigurer]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+2026-04-11T08:25:33.899+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] o.a.coyote.http11.Http11NioProtocol      : Initializing ProtocolHandler ["http-nio-8082"]
+2026-04-11T08:25:33.900+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-04-11T08:25:33.900+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.20]
+2026-04-11T08:25:34.147+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] org.hibernate.orm.jpa                    : HHH008540: Processing PersistenceUnitInfo [name: default]
+2026-04-11T08:25:34.167+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] org.hibernate.orm.core                   : HHH000001: Hibernate ORM core version 7.2.7.Final
+2026-04-11T08:25:34.346+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-04-11T08:25:34.392+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@3fc2a1d1
+2026-04-11T08:25:34.392+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-04-11T08:25:34.416+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [jdbc:postgresql://localhost:5432/frx_1]
+	Database driver: PostgreSQL JDBC Driver
+	Database dialect: PostgreSQLDialect
+	Database version: 16.6
+	Default catalog/schema: frx_1/public
+	Autocommit mode: undefined/unknown
+	Isolation level: READ_COMMITTED [default READ_COMMITTED]
+	JDBC fetch size: none
+	Pool: DataSourceConnectionProvider
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-04-11T08:25:34.794+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] org.hibernate.orm.core                   : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-04-11T08:25:34.820+05:30 [NO_CORR] WARN  90500 --- [demo] [           main] o.h.t.s.i.ExceptionHandlerLoggedImpl     : GenerationTarget encountered exception accepting command : Error executing DDL "alter table if exists orders alter column customer_id set data type varchar(255)" via JDBC [ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.]
+org.hibernate.tool.schema.spi.CommandAcceptanceException: Error executing DDL "alter table if exists orders alter column customer_id set data type varchar(255)" via JDBC [ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.]
+	at org.hibernate.tool.schema.internal.exec.GenerationTargetToDatabase.accept(GenerationTargetToDatabase.java:81)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.applySqlString(AbstractSchemaMigrator.java:566)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.applySqlStrings(AbstractSchemaMigrator.java:506)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.migrateTable(AbstractSchemaMigrator.java:324)
+	at org.hibernate.tool.schema.internal.GroupedSchemaMigratorImpl.performTablesMigration(GroupedSchemaMigratorImpl.java:84)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.performMigration(AbstractSchemaMigrator.java:220)
+	at org.hibernate.tool.schema.internal.AbstractSchemaMigrator.doMigration(AbstractSchemaMigrator.java:96)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.performDatabaseAction(SchemaManagementToolCoordinator.java:269)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.lambda$process$1(SchemaManagementToolCoordinator.java:101)
+	at java.base/java.util.HashMap.forEach(HashMap.java:1429)
+	at org.hibernate.tool.schema.spi.SchemaManagementToolCoordinator.process(SchemaManagementToolCoordinator.java:100)
+	at org.hibernate.boot.internal.SessionFactoryObserverForSchemaExport.sessionFactoryCreated(SessionFactoryObserverForSchemaExport.java:35)
+	at org.hibernate.internal.SessionFactoryObserverChain.sessionFactoryCreated(SessionFactoryObserverChain.java:33)
+	at org.hibernate.internal.SessionFactoryImpl.<init>(SessionFactoryImpl.java:323)
+	at org.hibernate.internal.SessionFactoryRegistry.instantiateSessionFactory(SessionFactoryRegistry.java:64)
+	at org.hibernate.boot.internal.SessionFactoryBuilderImpl.build(SessionFactoryBuilderImpl.java:437)
+	at org.hibernate.jpa.boot.internal.EntityManagerFactoryBuilderImpl.build(EntityManagerFactoryBuilderImpl.java:1456)
+	at org.springframework.orm.jpa.vendor.SpringHibernateJpaPersistenceProvider.createContainerEntityManagerFactory(SpringHibernateJpaPersistenceProvider.java:93)
+	at org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean.createNativeEntityManagerFactory(LocalContainerEntityManagerFactoryBean.java:443)
+	at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.buildNativeEntityManagerFactory(AbstractEntityManagerFactoryBean.java:436)
+	at org.springframework.orm.jpa.AbstractEntityManagerFactoryBean.afterPropertiesSet(AbstractEntityManagerFactoryBean.java:411)
+	at org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean.afterPropertiesSet(LocalContainerEntityManagerFactoryBean.java:419)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.invokeInitMethods(AbstractAutowireCapableBeanFactory.java:1864)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1813)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:603)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:525)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:333)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:371)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:331)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:201)
+	at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:977)
+	at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:621)
+	at org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContext.refresh(ServletWebServerApplicationContext.java:143)
+	at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:756)
+	at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:445)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:321)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1365)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1354)
+	at com.fractalx.generated.orderservice.OrderServiceApplication.main(OrderServiceApplication.java:20)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.springframework.boot.loader.launch.Launcher.launch(Launcher.java:106)
+	at org.springframework.boot.loader.launch.Launcher.launch(Launcher.java:64)
+	at org.springframework.boot.loader.launch.JarLauncher.main(JarLauncher.java:40)
+Caused by: org.postgresql.util.PSQLException: ERROR: foreign key constraint "fkpxtb8awmi0dk6smoh2vp1litg" cannot be implemented
+  Detail: Key columns "customer_id" and "id" are of incompatible types: character varying and bigint.
+	at org.postgresql.core.v3.QueryExecutorImpl.receiveErrorResponse(QueryExecutorImpl.java:2875)
+	at org.postgresql.core.v3.QueryExecutorImpl.processResults(QueryExecutorImpl.java:2560)
+	at org.postgresql.core.v3.QueryExecutorImpl.execute(QueryExecutorImpl.java:429)
+	at org.postgresql.jdbc.PgStatement.executeInternal(PgStatement.java:526)
+	at org.postgresql.jdbc.PgStatement.execute(PgStatement.java:436)
+	at org.postgresql.jdbc.PgStatement.executeWithFlags(PgStatement.java:358)
+	at org.postgresql.jdbc.PgStatement.executeCachedSql(PgStatement.java:343)
+	at org.postgresql.jdbc.PgStatement.executeWithFlags(PgStatement.java:319)
+	at org.postgresql.jdbc.PgStatement.execute(PgStatement.java:314)
+	at com.zaxxer.hikari.pool.ProxyStatement.execute(ProxyStatement.java:95)
+	at com.zaxxer.hikari.pool.HikariProxyStatement.execute(HikariProxyStatement.java)
+	at org.hibernate.tool.schema.internal.exec.GenerationTargetToDatabase.accept(GenerationTargetToDatabase.java:76)
+	... 43 common frames omitted
+2026-04-11T08:25:34.884+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 1/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:25:35.186+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 2/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:25:35.798+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 3/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:25:37.011+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 4/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:25:39.421+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 5/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:25:44.231+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 6/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:25:49.243+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 7/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:25:54.250+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 8/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:25:59.262+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 9/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:26:04.275+05:30 [NO_CORR] WARN  90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Registry lookup for customer-service failed (attempt 10/10): I/O error on GET request for "http://localhost:9999/services/customer-service": Connection refused
+2026-04-11T08:26:09.285+05:30 [NO_CORR] ERROR 90500 --- [demo] [pool-2-thread-1] c.f.g.o.NetScopeRegistryBridge           : Could not resolve customer-service from registry after 10 attempts — using static YAML fallback. Check registry health and FRACTALX_REGISTRY_URL env var.
+2026-04-11T08:26:09.313+05:30 [NO_CORR] WARN  90500 --- [demo] [           main] c.f.g.o.FractalRegistryClient            : Could not register with fractalx-registry at 'http://localhost:9999': I/O error on POST request for "http://localhost:9999/services": Connection refused — verify that 'fractalx.registry.url' is correctly set in application.yml and that fractalx-registry is running.
+2026-04-11T08:26:09.475+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] .f.n.c.c.NetScopeClientAutoConfiguration : NetScope Client Auto-Configuration initialized
+2026-04-11T08:26:09.494+05:30 [NO_CORR] WARN  90500 --- [demo] [           main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'outboxPublisher' defined in URL [jar:nested:/Users/sathnindu/Desktop/demo/microservices/order-service/target/order-service-0.0.1-SNAPSHOT.jar/!BOOT-INF/classes/!/com/fractalx/generated/orderservice/outbox/OutboxPublisher.class]: Unsatisfied dependency expressed through constructor parameter 2: No qualifying bean of type 'io.micrometer.tracing.Tracer' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+2026-04-11T08:26:09.495+05:30 [NO_CORR] WARN  90500 --- [demo] [           main] c.f.g.o.FractalRegistryClient            : Could not deregister from fractalx-registry: I/O error on DELETE request for "http://localhost:9999/services/demo/deregister": Connection refused
+2026-04-11T08:26:09.496+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-04-11T08:26:09.497+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+2026-04-11T08:26:09.499+05:30 [NO_CORR] INFO  90500 --- [demo] [           main] o.apache.catalina.core.StandardService   : Stopping service [Tomcat]
+2026-04-11T08:26:09.510+05:30 [NO_CORR] ERROR 90500 --- [demo] [           main] o.s.b.d.LoggingFailureAnalysisReporter   : 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Parameter 2 of constructor in com.fractalx.generated.orderservice.outbox.OutboxPublisher required a bean of type 'io.micrometer.tracing.Tracer' that could not be found.
+
+
+Action:
+
+Consider defining a bean of type 'io.micrometer.tracing.Tracer' in your configuration.
+

@@ -127,12 +127,27 @@ public class PomGenerator implements ServiceFileGenerator {
             removeDependencyByArtifact(doc, "fractalx-annotations");
             removeDependencyByArtifact(doc, "fractalx-core");
             removePluginByArtifact(doc, "fractalx-maven-plugin");
+            // spring-boot-starter-aop removed from Spring Boot 4.x; strip it so it doesn't
+            // appear without a managed version in the generated pom
+            boolean isBoot4Plus = cfg.springBootVersion() != null && !cfg.springBootVersion().isBlank()
+                    && Character.getNumericValue(cfg.springBootVersion().charAt(0)) >= 4;
+            if (isBoot4Plus) removeDependencyByArtifact(doc, "spring-boot-starter-aop");
             pruneAndResolveUnusedDeps(doc, module.getDetectedImports(), monolithProps,
                     module.getServiceName());
-            addFractalxDeps(doc);
+            addFractalxDeps(doc, cfg.springBootVersion());
             addTransactionSupportIfNeeded(doc, module.getDetectedImports());
             if (cfg.features().observability()) {
                 appendObservabilityDeps(doc);
+            }
+            if (isBoot4Plus) {
+                // Spring Boot 4.x manages OTel via micrometer-tracing BOM. ObservabilityInjector
+                // adds pinned OTel SDK versions (1.32.0) that are binary-incompatible with Boot 4.x's
+                // managed opentelemetry-exporter-common (1.55+) and prevent Tracer auto-configuration.
+                // Remove them AFTER appendObservabilityDeps() so Boot's BOM resolves correct versions
+                // transitively from micrometer-tracing-bridge-otel.
+                removeDependencyByArtifact(doc, "opentelemetry-sdk");
+                removeDependencyByArtifact(doc, "opentelemetry-exporter-otlp");
+                removeDependencyByArtifact(doc, "opentelemetry-semconv");
             }
             ensureSpringBootBom(doc, cfg.springBootVersion());
             ensureSpringCloudBom(doc, cfg.springCloudVersion());
@@ -150,6 +165,65 @@ public class PomGenerator implements ServiceFileGenerator {
      * monolith pom cannot be found or parsed.
      */
     private String buildPomFromScratch(FractalModule module, FractalxConfig cfg) {
+        boolean isBoot4Plus = cfg.springBootVersion() != null && !cfg.springBootVersion().isBlank()
+                && Character.getNumericValue(cfg.springBootVersion().charAt(0)) >= 4;
+
+        // spring-boot-starter-aop removed from Spring Boot 4.x
+        String aopDep = isBoot4Plus ? "" : """
+                        <dependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-aop</artifactId>
+                        </dependency>
+                """;
+        // spring-cloud-context (2025.x) is incompatible with Spring Boot 4.x / Spring Framework 7.x
+        String cloudContextDep = isBoot4Plus ? "" : """
+                        <dependency>
+                            <groupId>org.springframework.cloud</groupId>
+                            <artifactId>spring-cloud-context</artifactId>
+                        </dependency>
+                """;
+        // Exclude spring-cloud-context/commons from fractalx-runtime transitive deps on Spring Boot 4.x
+        String runtimeDep = isBoot4Plus
+                ? """
+                        <dependency>
+                            <groupId>org.fractalx</groupId>
+                            <artifactId>fractalx-runtime</artifactId>
+                            <version>%s</version>
+                            <exclusions>
+                                <exclusion>
+                                    <groupId>org.springframework.cloud</groupId>
+                                    <artifactId>spring-cloud-context</artifactId>
+                                </exclusion>
+                                <exclusion>
+                                    <groupId>org.springframework.cloud</groupId>
+                                    <artifactId>spring-cloud-commons</artifactId>
+                                </exclusion>
+                            </exclusions>
+                        </dependency>
+                """.formatted(FRACTALX_RUNTIME_VERSION)
+                : """
+                        <dependency>
+                            <groupId>org.fractalx</groupId>
+                            <artifactId>fractalx-runtime</artifactId>
+                            <version>%s</version>
+                        </dependency>
+                """.formatted(FRACTALX_RUNTIME_VERSION);
+
+        // For Boot 4.x: ObservabilityInjector includes pinned OTel SDK versions (1.32.0) that are
+        // binary-incompatible with Boot 4.x managed versions. Use only the version-managed deps.
+        String observabilityDeps = !cfg.features().observability() ? "" : isBoot4Plus ? """
+                        <!-- Micrometer OpenTelemetry tracing bridge — versions managed by Boot 4.x BOM -->
+                        <dependency>
+                            <groupId>io.micrometer</groupId>
+                            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+                        </dependency>
+                        <!-- Prometheus registry for /actuator/prometheus scraping -->
+                        <dependency>
+                            <groupId>io.micrometer</groupId>
+                            <artifactId>micrometer-registry-prometheus</artifactId>
+                        </dependency>
+                """ : observabilityInjector.getDependencies();
+
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -209,12 +283,7 @@ public class PomGenerator implements ServiceFileGenerator {
                             <artifactId>netscope-client</artifactId>
                             <version>%s</version>
                         </dependency>
-                        <dependency>
-                            <groupId>org.fractalx</groupId>
-                            <artifactId>fractalx-runtime</artifactId>
-                            <version>%s</version>
-                        </dependency>
-                        <dependency>
+                        %s<dependency>
                             <groupId>org.springframework.boot</groupId>
                             <artifactId>spring-boot-starter-actuator</artifactId>
                         </dependency>
@@ -223,15 +292,7 @@ public class PomGenerator implements ServiceFileGenerator {
                             <artifactId>resilience4j-spring-boot3</artifactId>
                             <version>%s</version>
                         </dependency>
-                        <dependency>
-                            <groupId>org.springframework.boot</groupId>
-                            <artifactId>spring-boot-starter-aop</artifactId>
-                        </dependency>
-                        <dependency>
-                            <groupId>org.springframework.cloud</groupId>
-                            <artifactId>spring-cloud-context</artifactId>
-                        </dependency>
-
+                        %s%s
                         <!-- ── Observability (OTel tracing) ─────────────────── -->
                 %s
                     </dependencies>
@@ -269,9 +330,11 @@ public class PomGenerator implements ServiceFileGenerator {
                 cfg.springCloudVersion(),
                 NETSCOPE_VERSION,
                 NETSCOPE_VERSION,
-                FRACTALX_RUNTIME_VERSION,
+                runtimeDep,
                 RESILIENCE4J_VERSION,
-                cfg.features().observability() ? observabilityInjector.getDependencies() : ""
+                aopDep,
+                cloudContextDep,
+                observabilityDeps
         );
     }
 
@@ -417,16 +480,32 @@ public class PomGenerator implements ServiceFileGenerator {
      * Each call to {@link #addDepIfAbsent} is a no-op if the dep is already present
      * (copied from monolith or previously added).
      */
-    private void addFractalxDeps(Document doc) {
+    private void addFractalxDeps(Document doc, String springBootVersion) {
+        boolean isBoot4Plus = springBootVersion != null && !springBootVersion.isBlank()
+                && Character.getNumericValue(springBootVersion.charAt(0)) >= 4;
         Element depsEl = ensureDependenciesElement(doc);
         addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-web",        null,                    null);
         addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-validation", null,                    null);
         addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-actuator",   null,                    null);
-        addDepIfAbsent(doc, depsEl, "org.springframework.boot",  "spring-boot-starter-aop",        null,                    null);
-        addDepIfAbsent(doc, depsEl, "org.springframework.cloud", "spring-cloud-context",          null,                    null);
+        // spring-boot-starter-aop was removed from Spring Boot 4.x; AOP is core in Spring Framework 7
+        if (!isBoot4Plus) {
+            addDepIfAbsent(doc, depsEl, "org.springframework.boot", "spring-boot-starter-aop",     null,                    null);
+        }
+        // spring-cloud-context (Spring Cloud 2025.x) is incompatible with Spring Boot 4.x/Spring Framework 7.x
+        if (!isBoot4Plus) {
+            addDepIfAbsent(doc, depsEl, "org.springframework.cloud", "spring-cloud-context",       null,                    null);
+        }
         addDepIfAbsent(doc, depsEl, "org.fractalx",              "netscope-server",               NETSCOPE_VERSION,        null);
         addDepIfAbsent(doc, depsEl, "org.fractalx",              "netscope-client",               NETSCOPE_VERSION,        null);
         addDepIfAbsent(doc, depsEl, "org.fractalx",              "fractalx-runtime",              FRACTALX_RUNTIME_VERSION, null);
+        // For Boot 4.x, exclude spring-cloud-context from fractalx-runtime's transitive deps
+        // (fractalx-runtime → spring-cloud-starter-openfeign → spring-cloud-context which is Boot 3.x only)
+        if (isBoot4Plus) {
+            // spring-cloud-context and spring-cloud-commons (2025.x) are not compatible with
+            // Spring Boot 4.x / Spring Framework 7.x (WebServerInitializedEvent moved packages etc.)
+            addExclusionToDep(doc, "fractalx-runtime", "org.springframework.cloud", "spring-cloud-context");
+            addExclusionToDep(doc, "fractalx-runtime", "org.springframework.cloud", "spring-cloud-commons");
+        }
         addDepIfAbsent(doc, depsEl, "io.github.resilience4j",    "resilience4j-spring-boot3",     RESILIENCE4J_VERSION,    null);
     }
 
@@ -647,6 +726,43 @@ public class PomGenerator implements ServiceFileGenerator {
             Element s = doc.createElement("scope"); s.setTextContent(scope); dep.appendChild(s);
         }
         depsEl.appendChild(dep);
+    }
+
+    /**
+     * Adds an {@code <exclusion>} to an existing dependency identified by {@code artifactId}.
+     * No-op if the dependency is not found or already has this exclusion.
+     */
+    private static void addExclusionToDep(Document doc, String depArtifactId,
+                                           String excludeGroupId, String excludeArtifactId) {
+        NodeList children = doc.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE || !"dependencies".equals(child.getNodeName())) continue;
+            NodeList deps = ((Element) child).getElementsByTagName("dependency");
+            for (int j = 0; j < deps.getLength(); j++) {
+                Element dep = (Element) deps.item(j);
+                if (!depArtifactId.equals(text(dep, "artifactId"))) continue;
+                // Find or create <exclusions>
+                NodeList existingExclusions = dep.getElementsByTagName("exclusions");
+                Element exclusionsEl;
+                if (existingExclusions.getLength() > 0) {
+                    exclusionsEl = (Element) existingExclusions.item(0);
+                    // Check if exclusion already present
+                    NodeList excs = exclusionsEl.getElementsByTagName("exclusion");
+                    for (int k = 0; k < excs.getLength(); k++) {
+                        if (excludeArtifactId.equals(text((Element) excs.item(k), "artifactId"))) return;
+                    }
+                } else {
+                    exclusionsEl = doc.createElement("exclusions");
+                    dep.appendChild(exclusionsEl);
+                }
+                Element excl = doc.createElement("exclusion");
+                Element eg = doc.createElement("groupId");    eg.setTextContent(excludeGroupId);    excl.appendChild(eg);
+                Element ea = doc.createElement("artifactId"); ea.setTextContent(excludeArtifactId); excl.appendChild(ea);
+                exclusionsEl.appendChild(excl);
+                return;
+            }
+        }
     }
 
     /**

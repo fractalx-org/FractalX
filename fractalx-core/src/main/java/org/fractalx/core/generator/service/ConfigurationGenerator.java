@@ -46,6 +46,13 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                 ? "    otel:\n      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:%s}\n".formatted(cfg.otelEndpoint())
                 : "    otel:\n      enabled: false\n";
         String samplingProbability = tracingEnabled ? "1.0" : "0.0";
+        // Spring Boot 4.x: configure OTel exporter via management.otlp.tracing.endpoint instead of
+        // a custom OtelConfig bean (which conflicts with Boot 4.x's managed OTel dependency versions).
+        boolean isBoot4 = isBoot4Plus(cfg.springBootVersion());
+        String otlpEndpointBlock = (tracingEnabled && isBoot4)
+                ? "  otlp:\n    tracing:\n      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:"
+                    + cfg.otelEndpoint() + "}/v1/traces\n"
+                : "";
 
         return """
                 spring:
@@ -53,6 +60,12 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                     name: %s
                   profiles:
                     active: ${SPRING_PROFILES_ACTIVE:dev}
+                  autoconfigure:
+                    exclude:
+                      - org.springframework.cloud.autoconfigure.LifecycleMvcEndpointAutoConfiguration
+                      # FractalX services use gRPC/NetScope, not Feign. Excluding prevents startup failure
+                      # when spring-cloud-context is not on the classpath (e.g. Spring Boot 4.x).
+                      - org.springframework.cloud.openfeign.FeignAutoConfiguration
 
                 server:
                   port: %d
@@ -93,7 +106,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                   tracing:
                     sampling:
                       probability: %s
-
+                %s
                 logging:
                   level:
                     org.fractalx: DEBUG
@@ -101,7 +114,7 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
                 """.formatted(module.getServiceName(), module.getPort(),
                 cfg.registryUrl(), cfg.sagaPort(), tracingEnabled,
                 cfg.loggerUrl().replaceAll("/api/logs$", ""),
-                otelBlock, module.grpcPort(), samplingProbability);
+                otelBlock, module.grpcPort(), samplingProbability, otlpEndpointBlock);
     }
 
     /** application-dev.yml — localhost hardcoded, H2 in-memory, suitable for local dev. */
@@ -215,5 +228,10 @@ public class ConfigurationGenerator implements ServiceFileGenerator {
             }
         }
         return sb.toString();
+    }
+
+    private static boolean isBoot4Plus(String version) {
+        return version != null && !version.isBlank()
+                && Character.getNumericValue(version.charAt(0)) >= 4;
     }
 }

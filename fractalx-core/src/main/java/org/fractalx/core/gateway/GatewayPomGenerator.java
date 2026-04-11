@@ -129,18 +129,7 @@ public class GatewayPomGenerator {
                         <groupId>io.micrometer</groupId>
                         <artifactId>micrometer-tracing-bridge-otel</artifactId>
                     </dependency>
-                    <!-- OTLP gRPC exporter ships spans to Jaeger on port 4317 -->
-                    <dependency>
-                        <groupId>io.opentelemetry</groupId>
-                        <artifactId>opentelemetry-exporter-otlp</artifactId>
-                        <version>1.32.0</version>
-                    </dependency>
-                    <!-- OTel semantic conventions (ResourceAttributes.SERVICE_NAME etc.) -->
-                    <dependency>
-                        <groupId>io.opentelemetry.semconv</groupId>
-                        <artifactId>opentelemetry-semconv</artifactId>
-                        <version>1.21.0-alpha</version>
-                    </dependency>
+                    __OTEL_DEPS__
                 </dependencies>
             
                 <build>
@@ -162,9 +151,26 @@ public class GatewayPomGenerator {
             </project>
             """;
 
+        boolean isBoot4Plus = config.springBootVersion() != null
+                && !config.springBootVersion().isBlank()
+                && Character.getNumericValue(config.springBootVersion().charAt(0)) >= 4;
+        String otelDeps = isBoot4Plus ? "" : """
+                <!-- OTLP gRPC exporter ships spans to Jaeger on port 4317 -->
+                    <dependency>
+                        <groupId>io.opentelemetry</groupId>
+                        <artifactId>opentelemetry-exporter-otlp</artifactId>
+                        <version>1.32.0</version>
+                    </dependency>
+                    <!-- OTel semantic conventions (ResourceAttributes.SERVICE_NAME etc.) -->
+                    <dependency>
+                        <groupId>io.opentelemetry.semconv</groupId>
+                        <artifactId>opentelemetry-semconv</artifactId>
+                        <version>1.21.0-alpha</version>
+                    </dependency>""";
         pomContent = pomContent
                 .replace("__SB_VERSION__", config.springBootVersion())
-                .replace("__SC_VERSION__", config.springCloudVersion());
+                .replace("__SC_VERSION__", config.springCloudVersion())
+                .replace("__OTEL_DEPS__", otelDeps);
         Path pomPath = gatewayRoot.resolve("pom.xml");
         Files.writeString(pomPath, pomContent);
         log.info("✓ Generated gateway pom.xml");

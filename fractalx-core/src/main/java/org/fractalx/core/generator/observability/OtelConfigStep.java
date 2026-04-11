@@ -43,10 +43,21 @@ public class OtelConfigStep implements ServiceFileGenerator {
         String pkg     = context.servicePackage();
         Path   pkgPath = resolvePackage(context.getSrcMainJava(), pkg);
 
-        Files.writeString(pkgPath.resolve("OtelConfig.java"), buildContent(pkg));
+        boolean isBoot4Plus = isBoot4Plus(context.getFractalxConfig().springBootVersion());
+        if (!isBoot4Plus) {
+            // OtelConfig.java uses the OTel SDK directly (OtlpGrpcSpanExporter, SdkTracerProvider, etc.)
+            // which conflicts with Spring Boot 4.x's managed OTel versions. On Boot 4.x, Spring Boot
+            // handles OTel natively via management.otlp.tracing.endpoint — no custom config needed.
+            Files.writeString(pkgPath.resolve("OtelConfig.java"), buildContent(pkg));
+        } else {
+            // Remove any OtelConfig.java left over from a previous non-Boot-4 generation run.
+            java.nio.file.Path stale = pkgPath.resolve("OtelConfig.java");
+            if (Files.exists(stale)) Files.delete(stale);
+        }
         Files.writeString(pkgPath.resolve("CorrelationTracingConfig.java"), buildCorrelationConfig(pkg));
         Files.writeString(pkgPath.resolve("TracingExclusionConfig.java"), buildTracingExclusion(pkg));
-        log.debug("Generated OtelConfig + CorrelationTracingConfig for {}", module.getServiceName());
+        log.debug("Generated{} CorrelationTracingConfig + TracingExclusionConfig for {}",
+                isBoot4Plus ? "" : " OtelConfig +", module.getServiceName());
     }
 
     /**
@@ -64,6 +75,7 @@ public class OtelConfigStep implements ServiceFileGenerator {
                 import jakarta.servlet.http.HttpServletRequest;
                 import jakarta.servlet.http.HttpServletResponse;
                 import org.slf4j.MDC;
+                import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
                 import org.springframework.context.annotation.Configuration;
                 import org.springframework.lang.NonNull;
                 import org.springframework.web.servlet.HandlerInterceptor;
@@ -80,8 +92,12 @@ public class OtelConfigStep implements ServiceFileGenerator {
                  * <p>This interceptor runs in {@code preHandle()} which is guaranteed to execute
                  * after Spring Boot's {@code ServerHttpObservationFilter} has already started the
                  * span. The {@link Tracer#currentSpan()} call is therefore always safe here.
+                 *
+                 * <p>Only activated when a {@link Tracer} bean is present in the context
+                 * (i.e. when Micrometer Tracing is fully configured with an OTel/Brave bridge).
                  */
                 @Configuration
+                @ConditionalOnBean(Tracer.class)
                 public class CorrelationTracingConfig implements WebMvcConfigurer {
 
                     private final Tracer tracer;
@@ -233,6 +249,11 @@ public class OtelConfigStep implements ServiceFileGenerator {
         for (String part : pkg.split("\\.")) p = p.resolve(part);
         Files.createDirectories(p);
         return p;
+    }
+
+    private static boolean isBoot4Plus(String version) {
+        return version != null && !version.isBlank()
+                && Character.getNumericValue(version.charAt(0)) >= 4;
     }
 
     private String toJavaId(String serviceName) {

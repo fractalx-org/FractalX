@@ -36,6 +36,23 @@ public class ValuePropertyDistributorStep implements ServiceFileGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(ValuePropertyDistributorStep.class);
 
+    /**
+     * Keys (and key prefixes) that FractalX already generates correctly for each service.
+     * Copying these from the monolith would overwrite the per-service values with the
+     * monolith's global values (e.g. spring.application.name=demo overrides the service name).
+     */
+    private static final Set<String> BLOCKED_KEY_PREFIXES = Set.of(
+            "spring.application.name",  // each service has its own name
+            "spring.datasource",        // dev profile uses H2; monolith uses PostgreSQL
+            "spring.jpa",               // generated in application-dev.yml already
+            "spring.h2",                // generated in application-dev.yml already
+            "spring.flyway",            // generated in application-dev.yml already
+            "spring.profiles",          // managed by base application.yml
+            "server.port",              // each service has its own port
+            "management.",              // managed by base application.yml
+            "logging."                  // managed by base application.yml
+    );
+
     @Override
     public void generate(GenerationContext context) throws IOException {
         Path monolithResources = context.getSourceRoot().getParent().resolve("resources");
@@ -57,6 +74,7 @@ public class ValuePropertyDistributorStep implements ServiceFileGenerator {
         Set<String>          missing   = new LinkedHashSet<>();
 
         for (String key : requiredKeys) {
+            if (isBlocked(key)) continue;
             if (monolithProps.containsKey(key)) {
                 resolved.put(key, monolithProps.get(key));
             } else {
@@ -64,8 +82,10 @@ public class ValuePropertyDistributorStep implements ServiceFileGenerator {
             }
         }
         for (String prefix : cfgPropPrefixes) {
+            if (isBlocked(prefix)) continue;
             boolean anyFound = false;
             for (Map.Entry<String, String> e : monolithProps.entrySet()) {
+                if (isBlocked(e.getKey())) continue;
                 if (e.getKey().startsWith(prefix + ".") || e.getKey().equals(prefix)) {
                     resolved.put(e.getKey(), e.getValue());
                     anyFound = true;
@@ -233,6 +253,14 @@ public class ValuePropertyDistributorStep implements ServiceFileGenerator {
         s = s.strip();
         if (s.startsWith("\"") && s.endsWith("\"")) return s.substring(1, s.length() - 1);
         return s;
+    }
+
+    private static boolean isBlocked(String key) {
+        if (key == null) return false;
+        for (String prefix : BLOCKED_KEY_PREFIXES) {
+            if (key.equals(prefix) || key.startsWith(prefix + ".")) return true;
+        }
+        return false;
     }
 
     private static String quoteIfNeeded(String value) {

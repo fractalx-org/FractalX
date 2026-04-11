@@ -195,7 +195,16 @@ public class RelationshipDecoupler {
                     }
                     String oldSegment = upperFirst(entry.getKey());   // e.g. "Payment"
                     String newSegment = upperFirst(entry.getValue()); // e.g. "PaymentId"
-                    renamedName = renamedName.replace(oldSegment, newSegment);
+                    // Avoid double-renaming: if oldSegment is already followed by the suffix
+                    // we're adding (e.g. "Customer" already followed by "Id"), don't rename.
+                    // e.g. findByCustomerId.replace("Customer","CustomerId") must NOT yield findByCustomerIdId
+                    if (newSegment.startsWith(oldSegment) && newSegment.length() > oldSegment.length()) {
+                        String suffix = java.util.regex.Pattern.quote(
+                                newSegment.substring(oldSegment.length()));
+                        renamedName = renamedName.replaceAll(oldSegment + "(?!" + suffix + ")", newSegment);
+                    } else {
+                        renamedName = renamedName.replace(oldSegment, newSegment);
+                    }
                 }
 
                 if (!renamedName.equals(originalName)) {

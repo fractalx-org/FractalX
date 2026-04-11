@@ -52,7 +52,6 @@ public class DbSummaryStep implements ServiceFileGenerator {
                 import jakarta.persistence.PersistenceContext;
                 import jakarta.persistence.metamodel.EntityType;
                 import org.springframework.beans.factory.annotation.Value;
-                import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
                 import org.springframework.http.ResponseEntity;
                 import org.springframework.web.bind.annotation.*;
 
