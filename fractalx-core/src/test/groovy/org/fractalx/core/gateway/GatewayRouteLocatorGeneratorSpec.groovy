@@ -146,4 +146,62 @@ class GatewayRouteLocatorGeneratorSpec extends Specification {
         c.contains("/api/\" + base + \"/**")
         c.contains("/api/\" + plural + \"/**")
     }
+
+    // ── Controller-scanning mode (monolithSrc provided) ───────────────────────
+
+    @TempDir
+    Path monolithSrc
+
+    private void writeController(String pkg, String className, String classPath,
+                                 List<String[]> methods) {
+        Path dir = monolithSrc.resolve(pkg.replace('.', '/'))
+        Files.createDirectories(dir)
+        def sb = new StringBuilder("package ${pkg};\n")
+        sb.append("import org.springframework.web.bind.annotation.*;\n")
+        sb.append("@RestController\n")
+        sb.append("@RequestMapping(\"${classPath}\")\n")
+        sb.append("public class ${className} {\n")
+        methods.eachWithIndex { m, i ->
+            sb.append("  @${m[0]}Mapping(\"${m[1]}\")\n")
+            sb.append("  public Object method${i}() { return null; }\n")
+        }
+        sb.append("}\n")
+        Files.writeString(dir.resolve("${className}.java"), sb.toString())
+    }
+
+    def "scanning mode emits cross-resource static route before general routes"() {
+        given:
+        FractalModule customer = FractalModule.builder()
+            .serviceName("customer-service")
+            .packageName("com.example.customer")
+            .port(8083)
+            .build()
+
+        writeController("com.example.order", "OrderController", "/api",
+            [["Get", "/orders"], ["Get", "/customers/{customerId}/orders"], ["Get", "/customers/{customerId}/summary"]])
+        writeController("com.example.customer", "CustomerController", "/api/customers",
+            [["Get", ""], ["Get", "/{id}"]])
+
+        when:
+        generator.generate(srcMainJava, [order, customer], monolithSrc)
+
+        then:
+        def c = routeLocator()
+        // Cross-resource route for order-service is generated
+        c.contains("order-service-cross-static")
+        c.contains("/api/customers/*/orders")
+        c.contains("/api/customers/*/summary")
+        // Cross-resource route appears before general order-service-static in the source
+        c.indexOf("order-service-cross-static") < c.indexOf("order-service-static")
+    }
+
+    def "scanning mode skipped when no monolithSrc provided (backward compatible)"() {
+        when:
+        generator.generate(srcMainJava, [order])
+
+        then:
+        def c = routeLocator()
+        !c.contains("cross-static")
+        c.contains("order-service-static")
+    }
 }

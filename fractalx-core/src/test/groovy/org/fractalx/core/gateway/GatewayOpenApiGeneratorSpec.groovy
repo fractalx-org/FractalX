@@ -1,5 +1,6 @@
 package org.fractalx.core.gateway
 
+import org.fractalx.core.auth.AuthPattern
 import org.fractalx.core.model.FractalModule
 import spock.lang.Specification
 import spock.lang.TempDir
@@ -224,5 +225,108 @@ class GatewayOpenApiGeneratorSpec extends Specification {
         def json = postman()
         json.contains('"mode": "raw"')
         json.contains('"language": "json"')
+    }
+
+    // ── Controller-scanning mode (monolithSrc provided) ───────────────────────
+
+    @TempDir
+    Path monolithSrc
+
+    private void writeController(String pkg, String className, String classPath,
+                                 List<String[]> methods) {
+        // methods: [[verb, path], ...]
+        Path dir = monolithSrc.resolve(pkg.replace('.', '/'))
+        Files.createDirectories(dir)
+        def sb = new StringBuilder("package ${pkg};\n")
+        sb.append("import org.springframework.web.bind.annotation.*;\n")
+        sb.append("@RestController\n")
+        sb.append("@RequestMapping(\"${classPath}\")\n")
+        sb.append("public class ${className} {\n")
+        methods.eachWithIndex { m, i ->
+            sb.append("  @${m[0]}Mapping(\"${m[1]}\")\n")
+            sb.append("  public Object method${i}() { return null; }\n")
+        }
+        sb.append("}\n")
+        Files.writeString(dir.resolve("${className}.java"), sb.toString())
+    }
+
+    def "scanning mode: Postman uses actual scanned paths instead of name heuristic"() {
+        given:
+        writeController("com.example.order", "OrderController", "/api/orders",
+            [["Get", ""], ["Post", ""], ["Get", "/{id}"], ["Put", "/{id}"], ["Delete", "/{id}"]])
+
+        when:
+        generator.generate(gatewayRoot, [order], AuthPattern.none(), monolithSrc)
+
+        then:
+        def json = postman()
+        // actual paths derived from controller, not name-heuristic
+        json.contains("{{gateway_url}}/api/orders")
+        json.contains("{{gateway_url}}/api/orders/{{id}}")
+        // service folder still present
+        json.contains('"name": "Order Service"')
+    }
+
+    def "scanning mode: cross-resource endpoint appears in owning service folder"() {
+        given:
+        FractalModule customer = FractalModule.builder()
+            .serviceName("customer-service")
+            .packageName("com.example.customer")
+            .port(8083)
+            .build()
+
+        // OrderController owns GET /api/customers/{id}/orders — a cross-resource route
+        writeController("com.example.order", "OrderController", "/api/orders",
+            [["Get", ""], ["Post", ""], ["Get", "/{id}"]])
+        writeController("com.example.order", "OrderCrossController", "/api/customers/{customerId}",
+            [["Get", "/orders"]])
+        writeController("com.example.customer", "CustomerController", "/api/customers",
+            [["Get", ""], ["Post", ""], ["Get", "/{id}"]])
+
+        when:
+        generator.generate(gatewayRoot, [order, customer], AuthPattern.none(), monolithSrc)
+
+        then:
+        def json = postman()
+        // Cross-resource path /api/customers/{id}/orders must appear somewhere in the collection
+        json.contains("/api/customers/{{id}}/orders")
+        // openapi.yaml must also contain this path under order-service tag
+        def spec = openApi()
+        spec.contains("/api/customers/{id}/orders")
+        spec.contains('tags: ["order-service"]')
+    }
+
+    def "scanning mode: openapi uses actual scanned paths with correct HTTP methods"() {
+        given:
+        writeController("com.example.order", "OrderController", "/api/orders",
+            [["Get", ""], ["Post", ""], ["Get", "/{id}"], ["Put", "/{id}"], ["Delete", "/{id}"],
+             ["Patch", "/{id}/status"]])
+
+        when:
+        generator.generate(gatewayRoot, [order], AuthPattern.none(), monolithSrc)
+
+        then:
+        def spec = openApi()
+        spec.contains("/api/orders:")
+        spec.contains("/api/orders/{id}:")
+        spec.contains("/api/orders/{id}/status:")
+        spec.contains("    get:")
+        spec.contains("    post:")
+        spec.contains("    put:")
+        spec.contains("    delete:")
+        spec.contains("    patch:")
+    }
+
+    def "scanning mode falls back to heuristic when no controllers found in package"() {
+        given: "monolithSrc exists but module package dir does not"
+        Files.createDirectories(monolithSrc)
+
+        when:
+        generator.generate(gatewayRoot, [order], AuthPattern.none(), monolithSrc)
+
+        then: "heuristic CRUD paths are used as fallback"
+        def spec = openApi()
+        spec.contains("/api/orders:")
+        spec.contains("operationId: \"order-service-list\"")
     }
 }

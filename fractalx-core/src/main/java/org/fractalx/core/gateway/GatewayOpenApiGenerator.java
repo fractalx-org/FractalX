@@ -8,7 +8,11 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -18,6 +22,13 @@ import java.util.UUID;
  *
  * Both files are written to fractalx-gateway/docs/ and can be imported
  * directly into Postman, Swagger UI, or any OpenAPI-compatible tooling.
+ *
+ * When a monolith source root is provided via
+ * {@link #generate(Path, List, AuthPattern, Path)}, endpoints are derived
+ * from actual controller annotations (package = module boundary), so
+ * cross-resource routes (e.g. {@code GET /api/customers/{id}/orders} owned
+ * by order-service) appear in the correct service folder. Without a source
+ * root the generator falls back to name-heuristic CRUD paths.
  *
  * Each Postman request includes built-in test scripts that assert:
  *   - Correct HTTP status code
@@ -29,25 +40,64 @@ public class GatewayOpenApiGenerator {
     private static final Logger log = LoggerFactory.getLogger(GatewayOpenApiGenerator.class);
     private static final int GATEWAY_PORT = 9999;
 
+    private final ControllerPathScanner scanner = new ControllerPathScanner();
+
     public void generate(Path gatewayRoot, List<FractalModule> modules) throws IOException {
         generate(gatewayRoot, modules, AuthPattern.none());
     }
 
     public void generate(Path gatewayRoot, List<FractalModule> modules, AuthPattern authPattern) throws IOException {
+        generate(gatewayRoot, modules, authPattern, null);
+    }
+
+    /**
+     * Generates documentation using actual controller paths when {@code monolithSrc} is non-null.
+     *
+     * @param monolithSrc path to the monolith's {@code src/main/java}; {@code null} → heuristic mode
+     */
+    public void generate(Path gatewayRoot, List<FractalModule> modules,
+                         AuthPattern authPattern, Path monolithSrc) throws IOException {
         Path docsDir = gatewayRoot.resolve("docs");
         Files.createDirectories(docsDir);
 
-        Files.writeString(docsDir.resolve("openapi.yaml"), buildOpenApi(modules, authPattern));
-        Files.writeString(docsDir.resolve("postman_collection.json"), buildPostmanCollection(modules, authPattern));
+        Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanned =
+                scanAll(modules, monolithSrc);
 
-        log.info("Generated openapi.yaml and postman_collection.json for {} services", modules.size());
+        Files.writeString(docsDir.resolve("openapi.yaml"),
+                buildOpenApi(modules, authPattern, scanned));
+        Files.writeString(docsDir.resolve("postman_collection.json"),
+                buildPostmanCollection(modules, authPattern, scanned));
+
+        log.info("Generated openapi.yaml and postman_collection.json for {} services{}",
+                modules.size(), monolithSrc != null ? " (controller-scanning mode)" : "");
+    }
+
+    // ── Controller scanning ───────────────────────────────────────────────────
+
+    /**
+     * Scans all modules. Returns an empty map (triggering heuristic fallback) when
+     * {@code monolithSrc} is null.
+     */
+    private Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanAll(
+            List<FractalModule> modules, Path monolithSrc) {
+        Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> result = new LinkedHashMap<>();
+        if (monolithSrc == null) return result;
+        for (FractalModule m : modules) {
+            Set<ControllerPathScanner.EndpointInfo> endpoints = scanner.scan(monolithSrc, m);
+            if (!endpoints.isEmpty()) {
+                result.put(m, endpoints);
+                log.debug("Scanned {} endpoints for {}", endpoints.size(), m.getServiceName());
+            }
+        }
+        return result;
     }
 
     // -------------------------------------------------------------------------
     // OpenAPI 3.0.3
     // -------------------------------------------------------------------------
 
-    private String buildOpenApi(List<FractalModule> modules, AuthPattern authPattern) {
+    private String buildOpenApi(List<FractalModule> modules, AuthPattern authPattern,
+                                Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanned) {
         StringBuilder sb = new StringBuilder();
 
         sb.append("openapi: \"3.0.3\"\n");
@@ -88,12 +138,121 @@ public class GatewayOpenApiGenerator {
             appendAuthPaths(sb);
         }
         for (FractalModule m : modules) {
-            appendServicePaths(sb, m);
+            if (scanned.containsKey(m)) {
+                appendScannedServicePaths(sb, m, scanned.get(m));
+            } else {
+                appendServicePaths(sb, m);
+            }
         }
         appendGatewayHealthPath(sb);
 
         appendComponents(sb);
         return sb.toString();
+    }
+
+    /**
+     * Emits OpenAPI path entries derived from actual scanned controller endpoints.
+     * Paths with the same URL but different HTTP methods are merged under one path key.
+     */
+    private void appendScannedServicePaths(StringBuilder sb, FractalModule m,
+                                            Set<ControllerPathScanner.EndpointInfo> endpoints) {
+        String tag   = m.getServiceName();
+        String opPfx = m.getServiceName();
+
+        // Group by path — preserve insertion order (LinkedHashMap)
+        Map<String, Set<ControllerPathScanner.EndpointInfo>> byPath = new LinkedHashMap<>();
+        for (ControllerPathScanner.EndpointInfo ep : endpoints) {
+            byPath.computeIfAbsent(ep.path(), k -> new LinkedHashSet<>()).add(ep);
+        }
+
+        for (Map.Entry<String, Set<ControllerPathScanner.EndpointInfo>> entry : byPath.entrySet()) {
+            String path = entry.getKey();
+            String openapiPath = path; // already uses {id}
+
+            sb.append("  ").append(openapiPath).append(":\n");
+
+            // Path-level parameter block when path contains {id}
+            if (path.contains("{")) {
+                sb.append("    parameters:\n");
+                // Count unique {id} occurrences — all normalised to {id} so just check once
+                int idCount = 0;
+                for (String seg : path.split("/")) {
+                    if (seg.startsWith("{") && seg.endsWith("}")) idCount++;
+                }
+                // Emit one param per distinct position — for simplicity emit the first one
+                sb.append("      - name: id\n");
+                sb.append("        in: path\n");
+                sb.append("        required: true\n");
+                sb.append("        description: \"Resource identifier\"\n");
+                sb.append("        schema:\n");
+                sb.append("          type: string\n");
+            }
+
+            for (ControllerPathScanner.EndpointInfo ep : entry.getValue()) {
+                String verb = ep.method().toLowerCase();
+                // Build a descriptive operationId from method + path segments
+                String opId = opPfx + "-" + verb + "-" + pathToOpSuffix(path);
+
+                sb.append("    ").append(verb).append(":\n");
+                sb.append("      tags: [\"").append(tag).append("\"]\n");
+                sb.append("      summary: \"").append(summaryFor(ep)).append("\"\n");
+                sb.append("      operationId: \"").append(opId).append("\"\n");
+                sb.append("      security:\n");
+                sb.append("        - BearerAuth: []\n");
+                sb.append("        - ApiKeyAuth: []\n");
+                if ("GET".equals(ep.method()) || "DELETE".equals(ep.method())) {
+                    sb.append("        - {}\n");
+                }
+
+                if ("POST".equals(ep.method()) || "PUT".equals(ep.method()) || "PATCH".equals(ep.method())) {
+                    sb.append("      requestBody:\n");
+                    sb.append("        required: true\n");
+                    sb.append("        content:\n");
+                    sb.append("          application/json:\n");
+                    sb.append("            schema:\n");
+                    sb.append("              $ref: \"#/components/schemas/GenericRequest\"\n");
+                }
+
+                sb.append("      responses:\n");
+                switch (ep.method()) {
+                    case "POST"   -> { appendSuccessResponse(sb, "201"); appendErrorResponses(sb); }
+                    case "DELETE" -> {
+                        sb.append("        \"204\":\n");
+                        sb.append("          description: \"Deleted successfully\"\n");
+                        appendErrorResponses(sb);
+                    }
+                    default       -> { appendSuccessResponse(sb, "200"); appendErrorResponses(sb); }
+                }
+            }
+        }
+    }
+
+    /** Derives a human-readable summary from the endpoint method and path. */
+    private String summaryFor(ControllerPathScanner.EndpointInfo ep) {
+        String[] segs = ep.path().split("/");
+        // Last non-empty, non-variable segment is the resource name
+        String resource = "Resource";
+        for (int i = segs.length - 1; i >= 0; i--) {
+            if (!segs[i].isEmpty() && !segs[i].startsWith("{")) {
+                resource = capitalize(segs[i]);
+                break;
+            }
+        }
+        return switch (ep.method()) {
+            case "GET"    -> ep.hasPathVar() ? "Get " + resource : "List " + resource;
+            case "POST"   -> "Create " + resource;
+            case "PUT"    -> "Update " + resource;
+            case "DELETE" -> "Delete " + resource;
+            case "PATCH"  -> "Patch " + resource;
+            default       -> ep.method() + " " + resource;
+        };
+    }
+
+    /** Converts a path like {@code /api/customers/{id}/orders} to {@code customers-id-orders}. */
+    private String pathToOpSuffix(String path) {
+        return path.replaceAll("^/", "")
+                   .replaceAll("\\{[^/]+\\}", "id")
+                   .replace("/", "-");
     }
 
     private void appendAuthPaths(StringBuilder sb) {
@@ -292,7 +451,8 @@ public class GatewayOpenApiGenerator {
     // Postman Collection v2.1
     // -------------------------------------------------------------------------
 
-    private String buildPostmanCollection(List<FractalModule> modules, AuthPattern authPattern) {
+    private String buildPostmanCollection(List<FractalModule> modules, AuthPattern authPattern,
+                                           Map<FractalModule, Set<ControllerPathScanner.EndpointInfo>> scanned) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
         sb.append("  \"info\": {\n");
@@ -327,12 +487,67 @@ public class GatewayOpenApiGenerator {
 
         for (FractalModule m : modules) {
             sb.append(",\n");
-            appendServiceFolder(sb, m);
+            if (scanned.containsKey(m)) {
+                appendScannedServiceFolder(sb, m, scanned.get(m));
+            } else {
+                appendServiceFolder(sb, m);
+            }
         }
 
         sb.append("\n  ]\n");
         sb.append("}\n");
         return sb.toString();
+    }
+
+    /**
+     * Emits a Postman folder for a service using actual scanned endpoints.
+     * Cross-resource endpoints (owned by this module but living under another service's URL prefix)
+     * are included in this folder so testers see them correctly attributed.
+     */
+    private void appendScannedServiceFolder(StringBuilder sb, FractalModule m,
+                                             Set<ControllerPathScanner.EndpointInfo> endpoints) {
+        String entity = m.getServiceName().replace("-service", "");
+        String name   = displayName(m);
+
+        sb.append("    {\n");
+        sb.append("      \"name\": \"").append(name).append("\",\n");
+        sb.append("      \"item\": [\n");
+
+        List<ControllerPathScanner.EndpointInfo> list = new java.util.ArrayList<>(endpoints);
+        for (int i = 0; i < list.size(); i++) {
+            ControllerPathScanner.EndpointInfo ep = list.get(i);
+            String url    = "{{gateway_url}}" + postmanPath(ep.path());
+            String body   = needsBody(ep.method()) ? buildSampleBody(entity) : null;
+            String reqName = summaryFor(ep);
+            boolean comma  = (i < list.size() - 1);
+            appendPostmanRequest(sb, reqName, ep.method(), url, body, testsFor(ep), comma);
+            if (i < list.size() - 1) sb.append("\n");
+        }
+
+        sb.append("\n      ]\n");
+        sb.append("    }");
+    }
+
+    /**
+     * Converts an OpenAPI-style path with {@code {id}} segments to a Postman
+     * path with {@code {{id}}} variable references.
+     */
+    private String postmanPath(String path) {
+        return path.replaceAll("\\{[^/]+\\}", "{{id}}");
+    }
+
+    private boolean needsBody(String method) {
+        return "POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method);
+    }
+
+    private String[] testsFor(ControllerPathScanner.EndpointInfo ep) {
+        return switch (ep.method()) {
+            case "POST"   -> createTests();
+            case "PUT"    -> updateTests();
+            case "DELETE" -> deleteTests();
+            case "PATCH"  -> updateTests();
+            default       -> ep.hasPathVar() ? getByIdTests() : listTests();
+        };
     }
 
     private void appendAuthFolder(StringBuilder sb) {
