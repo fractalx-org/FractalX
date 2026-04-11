@@ -119,18 +119,19 @@ public class NetScopeContextInterceptor implements ClientInterceptor, ServerInte
                 if (internalToken != null && !internalToken.isBlank()) {
                     try {
                         String secret = resolveInternalJwtSecret();
-                        io.jsonwebtoken.Claims claims = io.jsonwebtoken.Jwts.parserBuilder()
-                                .setSigningKey(io.jsonwebtoken.security.Keys.hmacShaKeyFor(
-                                        secret.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
-                                // Validate issuer — only accept tokens minted by the gateway
+                        javax.crypto.SecretKey key = io.jsonwebtoken.security.Keys.hmacShaKeyFor(
+                                secret.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                        // JJWT 0.12.x API: parser() / verifyWith() / parseSignedClaims() / getPayload()
+                        io.jsonwebtoken.Claims claims = io.jsonwebtoken.Jwts.parser()
+                                .verifyWith(key)
                                 .requireIssuer("fractalx-gateway")
                                 .build()
-                                .parseClaimsJws(internalToken)
-                                .getBody();
-                        // Validate audience — only accept tokens intended for internal service calls
-                        String aud = claims.getAudience();
-                        if (!"fractalx-internal".equals(aud)) {
-                            log.warn("NetScope: x-internal-token has unexpected audience '{}' — rejecting", aud);
+                                .parseSignedClaims(internalToken)
+                                .getPayload();
+                        // Validate audience — JJWT 0.12.x returns Set<String>
+                        java.util.Set<String> audSet = claims.getAudience();
+                        if (audSet == null || !audSet.contains("fractalx-internal")) {
+                            log.warn("NetScope: x-internal-token has unexpected audience '{}' — rejecting", audSet);
                             super.onHalfClose();
                             return;
                         }
