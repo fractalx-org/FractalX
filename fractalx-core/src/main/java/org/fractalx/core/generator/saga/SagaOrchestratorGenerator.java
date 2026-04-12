@@ -2,6 +2,7 @@ package org.fractalx.core.generator.saga;
 
 import org.fractalx.core.FractalxVersion;
 import org.fractalx.core.config.FractalxConfig;
+import org.fractalx.core.util.NamingUtils;
 import org.fractalx.core.util.SpringBootVersionUtil;
 import org.fractalx.core.datamanagement.DataReadmeGenerator;
 import org.fractalx.core.model.FractalModule;
@@ -684,7 +685,7 @@ public class SagaOrchestratorGenerator {
         Set<String> injectedClients = new java.util.LinkedHashSet<>();
         for (SagaStep step : saga.getSteps()) {
             String clientType = step.getBeanType() + "Client";
-            String fieldName  = Character.toLowerCase(clientType.charAt(0)) + clientType.substring(1);
+            String fieldName  = NamingUtils.decapitalize(clientType);
             if (injectedClients.add(clientType)) {
                 sb.append("    private final ").append(clientType).append(" ").append(fieldName).append(";\n");
             }
@@ -707,7 +708,7 @@ public class SagaOrchestratorGenerator {
         Set<String> seenCtorTypes = new java.util.LinkedHashSet<>();
         for (SagaStep step : saga.getSteps()) {
             String clientType = step.getBeanType() + "Client";
-            String fieldName  = Character.toLowerCase(clientType.charAt(0)) + clientType.substring(1);
+            String fieldName  = NamingUtils.decapitalize(clientType);
             if (seenCtorTypes.add(clientType)) {
                 ctorParams.add(clientType + " " + fieldName);
             }
@@ -719,7 +720,7 @@ public class SagaOrchestratorGenerator {
         Set<String> assigned = new java.util.LinkedHashSet<>();
         for (SagaStep step : saga.getSteps()) {
             String clientType = step.getBeanType() + "Client";
-            String fieldName  = Character.toLowerCase(clientType.charAt(0)) + clientType.substring(1);
+            String fieldName  = NamingUtils.decapitalize(clientType);
             if (assigned.add(fieldName)) {
                 sb.append("        this.").append(fieldName).append(" = ").append(fieldName).append(";\n");
             }
@@ -784,8 +785,7 @@ public class SagaOrchestratorGenerator {
 
         for (int i = 0; i < saga.getSteps().size(); i++) {
             SagaStep step = saga.getSteps().get(i);
-            String clientField = Character.toLowerCase(step.getBeanType().charAt(0))
-                               + step.getBeanType().substring(1) + "Client";
+            String clientField = NamingUtils.decapitalize(step.getBeanType()) + "Client";
             String stepLabel = step.getTargetServiceName() + ":" + step.getMethodName();
             String callArgs = buildCallArgs(step.getCallArguments(), paramTypeMap, params);
 
@@ -844,8 +844,7 @@ public class SagaOrchestratorGenerator {
             // The "reversed" step at position i in reversed list is at index (size-1-i) in the original
             int originalIdx = stepsForComp.size() - 1 - i;
             if (step.hasCompensation()) {
-                String clientField = Character.toLowerCase(step.getBeanType().charAt(0))
-                                   + step.getBeanType().substring(1) + "Client";
+                String clientField = NamingUtils.decapitalize(step.getBeanType()) + "Client";
                 sb.append("        if (lastCompletedStep >= ").append(originalIdx).append(") {\n");
                 sb.append("            try {\n");
                 sb.append("                // Compensate step ").append(originalIdx).append(": ")
@@ -1121,7 +1120,7 @@ public class SagaOrchestratorGenerator {
                     int lastGet = varPart.lastIndexOf(".get");
                     String getterPart = varPart.substring(lastGet + 4); // after ".get"
                     getterPart = getterPart.replace("()", ""); // remove ()
-                    String nestedVar = Character.toLowerCase(getterPart.charAt(0)) + getterPart.substring(1);
+                    String nestedVar = NamingUtils.decapitalize(getterPart);
                     // Try "customerId" as a param
                     String idParam = nestedVar + "Id";
                     if (paramTypeMap.containsKey(idParam)) {
@@ -1354,8 +1353,7 @@ public class SagaOrchestratorGenerator {
                 """);
 
         for (SagaDefinition saga : sagas) {
-            String svcField = Character.toLowerCase(saga.toClassName().charAt(0))
-                            + saga.toClassName().substring(1) + "SagaService";
+            String svcField = NamingUtils.decapitalize(saga.toClassName()) + "SagaService";
             sb.append("    private final ").append(saga.toClassName()).append("SagaService ")
               .append(svcField).append(";\n");
         }
@@ -1366,15 +1364,13 @@ public class SagaOrchestratorGenerator {
         List<String> params = new ArrayList<>();
         for (SagaDefinition saga : sagas) {
             String svcType  = saga.toClassName() + "SagaService";
-            String svcField = Character.toLowerCase(saga.toClassName().charAt(0))
-                            + saga.toClassName().substring(1) + "SagaService";
+            String svcField = NamingUtils.decapitalize(saga.toClassName()) + "SagaService";
             params.add(svcType + " " + svcField);
         }
         params.add("SagaInstanceRepository sagaRepository");
         sb.append(String.join(", ", params)).append(") {\n");
         for (SagaDefinition saga : sagas) {
-            String svcField = Character.toLowerCase(saga.toClassName().charAt(0))
-                            + saga.toClassName().substring(1) + "SagaService";
+            String svcField = NamingUtils.decapitalize(saga.toClassName()) + "SagaService";
             sb.append("        this.").append(svcField).append(" = ").append(svcField).append(";\n");
         }
         sb.append("        this.sagaRepository = sagaRepository;\n");
@@ -1382,8 +1378,7 @@ public class SagaOrchestratorGenerator {
 
         // Per-saga start endpoint
         for (SagaDefinition saga : sagas) {
-            String svcField = Character.toLowerCase(saga.toClassName().charAt(0))
-                            + saga.toClassName().substring(1) + "SagaService";
+            String svcField = NamingUtils.decapitalize(saga.toClassName()) + "SagaService";
             sb.append("    /** Start '").append(saga.getSagaId()).append("' saga. */\n");
             sb.append("    @PostMapping(\"/").append(saga.getSagaId()).append("/start\")\n");
             sb.append("    public ResponseEntity<Map<String, String>> start").append(saga.toClassName())
