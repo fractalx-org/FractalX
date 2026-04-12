@@ -38,11 +38,11 @@ public class GatewayPomGenerator {
                 <description>Auto-generated API Gateway for FractalX microservices</description>
             
                 <properties>
-                    <java.version>17</java.version>
+                    <java.version>__JAVA_VERSION__</java.version>
                     <spring-boot.version>__SB_VERSION__</spring-boot.version>
                     <spring-cloud.version>__SC_VERSION__</spring-cloud.version>
-                    <maven.compiler.source>17</maven.compiler.source>
-                    <maven.compiler.target>17</maven.compiler.target>
+                    <maven.compiler.source>__JAVA_VERSION__</maven.compiler.source>
+                    <maven.compiler.target>__JAVA_VERSION__</maven.compiler.target>
                     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
                 </properties>
             
@@ -175,6 +175,7 @@ public class GatewayPomGenerator {
         String gatewayBootVersion  = isBoot4Plus ? "3.4.13" : config.springBootVersion();
         String gatewayCloudVersion = isBoot4Plus ? "2024.0.0" : config.springCloudVersion();
         pomContent = pomContent
+                .replace("__JAVA_VERSION__", config.javaVersion())
                 .replace("__SB_VERSION__", gatewayBootVersion)
                 .replace("__SC_VERSION__", gatewayCloudVersion)
                 .replace("__OTEL_DEPS__", otelDeps)
