@@ -61,7 +61,14 @@ class AdminControllerGenerator {
                     private boolean checkServiceHealth(String url) {
                         try {
                             String resp = restTemplate.getForObject(url, String.class);
-                            return resp != null && resp.contains("UP");
+                            if (resp == null) return false;
+                            try {
+                                com.fasterxml.jackson.databind.JsonNode root =
+                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
+                                return "UP".equalsIgnoreCase(root.path("status").asText(""));
+                            } catch (Exception e) {
+                                return resp.toUpperCase().contains("UP");
+                            }
                         } catch (Exception e) {
                             return false;
                         }

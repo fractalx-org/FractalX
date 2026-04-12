@@ -193,14 +193,22 @@ class AdminTopologyGenerator {
                         } catch (Exception e) {
                             return "DOWN";
                         }
-                        // Phase 2: actuator health
+                        // Phase 2: actuator health (parse JSON for robust status detection)
                         try {
                             String resp = restTemplate.getForObject(
                                     "http://" + host + ":" + port + actuatorPath, String.class);
                             if (resp == null) return "RUNNING";
-                            boolean anyDown = resp.contains("DOWN");
-                            boolean allUp   = resp.contains("UP") && !anyDown;
-                            return allUp ? "UP" : anyDown ? "DEGRADED" : "RUNNING";
+                            try {
+                                com.fasterxml.jackson.databind.JsonNode root =
+                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
+                                String status = root.path("status").asText("UNKNOWN");
+                                if ("UP".equalsIgnoreCase(status)) return "UP";
+                                if ("DOWN".equalsIgnoreCase(status)) return "DEGRADED";
+                                if ("OUT_OF_SERVICE".equalsIgnoreCase(status)) return "DEGRADED";
+                                return "RUNNING";
+                            } catch (Exception parseEx) {
+                                return "RUNNING";
+                            }
                         } catch (Exception e) {
                             return "RUNNING"; // port open but actuator not exposed
                         }

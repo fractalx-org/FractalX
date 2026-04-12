@@ -417,9 +417,16 @@ class AdminDataConsistencyGenerator {
 
                     private String fetchDbHealth(int port) {
                         try {
-                            Object resp = restTemplate.getForObject(
-                                    "http://localhost:" + port + "/actuator/health/db", Object.class);
-                            return resp != null && resp.toString().contains("UP") ? "UP" : "DOWN";
+                            String resp = restTemplate.getForObject(
+                                    "http://localhost:" + port + "/actuator/health/db", String.class);
+                            if (resp == null) return "DOWN";
+                            try {
+                                com.fasterxml.jackson.databind.JsonNode root =
+                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
+                                return "UP".equalsIgnoreCase(root.path("status").asText("")) ? "UP" : "DOWN";
+                            } catch (Exception e) {
+                                return resp.toUpperCase().contains("UP") ? "UP" : "DOWN";
+                            }
                         } catch (Exception e) {
                             return "UNKNOWN";
                         }
@@ -461,7 +468,14 @@ class AdminDataConsistencyGenerator {
                             String resp = restTemplate.getForObject(
                                     "http://localhost:" + SAGA_ORCHESTRATOR_PORT + "/actuator/health",
                                     String.class);
-                            return (resp != null && resp.contains("UP")) ? "UP" : "DOWN";
+                            if (resp == null) return "DOWN";
+                            try {
+                                com.fasterxml.jackson.databind.JsonNode root =
+                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
+                                return "UP".equalsIgnoreCase(root.path("status").asText("")) ? "UP" : "DOWN";
+                            } catch (Exception e) {
+                                return resp.toUpperCase().contains("UP") ? "UP" : "DOWN";
+                            }
                         } catch (Exception e) {
                             return "DOWN";
                         }
