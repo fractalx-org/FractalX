@@ -90,7 +90,14 @@ class RegistryServiceClassGenerator {
                         if (healthUrl == null || healthUrl.isBlank()) return false;
                         try {
                             String response = restTemplate.getForObject(healthUrl, String.class);
-                            return response != null && response.contains("UP");
+                            if (response == null) return false;
+                            try {
+                                com.fasterxml.jackson.databind.JsonNode root =
+                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(response);
+                                return "UP".equalsIgnoreCase(root.path("status").asText(""));
+                            } catch (Exception e) {
+                                return response.toUpperCase().contains("UP");
+                            }
                         } catch (Exception e) {
                             return false;
                         }
