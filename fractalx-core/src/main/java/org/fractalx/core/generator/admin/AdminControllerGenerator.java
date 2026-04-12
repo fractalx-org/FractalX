@@ -62,13 +62,10 @@ class AdminControllerGenerator {
                         try {
                             String resp = restTemplate.getForObject(url, String.class);
                             if (resp == null) return false;
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode root =
-                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
-                                return "UP".equalsIgnoreCase(root.path("status").asText(""));
-                            } catch (Exception e) {
-                                return resp.toUpperCase().contains("UP");
-                            }
+                            java.util.regex.Matcher m = java.util.regex.Pattern
+                                    .compile("\"status\"\\\\s*:\\\\s*\"([^\"]+)\"")
+                                    .matcher(resp);
+                            return m.find() && "UP".equalsIgnoreCase(m.group(1));
                         } catch (Exception e) {
                             return false;
                         }

@@ -91,13 +91,10 @@ class RegistryServiceClassGenerator {
                         try {
                             String response = restTemplate.getForObject(healthUrl, String.class);
                             if (response == null) return false;
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode root =
-                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(response);
-                                return "UP".equalsIgnoreCase(root.path("status").asText(""));
-                            } catch (Exception e) {
-                                return response.toUpperCase().contains("UP");
-                            }
+                            java.util.regex.Matcher m = java.util.regex.Pattern
+                                    .compile("\"status\"\\\\s*:\\\\s*\"([^\"]+)\"")
+                                    .matcher(response);
+                            return m.find() && "UP".equalsIgnoreCase(m.group(1));
                         } catch (Exception e) {
                             return false;
                         }
