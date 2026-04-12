@@ -420,13 +420,10 @@ class AdminDataConsistencyGenerator {
                             String resp = restTemplate.getForObject(
                                     "http://localhost:" + port + "/actuator/health/db", String.class);
                             if (resp == null) return "DOWN";
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode root =
-                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
-                                return "UP".equalsIgnoreCase(root.path("status").asText("")) ? "UP" : "DOWN";
-                            } catch (Exception e) {
-                                return resp.toUpperCase().contains("UP") ? "UP" : "DOWN";
-                            }
+                            java.util.regex.Matcher dbM = java.util.regex.Pattern
+                                    .compile("\"status\"\\\\s*:\\\\s*\"([^\"]+)\"")
+                                    .matcher(resp);
+                            return dbM.find() && "UP".equalsIgnoreCase(dbM.group(1)) ? "UP" : "DOWN";
                         } catch (Exception e) {
                             return "UNKNOWN";
                         }
@@ -469,13 +466,10 @@ class AdminDataConsistencyGenerator {
                                     "http://localhost:" + SAGA_ORCHESTRATOR_PORT + "/actuator/health",
                                     String.class);
                             if (resp == null) return "DOWN";
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode root =
-                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
-                                return "UP".equalsIgnoreCase(root.path("status").asText("")) ? "UP" : "DOWN";
-                            } catch (Exception e) {
-                                return resp.toUpperCase().contains("UP") ? "UP" : "DOWN";
-                            }
+                            java.util.regex.Matcher sagaM = java.util.regex.Pattern
+                                    .compile("\"status\"\\\\s*:\\\\s*\"([^\"]+)\"")
+                                    .matcher(resp);
+                            return sagaM.find() && "UP".equalsIgnoreCase(sagaM.group(1)) ? "UP" : "DOWN";
                         } catch (Exception e) {
                             return "DOWN";
                         }
