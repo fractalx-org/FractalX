@@ -415,18 +415,13 @@ class AdminDataConsistencyGenerator {
 
                     // -------------------------------------------------------------------------
 
+                    @SuppressWarnings("unchecked")
                     private String fetchDbHealth(int port) {
                         try {
-                            String resp = restTemplate.getForObject(
-                                    "http://localhost:" + port + "/actuator/health/db", String.class);
-                            if (resp == null) return "DOWN";
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode root =
-                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
-                                return "UP".equalsIgnoreCase(root.path("status").asText("")) ? "UP" : "DOWN";
-                            } catch (Exception e) {
-                                return resp.toUpperCase().contains("UP") ? "UP" : "DOWN";
-                            }
+                            java.util.Map<String, Object> body = restTemplate.getForObject(
+                                    "http://localhost:" + port + "/actuator/health/db", java.util.Map.class);
+                            return body != null && "UP".equalsIgnoreCase(String.valueOf(body.get("status")))
+                                    ? "UP" : "DOWN";
                         } catch (Exception e) {
                             return "UNKNOWN";
                         }
@@ -463,19 +458,14 @@ class AdminDataConsistencyGenerator {
                         }
                     }
 
+                    @SuppressWarnings("unchecked")
                     private String fetchSagaOrchestratorHealth() {
                         try {
-                            String resp = restTemplate.getForObject(
+                            java.util.Map<String, Object> body = restTemplate.getForObject(
                                     "http://localhost:" + SAGA_ORCHESTRATOR_PORT + "/actuator/health",
-                                    String.class);
-                            if (resp == null) return "DOWN";
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode root =
-                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
-                                return "UP".equalsIgnoreCase(root.path("status").asText("")) ? "UP" : "DOWN";
-                            } catch (Exception e) {
-                                return resp.toUpperCase().contains("UP") ? "UP" : "DOWN";
-                            }
+                                    java.util.Map.class);
+                            return body != null && "UP".equalsIgnoreCase(String.valueOf(body.get("status")))
+                                    ? "UP" : "DOWN";
                         } catch (Exception e) {
                             return "DOWN";
                         }

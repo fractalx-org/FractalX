@@ -195,20 +195,15 @@ class AdminTopologyGenerator {
                         }
                         // Phase 2: actuator health (parse JSON for robust status detection)
                         try {
-                            String resp = restTemplate.getForObject(
-                                    "http://" + host + ":" + port + actuatorPath, String.class);
-                            if (resp == null) return "RUNNING";
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode root =
-                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
-                                String status = root.path("status").asText("UNKNOWN");
-                                if ("UP".equalsIgnoreCase(status)) return "UP";
-                                if ("DOWN".equalsIgnoreCase(status)) return "DEGRADED";
-                                if ("OUT_OF_SERVICE".equalsIgnoreCase(status)) return "DEGRADED";
-                                return "RUNNING";
-                            } catch (Exception parseEx) {
-                                return "RUNNING";
-                            }
+                            @SuppressWarnings("unchecked")
+                            java.util.Map<String, Object> body = restTemplate.getForObject(
+                                    "http://" + host + ":" + port + actuatorPath, java.util.Map.class);
+                            if (body == null) return "RUNNING";
+                            String status = String.valueOf(body.getOrDefault("status", "UNKNOWN"));
+                            if ("UP".equalsIgnoreCase(status)) return "UP";
+                            if ("DOWN".equalsIgnoreCase(status)) return "DEGRADED";
+                            if ("OUT_OF_SERVICE".equalsIgnoreCase(status)) return "DEGRADED";
+                            return "RUNNING";
                         } catch (Exception e) {
                             return "RUNNING"; // port open but actuator not exposed
                         }
