@@ -25,7 +25,7 @@ Manual microservices migrations are slow, error-prone, and expensive — requiri
 | Database isolation | Manually split schemas | `DataIsolationGenerator` + Flyway scaffolds |
 | Distributed sagas | Write orchestrator from scratch | Full saga service from `@DistributedSaga` |
 | Docker deployment | Write Dockerfiles + Compose | Generated `Dockerfile` + `docker-compose.yml` |
-| Admin dashboard | Build your own | 14-section ops dashboard auto-generated |
+| Admin dashboard | Build your own | 15-section ops dashboard auto-generated |
 
 ---
 
@@ -122,7 +122,7 @@ mvn fractalx:decompose
 ### Step 5 -- Start everything
 
 ```bash
-cd fractalx-output
+cd microservices
 ./start-all.sh
 ```
 
@@ -182,7 +182,7 @@ Then, after all services are generated:
 ```
 GatewayGenerator           -> fractalx-gateway (Spring Cloud Gateway + security + CORS + metrics)
 RegistryServiceGenerator   -> fractalx-registry (lightweight REST-based service registry)
-AdminServiceGenerator      -> admin-service (14-section ops dashboard)
+AdminServiceGenerator      -> admin-service (15-section ops dashboard)
 LoggerServiceGenerator     -> logger-service (structured log ingestion + query)
 SagaOrchestratorGenerator  -> fractalx-saga-orchestrator (when @DistributedSaga is found)
 DockerComposeGenerator     -> docker-compose.yml + multi-stage Dockerfiles
@@ -336,7 +336,7 @@ FractalX detects methods annotated with `@DistributedSaga`, maps their cross-ser
 ```java
 @DistributedSaga(
     sagaId       = "checkout",
-    compensation = "cancelCheckout"
+    compensationMethod = "cancelCheckout"
 )
 public void processCheckout(Long orderId, Long userId) {
     orderService.confirm(orderId);
@@ -586,7 +586,7 @@ Every goal renders the **FRACTALX** ASCII banner. The interactive menu is the re
 
 | Flag | Default | Description |
 |---|---|---|
-| `-Dfractalx.outputDirectory` | `./fractalx-output` | Output directory for generated services |
+| `-Dfractalx.outputDirectory` | `./microservices` | Output directory for generated services |
 | `-Dfractalx.color=false` | `true` | Disable ANSI colors (auto-disabled on non-TTY) |
 
 ---
@@ -755,7 +755,7 @@ mvn fractalx:stop                                        # 7. Stop all
 ## 8. Generated Output
 
 ```
-fractalx-output/
+microservices/
 +-- fractalx-registry/              # Service discovery registry -- start first
 +-- order-service/
 |   +-- pom.xml                     # netscope-server, netscope-client, resilience4j deps
@@ -814,7 +814,7 @@ fractalx-output/
 ### One command (recommended)
 
 ```bash
-cd fractalx-output
+cd microservices
 ./start-all.sh
 ```
 
@@ -861,7 +861,7 @@ cd admin-service    && mvn spring-boot:run
 ## 10. Docker Deployment
 
 ```bash
-cd fractalx-output
+cd microservices
 docker compose up --build
 ```
 
@@ -1225,7 +1225,7 @@ fractalx:
 Then activate the `db` profile:
 
 ```bash
-cd fractalx-output/admin-service
+cd microservices/admin-service
 mvn spring-boot:run -Dspring-boot.run.profiles=db
 ```
 
@@ -1635,7 +1635,7 @@ spring.sql.init.enabled: false
 ```bash
 mvn spring-boot:run -e -X                                    # full Maven debug
 mvn spring-boot:run -Dspring-boot.run.arguments="--debug"    # Spring condition report
-tail -f fractalx-output/order-service.log                    # service log
+tail -f microservices/order-service.log                    # service log
 curl -v http://localhost:9999/api/orders 2>&1 | grep -i "correlation\|trace"
 ```
 
