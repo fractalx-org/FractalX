@@ -233,7 +233,7 @@ public class PomGenerator implements ServiceFileGenerator {
 
                     <groupId>%s</groupId>
                     <artifactId>%s</artifactId>
-                    <version>1.0.0-SNAPSHOT</version>
+                    <version>%s</version>
                     <packaging>jar</packaging>
 
                     <name>%s</name>
@@ -324,6 +324,7 @@ public class PomGenerator implements ServiceFileGenerator {
                 """.formatted(
                 cfg.effectiveBasePackage(),
                 module.getServiceName(),
+                cfg.initialServiceVersion(),
                 module.getServiceName(),
                 cfg.javaVersion(),
                 cfg.springBootVersion(),

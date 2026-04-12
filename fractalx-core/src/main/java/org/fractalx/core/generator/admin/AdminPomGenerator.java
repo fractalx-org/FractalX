@@ -25,7 +25,7 @@ class AdminPomGenerator {
 
                     <groupId>%s</groupId>
                     <artifactId>admin-service</artifactId>
-                    <version>1.0.0-SNAPSHOT</version>
+                    <version>%s</version>
                     <packaging>jar</packaging>
 
                     <name>FractalX Admin Service</name>
@@ -163,7 +163,7 @@ class AdminPomGenerator {
                         </plugins>
                     </build>
                 </project>
-                """.formatted(config.effectiveBasePackage(), config.javaVersion(), config.springBootVersion(), config.javaVersion(), config.javaVersion(), FractalxVersion.get(),
+                """.formatted(config.effectiveBasePackage(), config.initialServiceVersion(), config.javaVersion(), config.springBootVersion(), config.javaVersion(), config.javaVersion(), FractalxVersion.get(),
                         SpringBootVersionUtil.isBoot4Plus(config.springBootVersion()) ? """
 
                             <exclusions>
