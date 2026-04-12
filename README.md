@@ -2,7 +2,7 @@
 
 [![Maven Central](https://img.shields.io/badge/maven--central-0.4.0-blue)](https://central.sonatype.com/artifact/org.fractalx/fractalx-annotations)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
-[![Java](https://img.shields.io/badge/java-17%2B-orange)](https://adoptium.net/)
+[![Java](https://img.shields.io/badge/java-21%2B-orange)](https://adoptium.net/)
 [![Spring Boot](https://img.shields.io/badge/spring--boot-3.2%2B%20%7C%204.x-brightgreen)](https://spring.io/projects/spring-boot)
 
 **Static decomposition framework — converts modular monolithic Spring Boot applications into production-ready microservice deployments via AST analysis and code generation.**
@@ -262,7 +262,7 @@ The host is resolved dynamically from `fractalx-registry` at startup -- no hardc
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Java | 17+ | Required |
+| Java | 21+ (configurable) | Required |
 | Maven | 3.8+ | Required |
 | Git | any | Required |
 | Docker + Docker Compose | 24+ | Optional -- needed only for container deployment |
@@ -400,12 +400,23 @@ Create `fractalx-config.yml` in `src/main/resources/` alongside your `applicatio
 
 ```yaml
 fractalx:
+  base-package: com.acme.generated            # defaults to monolith groupId + ".generated"
+  java-version: 21                            # defaults to version read from source pom.xml, then 21
+  initial-service-version: 1.0.0-SNAPSHOT     # version for generated pom.xml artifacts (can inherit monolith version)
+  spring-boot-version: 3.3.2                  # defaults to version read from source pom.xml
+  spring-cloud-version: 2023.0.1
   registry:
-    url: http://my-registry-host:8761        # baked into FRACTALX_REGISTRY_URL fallback
+    url: http://my-registry-host:8761         # baked into FRACTALX_REGISTRY_URL fallback
+    port: 8761
   logger:
-    url: http://my-logger-host:9099          # baked into FRACTALX_LOGGER_URL fallback
+    url: http://my-logger-host:9099           # baked into FRACTALX_LOGGER_URL fallback
+    port: 9099
+  saga:
+    port: 8099
   otel:
-    endpoint: http://my-jaeger-host:4317     # baked into OTEL_EXPORTER_OTLP_ENDPOINT fallback
+    endpoint: http://my-jaeger-host:4317      # baked into OTEL_EXPORTER_OTLP_ENDPOINT fallback
+    jaeger-ui-port: 16686                     # Jaeger UI port in docker-compose
+    jaeger-otlp-port: 4317                    # Jaeger OTLP collector port in docker-compose
   gateway:
     port: 9999
     cors:
@@ -419,6 +430,10 @@ fractalx:
       url: jdbc:mysql://localhost:3306/admin_db
       username: admin_user
       password: secret
+  docker:
+    maven-build-image: maven:3.9-eclipse-temurin-21   # defaults derived from java-version
+    jre-runtime-image: eclipse-temurin:21-jre-jammy    # defaults derived from java-version
+    jaeger-image: jaegertracing/all-in-one:1.53
   services:
     order-service:
       datasource:
@@ -432,7 +447,7 @@ fractalx:
         password: secret
 ```
 
-All keys are optional. When absent, FractalX falls back to sensible defaults: registry `http://localhost:8761`, logger `http://localhost:9099`, Jaeger `http://localhost:4317`. The source monolith's `application.yml` and `application.properties` are also consulted as a secondary fallback.
+All keys are optional. When absent, FractalX falls back to sensible defaults (e.g., Java 21, registry `http://localhost:8761`, logger `http://localhost:9099`, Jaeger `http://localhost:4317`). Java version, Spring Boot version, and initial service version are also auto-detected from the monolith's `pom.xml`. The source monolith's `application.yml` and `application.properties` are consulted as a secondary fallback.
 
 ### `@Value` property migration
 
@@ -2525,8 +2540,8 @@ project:
   groupId: com.example
   artifactId: my-platform
   version: 1.0.0-SNAPSHOT
-  javaVersion: "17"
-  springBootVersion: 3.2.5
+  javaVersion: "21"
+  springBootVersion: 3.3.2
   description: "My FractalX modular monolith"
 
   services:
@@ -2605,8 +2620,8 @@ project:
 | `groupId` | `String` | `com.example` | Maven group ID |
 | `artifactId` | `String` | `my-platform` | Maven artifact ID |
 | `version` | `String` | `1.0.0-SNAPSHOT` | Project version |
-| `javaVersion` | `String` | `17` | Java source/target version |
-| `springBootVersion` | `String` | `3.2.5` | Spring Boot parent version |
+| `javaVersion` | `String` | `21` | Java source/target version |
+| `springBootVersion` | `String` | `3.3.2` | Spring Boot parent version |
 | `packageName` | `String` | derived | Base Java package (derived as `groupId + "." + artifactId` if omitted) |
 | `description` | `String` | — | Human-readable description |
 | `services` | `List<ServiceSpec>` | — | Service boundary definitions |
