@@ -198,15 +198,17 @@ class AdminTopologyGenerator {
                             String resp = restTemplate.getForObject(
                                     "http://" + host + ":" + port + actuatorPath, String.class);
                             if (resp == null) return "RUNNING";
-                            java.util.regex.Matcher m = java.util.regex.Pattern
-                                    .compile("\"status\"\\\\s*:\\\\s*\"([^\"]+)\"")
-                                    .matcher(resp);
-                            if (!m.find()) return "RUNNING";
-                            String status = m.group(1);
-                            if ("UP".equalsIgnoreCase(status)) return "UP";
-                            if ("DOWN".equalsIgnoreCase(status)) return "DEGRADED";
-                            if ("OUT_OF_SERVICE".equalsIgnoreCase(status)) return "DEGRADED";
-                            return "RUNNING";
+                            try {
+                                com.fasterxml.jackson.databind.JsonNode root =
+                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(resp);
+                                String status = root.path("status").asText("UNKNOWN");
+                                if ("UP".equalsIgnoreCase(status)) return "UP";
+                                if ("DOWN".equalsIgnoreCase(status)) return "DEGRADED";
+                                if ("OUT_OF_SERVICE".equalsIgnoreCase(status)) return "DEGRADED";
+                                return "RUNNING";
+                            } catch (Exception parseEx) {
+                                return "RUNNING";
+                            }
                         } catch (Exception e) {
                             return "RUNNING"; // port open but actuator not exposed
                         }
