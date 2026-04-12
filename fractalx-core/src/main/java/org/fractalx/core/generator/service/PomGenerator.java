@@ -240,10 +240,10 @@ public class PomGenerator implements ServiceFileGenerator {
                     <description>Generated microservice by FractalX</description>
 
                     <properties>
-                        <java.version>17</java.version>
+                        <java.version>%s</java.version>
                         <spring-boot.version>%s</spring-boot.version>
-                        <maven.compiler.source>17</maven.compiler.source>
-                        <maven.compiler.target>17</maven.compiler.target>
+                        <maven.compiler.source>%s</maven.compiler.source>
+                        <maven.compiler.target>%s</maven.compiler.target>
                         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
                     </properties>
 
@@ -325,7 +325,10 @@ public class PomGenerator implements ServiceFileGenerator {
                 cfg.effectiveBasePackage(),
                 module.getServiceName(),
                 module.getServiceName(),
+                cfg.javaVersion(),
                 cfg.springBootVersion(),
+                cfg.javaVersion(),
+                cfg.javaVersion(),
                 cfg.springCloudVersion(),
                 NETSCOPE_VERSION,
                 NETSCOPE_VERSION,

@@ -17,6 +17,7 @@ import java.util.Map;
  * <pre>
  * fractalx:
  *   base-package: com.acme.generated       # defaults to monolith groupId + ".generated"
+ *   java-version: 21                       # defaults to version read from source pom.xml, then 21
  *   spring-boot-version: 3.3.2             # defaults to version read from source pom.xml
  *   spring-cloud-version: 2023.0.1
  *   registry:
@@ -47,8 +48,8 @@ import java.util.Map;
  *     retry-wait-duration: 100ms
  *     timeout-duration: 2s
  *   docker:
- *     maven-build-image: maven:3.9-eclipse-temurin-17
- *     jre-runtime-image: eclipse-temurin:17-jre-jammy
+ *     maven-build-image: maven:3.9-eclipse-temurin-21  # defaults derived from java-version
+ *     jre-runtime-image: eclipse-temurin:21-jre-jammy  # defaults derived from java-version
  *     jaeger-image: jaegertracing/all-in-one:1.53
  *   services:
  *     order-service:
@@ -74,6 +75,7 @@ public record FractalxConfig(
 
         // ── Generalisation fields ─────────────────────────────────────────────
         String basePackage,          // null → derived from source pom groupId at read time
+        String javaVersion,          // defaults to version read from source pom.xml, then "21"
         String springBootVersion,
         String springCloudVersion,
         int    registryPort,
@@ -152,9 +154,13 @@ public record FractalxConfig(
             String jaegerImage
     ) {
         public static DockerImages defaults() {
+            return defaults("21");
+        }
+
+        public static DockerImages defaults(String javaVersion) {
             return new DockerImages(
-                    "maven:3.9-eclipse-temurin-17",
-                    "eclipse-temurin:17-jre-jammy",
+                    "maven:3.9-eclipse-temurin-" + javaVersion,
+                    "eclipse-temurin:" + javaVersion + "-jre-jammy",
                     "jaegertracing/all-in-one:1.53"
             );
         }
@@ -173,6 +179,7 @@ public record FractalxConfig(
                 9090,
                 Map.of(),
                 null,
+                "21",
                 "3.2.0",
                 "2023.0.0",
                 8761,
@@ -200,7 +207,7 @@ public record FractalxConfig(
     public FractalxConfig withBasePackage(String basePackage) {
         return new FractalxConfig(registryUrl, loggerUrl, otelEndpoint, gatewayPort,
                 corsAllowedOrigins, oauth2JwksUri, adminPort, serviceOverrides,
-                basePackage, springBootVersion, springCloudVersion, registryPort,
+                basePackage, javaVersion, springBootVersion, springCloudVersion, registryPort,
                 loggerPort, sagaPort, resilience, dockerImages, features, naming);
     }
 
