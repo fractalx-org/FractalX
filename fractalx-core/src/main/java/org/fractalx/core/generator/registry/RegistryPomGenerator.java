@@ -31,10 +31,10 @@ class RegistryPomGenerator {
                     <description>Lightweight service registry for FractalX microservices</description>
 
                     <properties>
-                        <java.version>17</java.version>
+                        <java.version>__JAVA_VERSION__</java.version>
                         <spring-boot.version>__SB_VERSION__</spring-boot.version>
-                        <maven.compiler.source>17</maven.compiler.source>
-                        <maven.compiler.target>17</maven.compiler.target>
+                        <maven.compiler.source>__JAVA_VERSION__</maven.compiler.source>
+                        <maven.compiler.target>__JAVA_VERSION__</maven.compiler.target>
                         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
                     </properties>
 
@@ -90,7 +90,8 @@ class RegistryPomGenerator {
                 </project>
                 """;
 
-        content = content.replace("__SB_VERSION__", config.springBootVersion());
+        content = content.replace("__JAVA_VERSION__", config.javaVersion())
+                .replace("__SB_VERSION__", config.springBootVersion());
         Files.writeString(registryRoot.resolve("pom.xml"), content);
         log.debug("Generated registry pom.xml");
     }

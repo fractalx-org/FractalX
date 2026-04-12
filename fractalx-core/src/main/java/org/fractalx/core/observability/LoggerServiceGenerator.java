@@ -62,7 +62,7 @@ public class LoggerServiceGenerator {
                     </parent>
 
                     <properties>
-                        <java.version>17</java.version>
+                        <java.version>%s</java.version>
                     </properties>
 
                     <dependencies>
@@ -87,7 +87,7 @@ public class LoggerServiceGenerator {
                 </project>
                 """;
         Files.writeString(root.resolve("pom.xml"),
-                content.formatted(config.effectiveBasePackage(), config.springBootVersion()));
+                content.formatted(config.effectiveBasePackage(), config.springBootVersion(), config.javaVersion()));
     }
 
     private void generateConfig(Path resources) throws IOException {
