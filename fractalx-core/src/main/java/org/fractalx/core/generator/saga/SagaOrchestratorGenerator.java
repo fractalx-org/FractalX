@@ -152,10 +152,10 @@ public class SagaOrchestratorGenerator {
                     <description>Auto-generated distributed saga orchestrator by FractalX</description>
 
                     <properties>
-                        <java.version>17</java.version>
+                        <java.version>__JAVA_VERSION__</java.version>
                         <spring-boot.version>__SB_VERSION__</spring-boot.version>
-                        <maven.compiler.source>17</maven.compiler.source>
-                        <maven.compiler.target>17</maven.compiler.target>
+                        <maven.compiler.source>__JAVA_VERSION__</maven.compiler.source>
+                        <maven.compiler.target>__JAVA_VERSION__</maven.compiler.target>
                         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
                     </properties>
 
@@ -242,6 +242,7 @@ public class SagaOrchestratorGenerator {
                 """);
         writeFile(serviceRoot, "pom.xml",
                 sb.toString()
+                        .replace("__JAVA_VERSION__", config.javaVersion())
                         .replace("__FX_VERSION__", FractalxVersion.get())
                         .replace("__BASE_GROUP__", config.effectiveBasePackage())
                         .replace("__SB_VERSION__", config.springBootVersion())
