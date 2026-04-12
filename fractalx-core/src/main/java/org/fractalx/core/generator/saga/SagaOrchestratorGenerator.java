@@ -1040,6 +1040,16 @@ public class SagaOrchestratorGenerator {
         sb.append("        }\n");
         sb.append("    }\n\n");
 
+        // throwUnresolved helper — used by generated call-site args that could not be resolved
+        sb.append("    /** Throws at runtime for saga step parameters that could not be resolved during generation. */\n");
+        sb.append("    @SuppressWarnings(\"unchecked\")\n");
+        sb.append("    private static <T> T throwUnresolved(String arg) {\n");
+        sb.append("        throw new UnsupportedOperationException(\n");
+        sb.append("                \"Unresolved saga step parameter: '\" + arg + \"' — \"\n");
+        sb.append("                + \"FractalX could not map this expression to a payload accessor. \"\n");
+        sb.append("                + \"See DECOMPOSITION_HINTS.md for guidance.\");\n");
+        sb.append("    }\n\n");
+
         sb.append("}\n");
         return sb.toString();
     }
@@ -1097,7 +1107,10 @@ public class SagaOrchestratorGenerator {
                                   List<MethodParam> sagaParams) {
         if (callArgs.isEmpty()) {
             // No captured args — emit positional references to all saga params
-            if (sagaParams.isEmpty()) return "/* TODO: add parameters */";
+            if (sagaParams.isEmpty()) {
+                log.warn("Saga step has no resolvable parameters — generated code will throw at runtime. Add parameters to the saga method or supply a DecompositionHint.");
+                return "/* FIXME: no saga parameters resolved — add parameters to the saga method */";
+            }
             return sagaParams.stream()
                     .map(p -> "p." + p.getName() + "()")
                     .collect(java.util.stream.Collectors.joining(", "));
@@ -1127,8 +1140,9 @@ public class SagaOrchestratorGenerator {
                         resolvedArgs.add("p." + idParam + "()");
                         continue;
                     }
-                    // Fall back: keep nestedVar + ".getId()" won't work; emit TODO
-                    resolvedArgs.add("/* TODO: resolve " + arg + " */ null");
+                    // Fall back: unresolvable chained accessor — fail fast at runtime
+                    log.warn("Saga step argument '{}' could not be resolved to a payload accessor", arg);
+                    resolvedArgs.add("throwUnresolved(\"" + arg.replace("\"", "\\\"") + "\")");
                 } else {
                     // Simple: "order.getId()" → orderId
                     String entityVarName = varPart;
@@ -1139,8 +1153,9 @@ public class SagaOrchestratorGenerator {
                         // param is "order" itself (less common)
                         resolvedArgs.add("p." + entityVarName + "()");
                     } else {
-                        // No match — emit a TODO comment so code at least compiles as a String stub
-                        resolvedArgs.add("/* TODO: resolve " + arg + " */ null");
+                        // No match — fail fast at runtime rather than passing null silently
+                        log.warn("Saga step argument '{}' could not be resolved to a payload accessor", arg);
+                        resolvedArgs.add("throwUnresolved(\"" + arg.replace("\"", "\\\"") + "\")");
                     }
                 }
             } else if (isNumericLiteral(arg) || "true".equals(arg) || "false".equals(arg) || "null".equals(arg)) {
@@ -1148,8 +1163,9 @@ public class SagaOrchestratorGenerator {
                 resolvedArgs.add(arg);
             } else {
                 // Unknown expression — cannot be resolved in the orchestrator's scope.
-                // Replace with null and leave a TODO comment for the developer.
-                resolvedArgs.add("/* TODO: was '" + arg.replace("*/", "* /") + "' */ null");
+                // Fail fast at runtime so the developer is forced to resolve it.
+                log.warn("Saga step argument '{}' is an unknown expression that cannot be resolved in the orchestrator scope", arg);
+                resolvedArgs.add("throwUnresolved(\"" + arg.replace("\"", "\\\"").replace("*/", "* /") + "\")");
             }
         }
         return String.join(", ", resolvedArgs);
