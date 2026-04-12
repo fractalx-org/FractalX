@@ -24,7 +24,7 @@ class RegistryPomGenerator {
 
                     <groupId>org.fractalx</groupId>
                     <artifactId>fractalx-registry</artifactId>
-                    <version>1.0.0-SNAPSHOT</version>
+                    <version>__SVC_VERSION__</version>
                     <packaging>jar</packaging>
 
                     <name>FractalX Service Registry</name>
@@ -90,7 +90,8 @@ class RegistryPomGenerator {
                 </project>
                 """;
 
-        content = content.replace("__JAVA_VERSION__", config.javaVersion())
+        content = content.replace("__SVC_VERSION__", config.initialServiceVersion())
+                .replace("__JAVA_VERSION__", config.javaVersion())
                 .replace("__SB_VERSION__", config.springBootVersion());
         Files.writeString(registryRoot.resolve("pom.xml"), content);
         log.debug("Generated registry pom.xml");

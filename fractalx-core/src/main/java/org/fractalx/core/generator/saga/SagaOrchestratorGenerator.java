@@ -147,7 +147,7 @@ public class SagaOrchestratorGenerator {
                     <modelVersion>4.0.0</modelVersion>
                     <groupId>__BASE_GROUP__</groupId>
                     <artifactId>fractalx-saga-orchestrator</artifactId>
-                    <version>1.0.0-SNAPSHOT</version>
+                    <version>__SVC_VERSION__</version>
                     <name>FractalX Saga Orchestrator</name>
                     <description>Auto-generated distributed saga orchestrator by FractalX</description>
 
@@ -242,6 +242,7 @@ public class SagaOrchestratorGenerator {
                 """);
         writeFile(serviceRoot, "pom.xml",
                 sb.toString()
+                        .replace("__SVC_VERSION__", config.initialServiceVersion())
                         .replace("__JAVA_VERSION__", config.javaVersion())
                         .replace("__FX_VERSION__", FractalxVersion.get())
                         .replace("__BASE_GROUP__", config.effectiveBasePackage())

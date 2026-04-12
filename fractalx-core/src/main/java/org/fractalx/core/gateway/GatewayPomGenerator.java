@@ -31,7 +31,7 @@ public class GatewayPomGenerator {
             
                 <groupId>org.fractalx.gateway</groupId>
                 <artifactId>fractalx-api-gateway</artifactId>
-                <version>1.0.0-SNAPSHOT</version>
+                <version>__SVC_VERSION__</version>
                 <packaging>jar</packaging>
             
                 <name>FractalX API Gateway</name>
@@ -175,6 +175,7 @@ public class GatewayPomGenerator {
         String gatewayBootVersion  = isBoot4Plus ? "3.4.13" : config.springBootVersion();
         String gatewayCloudVersion = isBoot4Plus ? "2024.0.0" : config.springCloudVersion();
         pomContent = pomContent
+                .replace("__SVC_VERSION__", config.initialServiceVersion())
                 .replace("__JAVA_VERSION__", config.javaVersion())
                 .replace("__SB_VERSION__", gatewayBootVersion)
                 .replace("__SC_VERSION__", gatewayCloudVersion)
@@ -196,10 +197,10 @@ public class GatewayPomGenerator {
                     <dependency>
                         <groupId>%s</groupId>
                         <artifactId>%s</artifactId>
-                        <version>1.0.0-SNAPSHOT</version>
+                        <version>%s</version>
                         <scope>provided</scope>
                     </dependency>
-                    """, config.effectiveBasePackage(), module.getServiceName()));
+                    """, config.effectiveBasePackage(), module.getServiceName(), config.initialServiceVersion()));
         }
 
         return deps.toString();
