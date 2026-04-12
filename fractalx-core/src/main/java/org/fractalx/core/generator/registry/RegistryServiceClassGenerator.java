@@ -86,18 +86,13 @@ class RegistryServiceClassGenerator {
                         });
                     }
 
+                    @SuppressWarnings("unchecked")
                     private boolean checkHealth(String healthUrl) {
                         if (healthUrl == null || healthUrl.isBlank()) return false;
                         try {
-                            String response = restTemplate.getForObject(healthUrl, String.class);
-                            if (response == null) return false;
-                            try {
-                                com.fasterxml.jackson.databind.JsonNode root =
-                                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(response);
-                                return "UP".equalsIgnoreCase(root.path("status").asText(""));
-                            } catch (Exception e) {
-                                return response.toUpperCase().contains("UP");
-                            }
+                            java.util.Map<String, Object> body =
+                                    restTemplate.getForObject(healthUrl, java.util.Map.class);
+                            return body != null && "UP".equalsIgnoreCase(String.valueOf(body.get("status")));
                         } catch (Exception e) {
                             return false;
                         }
