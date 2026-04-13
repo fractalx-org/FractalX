@@ -9,9 +9,10 @@ import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
-import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import org.fractalx.core.graph.DependencyGraph;
 import org.fractalx.core.graph.GraphNode;
+import org.fractalx.core.naming.EnglishPluralizer;
+import org.fractalx.core.naming.NamingConventions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
@@ -52,6 +53,13 @@ public class AuthPatternDetector {
     /** JPA relationship annotations — fields with these are not copied as JWT claims. */
     private static final Set<String> RELATIONSHIP_ANNOTATIONS = Set.of(
             "OneToMany", "ManyToOne", "OneToOne", "ManyToMany", "Embedded", "EmbeddedId");
+
+    /** Path fragments that identify account-creation (registration) endpoints. */
+    private static final Set<String> REGISTRATION_PATHS = Set.of(
+            "/register", "/signup", "/sign-up", "/enroll", "/create-account");
+
+    private static final EnglishPluralizer PLURALIZER =
+            new EnglishPluralizer(NamingConventions.defaults().irregularPlurals());
 
     private final Path projectRoot;
     private final DependencyGraph graph;
@@ -365,48 +373,44 @@ public class AuthPatternDetector {
                                                 injectedServices.put(v.getNameAsString(), type);
                                         }));
 
-                                // Find the register method
+                                // Structural: find POST endpoint mapped to a registration path
                                 for (MethodDeclaration method : cls.getMethods()) {
-                                    if (!method.getNameAsString().toLowerCase().contains("register")) continue;
+                                    if (!hasRegistrationMapping(method)) continue;
 
-                                    // Look for: injectedService.createXxx(new EntityType(...)) calls
+                                    // Structural (data-flow): derive the id field from the user entity
+                                    // setter — e.g. user.setCustomerId(...) → idField = "customerId".
+                                    // This replaces the heuristic startsWith("create") on the service
+                                    // method name, because the *effect* (setting an id on the user) is
+                                    // the structural signal, not what the service method is called.
+                                    String idField = findIdSetterOnUser(method, injectedServices);
+                                    if (idField == null) continue;
+
+                                    // Find the cross-module service call in this registration endpoint
                                     for (MethodCallExpr call : method.findAll(MethodCallExpr.class)) {
                                         if (call.getScope().isEmpty()) continue;
                                         if (!(call.getScope().get() instanceof NameExpr scope)) continue;
 
-                                        String varName   = scope.getNameAsString();
+                                        String varName    = scope.getNameAsString();
                                         String serviceType = injectedServices.get(varName);
                                         if (serviceType == null) continue;
-
-                                        String methodName = call.getNameAsString();
-                                        if (!methodName.startsWith("create")) continue;
-
-                                        // Derive the entity type from the method name: createCustomer → Customer
-                                        String entityType = Character.toUpperCase(methodName.charAt(6))
-                                                + methodName.substring(7);
-                                        if (entityType.isBlank()) continue;
 
                                         // Check this service is from a different package (cross-module)
                                         String serviceTypePkg = resolveServicePackage(cu, serviceType);
                                         if (serviceTypePkg != null && serviceTypePkg.equals(authPkg)) continue;
                                         if (serviceTypePkg != null && serviceTypePkg.equals(userPkg)) continue;
 
-                                        // Derive service name: CustomerService → customer-service
+                                        // Derive service name from type: CustomerService → customer-service
                                         String baseTypeName = serviceType.replace("Service", "");
                                         String serviceName  = toKebabCase(baseTypeName) + "-service";
 
-                                        // Derive API path: Customer → /api/customers
-                                        String entityLower  = Character.toLowerCase(entityType.charAt(0))
-                                                + entityType.substring(1);
-                                        String apiPath      = "/api/" + entityLower + "s";
+                                        // Derive API path from idField: "customerId" → "customer" → pluralize
+                                        String entityLower = idField.endsWith("Id")
+                                                ? idField.substring(0, idField.length() - 2) : idField;
+                                        String apiPath = "/api/" + PLURALIZER.pluralize(entityLower);
 
-                                        // Derive the id field name: customerId
-                                        String idField = entityLower + "Id";
-
-                                        log.debug("Detected register cross-module call: {}.{}() → {} {}",
-                                                varName, methodName, serviceName, apiPath);
-                                        String[] found = {serviceName, apiPath, idField};
-                                        return Stream.<String[]>of(found);
+                                        log.debug("Detected register cross-module call: {}.{}() → {} {} idField={}",
+                                                varName, call.getNameAsString(), serviceName, apiPath, idField);
+                                        return Stream.<String[]>of(new String[]{serviceName, apiPath, idField});
                                     }
                                 }
                             }
@@ -436,6 +440,45 @@ public class AuthPatternDetector {
         }
         // Name-based fallback
         return simpleTypeName.endsWith("Service");
+    }
+
+    /**
+     * Returns true if {@code method} is a POST endpoint mapped to a registration path
+     * (structural check via {@code @PostMapping}/@{@code RequestMapping} annotation value).
+     */
+    private static boolean hasRegistrationMapping(MethodDeclaration method) {
+        for (AnnotationExpr ann : method.getAnnotations()) {
+            String name = ann.getNameAsString();
+            if (!name.equals("PostMapping") && !name.equals("RequestMapping")) continue;
+            String val = ann.toString().toLowerCase();
+            if (REGISTRATION_PATHS.stream().anyMatch(val::contains)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Scans {@code method} for a {@code setXxxId(...)} call whose receiver is NOT itself an
+     * injected service — meaning it's called on the user entity being constructed. Returns
+     * the id field name (e.g. {@code "customerId"}) or {@code null} if none found.
+     *
+     * <p>This is the structural replacement for the heuristic {@code startsWith("create")}:
+     * instead of guessing what service method creates the entity, we observe the *effect* —
+     * which id field is written back onto the user object.
+     */
+    private static String findIdSetterOnUser(MethodDeclaration method,
+                                              Map<String, String> injectedServices) {
+        for (MethodCallExpr call : method.findAll(MethodCallExpr.class)) {
+            if (call.getScope().isEmpty()) continue;
+            if (!(call.getScope().get() instanceof NameExpr scope)) continue;
+            String callName  = call.getNameAsString();
+            String scopeName = scope.getNameAsString();
+            // setXxxId on a variable that is NOT an injected service → it's on the user entity
+            if (callName.startsWith("set") && callName.endsWith("Id") && callName.length() > 5
+                    && !injectedServices.containsKey(scopeName)) {
+                return Character.toLowerCase(callName.charAt(3)) + callName.substring(4);
+            }
+        }
+        return null;
     }
 
     /** Returns the package of the first import matching the given simple type name, or null. */
