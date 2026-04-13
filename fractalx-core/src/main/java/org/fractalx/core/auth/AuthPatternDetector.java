@@ -151,21 +151,11 @@ public class AuthPatternDetector {
                     // 1. @RestController with auth-related request mappings
                     // Use graph for annotation check when available
                     if (hasAnnotationStructural(cls, pkg, "RestController")) {
-                        isAuthClass = cls.getAnnotations().stream()
-                                .anyMatch(this::isRequestMappingToAuth)
-                                || cls.getMethods().stream()
-                                   .anyMatch(m -> m.getAnnotations().stream()
-                                                  .anyMatch(this::isMappingToAuthLogin));
-                        // Also check method parameters for Spring Security types
+                        String fqcn = pkg.isEmpty() ? cls.getNameAsString() : pkg + "." + cls.getNameAsString();
+                        isAuthClass = hasAuthMappings(cls, fqcn);
+                        // Check method parameters for Spring Security types (structural via graph)
                         if (!isAuthClass) {
-                            isAuthClass = cls.getMethods().stream().anyMatch(m ->
-                                    m.getParameters().stream().anyMatch(p -> {
-                                        String pType = p.getType().asString();
-                                        return pType.equals("Authentication")
-                                            || pType.equals("Principal")
-                                            || p.getAnnotations().stream()
-                                                .anyMatch(a -> a.getNameAsString().equals("AuthenticationPrincipal"));
-                                    }));
+                            isAuthClass = hasSecurityMethodParams(cls, fqcn);
                         }
                     }
 
@@ -179,10 +169,9 @@ public class AuthPatternDetector {
                         isAuthClass = implementsInterface(cls, pkg, "UserDetailsService");
                     }
 
-                    // 4. Class has a method returning SecurityFilterChain
+                    // 4. Class has a method returning SecurityFilterChain (structural via graph)
                     if (!isAuthClass) {
-                        isAuthClass = cls.getMethods().stream()
-                                .anyMatch(m -> m.getType().asString().equals("SecurityFilterChain"));
+                        isAuthClass = hasMethodReturningFilterChain(cls, pkg);
                     }
 
                     if (isAuthClass) {
@@ -253,6 +242,67 @@ public class AuthPatternDetector {
         }
         return cls.getImplementedTypes().stream()
                 .anyMatch(t -> t.getNameAsString().equals(interfaceName));
+    }
+
+    /** Checks for auth-related request mapping annotations — via graph method-level data or AST. */
+    private boolean hasAuthMappings(ClassOrInterfaceDeclaration cls, String fqcn) {
+        if (graph != null) {
+            var node = graph.node(fqcn);
+            if (node.isPresent()) {
+                return node.get().methods().stream().anyMatch(m ->
+                        m.annotations().stream().anyMatch(a ->
+                                isHttpMappingAnnotation(a) && m.stringLiterals().stream()
+                                        .anyMatch(s -> AUTH_PATH_FRAGMENTS.stream()
+                                                .anyMatch(frag -> s.toLowerCase().contains(frag)))));
+            }
+        }
+        // AST fallback
+        return cls.getAnnotations().stream().anyMatch(this::isRequestMappingToAuth)
+                || cls.getMethods().stream()
+                   .anyMatch(m -> m.getAnnotations().stream()
+                                  .anyMatch(this::isMappingToAuthLogin));
+    }
+
+    private static boolean isHttpMappingAnnotation(String name) {
+        return Set.of("RequestMapping", "GetMapping", "PostMapping",
+                "PutMapping", "DeleteMapping", "PatchMapping").contains(name);
+    }
+
+    /** Checks for Spring Security parameter types (Authentication, Principal, @AuthenticationPrincipal). */
+    private boolean hasSecurityMethodParams(ClassOrInterfaceDeclaration cls, String fqcn) {
+        if (graph != null) {
+            var node = graph.node(fqcn);
+            if (node.isPresent()) {
+                return node.get().methods().stream().anyMatch(m ->
+                        m.parameterTypes().stream().anyMatch(pt ->
+                                pt.equals("Authentication") || pt.equals("Principal"))
+                        || m.annotations().contains("AuthenticationPrincipal"));
+            }
+        }
+        // AST fallback
+        return cls.getMethods().stream().anyMatch(m ->
+                m.getParameters().stream().anyMatch(p -> {
+                    String pType = p.getType().asString();
+                    return pType.equals("Authentication")
+                        || pType.equals("Principal")
+                        || p.getAnnotations().stream()
+                            .anyMatch(a -> a.getNameAsString().equals("AuthenticationPrincipal"));
+                }));
+    }
+
+    /** Checks for a method returning SecurityFilterChain — via graph or AST. */
+    private boolean hasMethodReturningFilterChain(ClassOrInterfaceDeclaration cls, String pkg) {
+        if (graph != null) {
+            String fqcn = pkg.isEmpty() ? cls.getNameAsString() : pkg + "." + cls.getNameAsString();
+            var node = graph.node(fqcn);
+            if (node.isPresent()) {
+                return node.get().methods().stream()
+                        .anyMatch(m -> "SecurityFilterChain".equals(m.returnType()));
+            }
+        }
+        // AST fallback
+        return cls.getMethods().stream()
+                .anyMatch(m -> m.getType().asString().equals("SecurityFilterChain"));
     }
 
     private static final Set<String> AUTH_PATH_FRAGMENTS = Set.of(

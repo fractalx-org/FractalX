@@ -10,7 +10,6 @@ import com.github.javaparser.ast.expr.StringLiteralExpr;
 import org.fractalx.core.gateway.SecurityProfile.AuthType;
 import org.fractalx.core.gateway.SecurityProfile.RouteSecurityRule;
 import org.fractalx.core.graph.DependencyGraph;
-import org.fractalx.core.graph.GraphNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
@@ -214,18 +213,17 @@ public class SecurityAnalyzer {
         Set<AuthType> detected = new LinkedHashSet<>();
 
         // OAuth2 (highest priority)
-        if (yaml.jwkSetUri != null || yaml.issuerUri != null || anyCallMatches(cus, "oauth2ResourceServer")) {
+        if (yaml.jwkSetUri != null || yaml.issuerUri != null || hasMethodCall("oauth2ResourceServer", cus)) {
             detected.add(AuthType.OAUTH2);
         }
 
         // Basic Auth
-        if (yaml.basicUsername != null || anyCallMatches(cus, "httpBasic")) {
+        if (yaml.basicUsername != null || hasMethodCall("httpBasic", cus)) {
             detected.add(AuthType.BASIC);
         }
 
         // Bearer JWT (custom OncePerRequestFilter with "Bearer " literal)
-        boolean hasBearerFilter = cus.stream().anyMatch(this::isBearerJwtFilter);
-        if (hasBearerFilter) {
+        if (hasBearerJwtFilter(cus)) {
             detected.add(AuthType.BEARER_JWT);
         }
 
@@ -250,38 +248,43 @@ public class SecurityAnalyzer {
         return detected;
     }
 
-    private boolean anyCallMatches(List<CompilationUnit> cus, String methodName) {
+    /** Checks whether any method body contains a call to the given method name. */
+    private boolean hasMethodCall(String methodName, List<CompilationUnit> cus) {
+        if (graph != null) {
+            return !graph.nodesWithMethodCall(methodName).isEmpty();
+        }
+        // AST fallback
         return cus.stream().anyMatch(cu ->
                 cu.findAll(MethodCallExpr.class).stream()
                         .anyMatch(m -> m.getNameAsString().equals(methodName)));
     }
 
-    private boolean isBearerJwtFilter(CompilationUnit cu) {
-        // Structural check: use DependencyGraph when available to find filter subclasses
-        boolean hasFilterSubclass;
+    /**
+     * Detects a Bearer JWT filter pattern: a class that extends OncePerRequestFilter
+     * and contains "Bearer " or "Authorization" string literals in its methods.
+     * Uses graph method-level data (Phase 2) when available.
+     */
+    private boolean hasBearerJwtFilter(List<CompilationUnit> cus) {
         if (graph != null) {
-            // Graph-based: query for any class whose superclass is OncePerRequestFilter
-            hasFilterSubclass = graph.nodesMatching(n ->
-                    "OncePerRequestFilter".equals(n.superclass())).stream()
-                    .anyMatch(n -> cuContainsClass(cu, n.simpleName()));
-        } else {
-            // AST fallback: check extends clause by name
-            hasFilterSubclass = cu.findAll(ClassOrInterfaceDeclaration.class).stream()
-                    .anyMatch(cls -> cls.getExtendedTypes().stream()
-                            .anyMatch(t -> t.getNameAsString().equals("OncePerRequestFilter")));
+            // Fully graph-based: superclass check + string literal check
+            return graph.nodesMatching(n ->
+                    "OncePerRequestFilter".equals(n.superclass())
+                    && n.methods().stream().anyMatch(m ->
+                            m.stringLiterals().stream().anyMatch(s ->
+                                    s.toLowerCase().contains("bearer ")
+                                    || s.equalsIgnoreCase("authorization")))
+            ).stream().findAny().isPresent();
         }
-        if (!hasFilterSubclass) return false;
-
-        // String literal check: still requires AST — graph does not capture string constants
-        return cu.findAll(StringLiteralExpr.class).stream()
-                .anyMatch(s -> s.asString().toLowerCase().contains("bearer ")
-                           || s.asString().equalsIgnoreCase("authorization"));
-    }
-
-    /** Returns true if the compilation unit contains a class with the given simple name. */
-    private boolean cuContainsClass(CompilationUnit cu, String simpleName) {
-        return cu.findAll(ClassOrInterfaceDeclaration.class).stream()
-                .anyMatch(cls -> cls.getNameAsString().equals(simpleName));
+        // AST fallback
+        return cus.stream().anyMatch(cu ->
+                cu.findAll(ClassOrInterfaceDeclaration.class).stream().anyMatch(cls -> {
+                    boolean extendsFilter = cls.getExtendedTypes().stream()
+                            .anyMatch(t -> t.getNameAsString().equals("OncePerRequestFilter"));
+                    if (!extendsFilter) return false;
+                    return cu.findAll(StringLiteralExpr.class).stream()
+                            .anyMatch(s -> s.asString().toLowerCase().contains("bearer ")
+                                       || s.asString().equalsIgnoreCase("authorization"));
+                }));
     }
 
     // ── requestMatchers rule extraction ───────────────────────────────────────

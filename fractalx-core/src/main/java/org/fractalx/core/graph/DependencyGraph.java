@@ -88,6 +88,32 @@ public final class DependencyGraph {
                 .collect(Collectors.groupingBy(GraphNode::packageName));
     }
 
+    // ── Method-level queries (Phase 2) ────────────────────────────────────
+
+    /** Returns nodes that have at least one method annotated with the given annotation. */
+    public List<GraphNode> nodesWithMethodAnnotation(String annotationSimpleName) {
+        return nodesMatching(n -> n.methods().stream()
+                .anyMatch(m -> m.annotations().contains(annotationSimpleName)));
+    }
+
+    /** Returns nodes that contain a string literal matching the predicate in any method body. */
+    public List<GraphNode> nodesContainingLiteral(java.util.function.Predicate<String> literalPredicate) {
+        return nodesMatching(n -> n.methods().stream()
+                .anyMatch(m -> m.stringLiterals().stream().anyMatch(literalPredicate)));
+    }
+
+    /** Returns nodes that have at least one method whose body calls the given method name. */
+    public List<GraphNode> nodesWithMethodCall(String methodName) {
+        return nodesMatching(n -> n.methods().stream()
+                .anyMatch(m -> m.bodyMethodCalls().contains(methodName)));
+    }
+
+    /** Returns nodes with a method that returns the given type (simple name). */
+    public List<GraphNode> nodesWithMethodReturning(String returnType) {
+        return nodesMatching(n -> n.methods().stream()
+                .anyMatch(m -> returnType.equals(m.returnType())));
+    }
+
     // ── Internals ──────────────────────────────────────────────────────────
 
     private List<GraphNode> resolveTargets(String fqcn, EdgeKind kind) {

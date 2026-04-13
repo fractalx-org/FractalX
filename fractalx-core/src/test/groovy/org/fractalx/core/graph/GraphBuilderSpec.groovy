@@ -418,6 +418,217 @@ class GraphBuilderSpec extends Specification {
         graph.implementorsOf("com.example.Auditable")[0].fqcn() == "com.example.Order"
     }
 
+    // ── Method-level data (Phase 2) ──────────────────────────────────────
+
+    def "collects method annotations"() {
+        given:
+        writeJavaFile("com/example", "OrderController.java", """
+            package com.example;
+            import org.springframework.web.bind.annotation.GetMapping;
+            import org.springframework.web.bind.annotation.RestController;
+            @RestController
+            public class OrderController {
+                @GetMapping("/orders")
+                public String listOrders() { return "orders"; }
+                public void internalMethod() {}
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+        def node = graph.node("com.example.OrderController").get()
+
+        then:
+        node.methods().size() == 2
+        node.methods().find { it.name() == "listOrders" }.annotations().contains("GetMapping")
+        node.methods().find { it.name() == "internalMethod" }.annotations().isEmpty()
+    }
+
+    def "collects method return types"() {
+        given:
+        writeJavaFile("com/example", "SecurityConfig.java", """
+            package com.example;
+            public class SecurityConfig {
+                public SecurityFilterChain filterChain() { return null; }
+                public void init() {}
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+        def node = graph.node("com.example.SecurityConfig").get()
+
+        then:
+        node.methods().find { it.name() == "filterChain" }.returnType() == "SecurityFilterChain"
+        node.methods().find { it.name() == "init" }.returnType() == "void"
+    }
+
+    def "collects string literals from method bodies"() {
+        given:
+        writeJavaFile("com/example", "JwtFilter.java", """
+            package com.example;
+            public class JwtFilter {
+                public void doFilter() {
+                    String header = request.getHeader("Authorization");
+                    if (header.startsWith("Bearer ")) {
+                        String token = header.substring(7);
+                    }
+                }
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+        def node = graph.node("com.example.JwtFilter").get()
+        def method = node.methods().find { it.name() == "doFilter" }
+
+        then:
+        method.stringLiterals().contains("Authorization")
+        method.stringLiterals().contains("Bearer ")
+    }
+
+    def "collects method body call expressions"() {
+        given:
+        writeJavaFile("com/example", "SecurityConfig.java", """
+            package com.example;
+            public class SecurityConfig {
+                public Object configure() {
+                    http.oauth2ResourceServer();
+                    http.httpBasic();
+                    return null;
+                }
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+        def node = graph.node("com.example.SecurityConfig").get()
+        def method = node.methods().find { it.name() == "configure" }
+
+        then:
+        method.bodyMethodCalls().contains("oauth2ResourceServer")
+        method.bodyMethodCalls().contains("httpBasic")
+    }
+
+    def "collects method parameter types"() {
+        given:
+        writeJavaFile("com/example", "AuthController.java", """
+            package com.example;
+            public class AuthController {
+                public String login(Authentication auth, String username) {
+                    return "ok";
+                }
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+        def node = graph.node("com.example.AuthController").get()
+        def method = node.methods().find { it.name() == "login" }
+
+        then:
+        method.parameterTypes() == ["Authentication", "String"]
+    }
+
+    def "nodesWithMethodAnnotation query works"() {
+        given:
+        writeJavaFile("com/example", "Config.java", """
+            package com.example;
+            public class Config {
+                @Bean
+                public Object myBean() { return null; }
+            }
+        """)
+        writeJavaFile("com/example", "Service.java", """
+            package com.example;
+            public class Service {
+                public void doWork() {}
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+
+        then:
+        graph.nodesWithMethodAnnotation("Bean").size() == 1
+        graph.nodesWithMethodAnnotation("Bean")[0].fqcn() == "com.example.Config"
+    }
+
+    def "nodesContainingLiteral query works"() {
+        given:
+        writeJavaFile("com/example", "Filter.java", """
+            package com.example;
+            public class Filter {
+                public void filter() {
+                    String h = "Bearer ";
+                }
+            }
+        """)
+        writeJavaFile("com/example", "Other.java", """
+            package com.example;
+            public class Other {
+                public void run() {
+                    String s = "hello";
+                }
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+
+        then:
+        graph.nodesContainingLiteral(s -> s.toLowerCase().contains("bearer")).size() == 1
+        graph.nodesContainingLiteral(s -> s.toLowerCase().contains("bearer"))[0].fqcn() == "com.example.Filter"
+    }
+
+    def "nodesWithMethodCall query works"() {
+        given:
+        writeJavaFile("com/example", "Config.java", """
+            package com.example;
+            public class Config {
+                public void setup() {
+                    http.oauth2ResourceServer();
+                }
+            }
+        """)
+        writeJavaFile("com/example", "Other.java", """
+            package com.example;
+            public class Other {
+                public void run() {}
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+
+        then:
+        graph.nodesWithMethodCall("oauth2ResourceServer").size() == 1
+        graph.nodesWithMethodCall("oauth2ResourceServer")[0].fqcn() == "com.example.Config"
+    }
+
+    def "nodesWithMethodReturning query works"() {
+        given:
+        writeJavaFile("com/example", "Config.java", """
+            package com.example;
+            public class Config {
+                public SecurityFilterChain chain() { return null; }
+            }
+        """)
+        writeJavaFile("com/example", "Service.java", """
+            package com.example;
+            public class Service {
+                public String process() { return "ok"; }
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+
+        then:
+        graph.nodesWithMethodReturning("SecurityFilterChain").size() == 1
+        graph.nodesWithMethodReturning("SecurityFilterChain")[0].fqcn() == "com.example.Config"
+    }
+
     // ── Determinism ────────────────────────────────────────────────────────
 
     def "same source produces identical graph — deterministic"() {

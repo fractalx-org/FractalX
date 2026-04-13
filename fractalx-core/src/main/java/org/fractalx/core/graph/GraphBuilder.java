@@ -4,6 +4,8 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.body.*;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 
 import java.io.IOException;
@@ -120,8 +122,11 @@ public class GraphBuilder {
             }
         }
 
+        // Phase 2: collect method-level metadata
+        List<MethodInfo> methods = collectMethods(type);
+
         GraphNode node = new GraphNode(fqcn, simpleName, kind, annotations,
-                implemented, superclass, packageName, sourceFile);
+                implemented, superclass, packageName, sourceFile, methods);
         nodesByFqcn.put(fqcn, node);
         simpleNameToFqcns.computeIfAbsent(simpleName, k -> new ArrayList<>()).add(fqcn);
 
@@ -143,6 +148,45 @@ public class GraphBuilder {
             return cid.isInterface() ? NodeKind.INTERFACE : NodeKind.CLASS;
         }
         return NodeKind.CLASS;
+    }
+
+    // ── Method-level data collection ────────────────────────────────────────
+
+    private List<MethodInfo> collectMethods(TypeDeclaration<?> type) {
+        List<MethodInfo> methods = new ArrayList<>();
+        for (MethodDeclaration method : type.getMethods()) {
+            String name = method.getNameAsString();
+            Set<String> methodAnnotations = method.getAnnotations().stream()
+                    .map(a -> a.getNameAsString())
+                    .collect(Collectors.toSet());
+            String returnType = method.getType().asString();
+            // Strip generics from return type
+            int genIdx = returnType.indexOf('<');
+            if (genIdx > 0) returnType = returnType.substring(0, genIdx);
+
+            List<String> paramTypes = method.getParameters().stream()
+                    .map(p -> {
+                        String t = p.getType().asString();
+                        int gi = t.indexOf('<');
+                        return gi > 0 ? t.substring(0, gi) : t;
+                    })
+                    .toList();
+
+            // Collect string literals from method body
+            Set<String> stringLiterals = method.findAll(StringLiteralExpr.class).stream()
+                    .map(StringLiteralExpr::asString)
+                    .collect(Collectors.toSet());
+
+            // Collect method call names from method body
+            List<String> bodyMethodCalls = method.findAll(MethodCallExpr.class).stream()
+                    .map(MethodCallExpr::getNameAsString)
+                    .distinct()
+                    .toList();
+
+            methods.add(new MethodInfo(name, methodAnnotations, returnType,
+                    paramTypes, stringLiterals, bodyMethodCalls));
+        }
+        return methods;
     }
 
     // ── Phase 2: Edge collection ───────────────────────────────────────────

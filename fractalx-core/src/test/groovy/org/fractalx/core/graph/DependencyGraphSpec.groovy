@@ -239,6 +239,70 @@ class DependencyGraphSpec extends Specification {
         byPkg["com.example.payment"].size() == 1
     }
 
+    // ── Method-level queries (Phase 2) ──────────────────────────────────
+
+    def "nodesWithMethodAnnotation finds nodes with annotated methods"() {
+        given:
+        def methods = [new MethodInfo("myBean", Set.of("Bean"), "Object", [], Set.of(), [])]
+        def a = new GraphNode("com.example.Config", "Config", NodeKind.CLASS,
+                Set.of(), Set.of(), null, "com.example", null, methods)
+        def b = new GraphNode("com.example.Service", "Service", NodeKind.CLASS,
+                Set.of(), Set.of(), null, "com.example", null, [])
+        def graph = DependencyGraph.builder().addNode(a).addNode(b).build()
+
+        expect:
+        graph.nodesWithMethodAnnotation("Bean").size() == 1
+        graph.nodesWithMethodAnnotation("Bean")[0].fqcn() == "com.example.Config"
+        graph.nodesWithMethodAnnotation("NonExistent").isEmpty()
+    }
+
+    def "nodesContainingLiteral finds nodes with matching string literals in methods"() {
+        given:
+        def methods = [new MethodInfo("filter", Set.of(), "void", [], Set.of("Bearer ", "Authorization"), [])]
+        def a = new GraphNode("com.example.JwtFilter", "JwtFilter", NodeKind.CLASS,
+                Set.of(), Set.of(), null, "com.example", null, methods)
+        def b = new GraphNode("com.example.Other", "Other", NodeKind.CLASS,
+                Set.of(), Set.of(), null, "com.example", null, [])
+        def graph = DependencyGraph.builder().addNode(a).addNode(b).build()
+
+        expect:
+        graph.nodesContainingLiteral(s -> s.contains("Bearer")).size() == 1
+        graph.nodesContainingLiteral(s -> s.contains("Bearer"))[0].fqcn() == "com.example.JwtFilter"
+        graph.nodesContainingLiteral(s -> s.contains("nope")).isEmpty()
+    }
+
+    def "nodesWithMethodCall finds nodes containing specific method calls"() {
+        given:
+        def methods = [new MethodInfo("configure", Set.of(), "void", [], Set.of(), ["oauth2ResourceServer", "httpBasic"])]
+        def a = new GraphNode("com.example.SecurityConfig", "SecurityConfig", NodeKind.CLASS,
+                Set.of(), Set.of(), null, "com.example", null, methods)
+        def b = new GraphNode("com.example.Other", "Other", NodeKind.CLASS,
+                Set.of(), Set.of(), null, "com.example", null, [])
+        def graph = DependencyGraph.builder().addNode(a).addNode(b).build()
+
+        expect:
+        graph.nodesWithMethodCall("oauth2ResourceServer").size() == 1
+        graph.nodesWithMethodCall("oauth2ResourceServer")[0].fqcn() == "com.example.SecurityConfig"
+        graph.nodesWithMethodCall("httpBasic").size() == 1
+        graph.nodesWithMethodCall("nonExistent").isEmpty()
+    }
+
+    def "nodesWithMethodReturning finds nodes with methods returning specific types"() {
+        given:
+        def methods = [new MethodInfo("chain", Set.of("Bean"), "SecurityFilterChain", [], Set.of(), [])]
+        def a = new GraphNode("com.example.Config", "Config", NodeKind.CLASS,
+                Set.of(), Set.of(), null, "com.example", null, methods)
+        def b = new GraphNode("com.example.Service", "Service", NodeKind.CLASS,
+                Set.of(), Set.of(), null, "com.example", null,
+                [new MethodInfo("process", Set.of(), "String", [], Set.of(), [])])
+        def graph = DependencyGraph.builder().addNode(a).addNode(b).build()
+
+        expect:
+        graph.nodesWithMethodReturning("SecurityFilterChain").size() == 1
+        graph.nodesWithMethodReturning("SecurityFilterChain")[0].fqcn() == "com.example.Config"
+        graph.nodesWithMethodReturning("void").isEmpty()
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
     private DependencyGraph threeNodeGraph() {
