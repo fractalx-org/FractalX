@@ -1,6 +1,6 @@
 # FractalX
 
-[![Maven Central](https://img.shields.io/badge/maven--central-0.4.0-blue)](https://central.sonatype.com/artifact/org.fractalx/fractalx-annotations)
+[![Maven Central](https://img.shields.io/badge/maven--central-0.4.1-blue)](https://central.sonatype.com/artifact/org.fractalx/fractalx-annotations)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Java](https://img.shields.io/badge/java-21%2B-orange)](https://adoptium.net/)
 [![Spring Boot](https://img.shields.io/badge/spring--boot-3.2%2B%20%7C%204.x-brightgreen)](https://spring.io/projects/spring-boot)
@@ -74,7 +74,7 @@ Manual microservices migrations are slow, error-prone, and expensive — requiri
 <dependency>
     <groupId>org.fractalx</groupId>
     <artifactId>fractalx-annotations</artifactId>
-    <version>0.4.0</version>
+    <version>0.4.1</version>
 </dependency>
 ```
 
@@ -100,7 +100,7 @@ That is the only source change required. No other annotations are needed in your
 <plugin>
     <groupId>org.fractalx</groupId>
     <artifactId>fractalx-maven-plugin</artifactId>
-    <version>0.4.0</version>
+    <version>0.4.1</version>
 </plugin>
 ```
 
@@ -111,7 +111,7 @@ mvn fractalx:decompose
 ```
 
 ```
-[INFO] FractalX 0.4.0 -- starting decomposition
+[INFO] FractalX 0.4.1 -- starting decomposition
 [INFO] Phase 1: Parsing 22 source files ...
 [INFO] Phase 2: Detected 2 modules, 1 cross-module dependency
 [INFO] Generating order-service   (port 8081) ...
@@ -2699,12 +2699,12 @@ Here is a minimal but complete modular monolith that FractalX can fully decompos
     <dependency>
         <groupId>org.fractalx</groupId>
         <artifactId>fractalx-annotations</artifactId>
-        <version>0.4.0</version>
+        <version>0.4.1</version>
     </dependency>
     <dependency>
         <groupId>org.fractalx</groupId>
         <artifactId>fractalx-runtime</artifactId>
-        <version>0.4.0</version>
+        <version>0.4.1</version>
     </dependency>
     <!-- your normal Spring Boot deps -->
 </dependencies>
@@ -2714,7 +2714,7 @@ Here is a minimal but complete modular monolith that FractalX can fully decompos
         <plugin>
             <groupId>org.fractalx</groupId>
             <artifactId>fractalx-maven-plugin</artifactId>
-            <version>0.4.0</version>
+            <version>0.4.1</version>
         </plugin>
     </plugins>
 </build>
