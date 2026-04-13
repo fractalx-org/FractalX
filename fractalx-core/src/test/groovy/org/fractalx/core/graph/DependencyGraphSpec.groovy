@@ -303,6 +303,21 @@ class DependencyGraphSpec extends Specification {
         graph.nodesWithMethodReturning("void").isEmpty()
     }
 
+    def "callArgumentsFor extracts string arguments for specific call sites"() {
+        given:
+        def methods = [new MethodInfo("generateToken", Set.of(), "String", ["User"], Set.of(),
+                ["claim", "subject", "compact"],
+                ["claim": Set.of("customerId", "roles"), "subject": Set.of()])]
+        def a = new GraphNode("com.example.JwtUtil", "JwtUtil", NodeKind.CLASS,
+                Set.of("Component"), Set.of(), null, "com.example", null, methods)
+        def graph = DependencyGraph.builder().addNode(a).build()
+
+        expect:
+        graph.callArgumentsFor({ true }, "claim") == Set.of("customerId", "roles")
+        graph.callArgumentsFor({ true }, "subject").isEmpty()
+        graph.callArgumentsFor({ true }, "nonExistent").isEmpty()
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
     private DependencyGraph threeNodeGraph() {

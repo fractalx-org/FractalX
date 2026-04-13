@@ -114,6 +114,22 @@ public final class DependencyGraph {
                 .anyMatch(m -> returnType.equals(m.returnType())));
     }
 
+    /**
+     * Extracts all string literal arguments passed to the given method call name
+     * across all methods of all nodes matching the predicate. For example,
+     * {@code callArgumentsFor(n -> true, "claim")} returns all claim names
+     * from {@code .claim("customerId", ...)} calls across the codebase.
+     */
+    public java.util.Set<String> callArgumentsFor(java.util.function.Predicate<GraphNode> nodePredicate,
+                                                   String callMethodName) {
+        return nodes.values().stream()
+                .filter(nodePredicate)
+                .flatMap(n -> n.methods().stream())
+                .map(m -> m.callArgumentLiterals().getOrDefault(callMethodName, java.util.Set.of()))
+                .flatMap(java.util.Set::stream)
+                .collect(Collectors.toSet());
+    }
+
     // ── Internals ──────────────────────────────────────────────────────────
 
     private List<GraphNode> resolveTargets(String fqcn, EdgeKind kind) {

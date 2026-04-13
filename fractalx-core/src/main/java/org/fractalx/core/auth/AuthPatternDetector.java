@@ -185,17 +185,10 @@ public class AuthPatternDetector {
                     boolean implementsUD = implementsInterface(cls, pkg, "UserDetails");
                     if (implementsUD && hasAnnotationStructural(cls, pkg, "Entity")) {
                         userDetailsPkg.set(pkg);
-                        // Collect domain-specific fields that should propagate into JWT claims
-                        Map<String, String> fields = new HashMap<>();
-                        for (FieldDeclaration f : cls.getFields()) {
-                            if (f.getVariables().isEmpty()) continue;
-                            String fieldName = f.getVariables().get(0).getNameAsString();
-                            if (STANDARD_USER_FIELDS.contains(fieldName)) continue;
-                            boolean hasRelationship = f.getAnnotations().stream()
-                                    .anyMatch(a -> RELATIONSHIP_ANNOTATIONS.contains(a.getNameAsString()));
-                            if (hasRelationship) continue;
-                            fields.put(fieldName, f.getElementType().asString());
-                        }
+                        // Collect domain-specific fields that should propagate into JWT claims.
+                        // Structural approach: read .claim("X", ...) calls from the monolith's
+                        // token-generation code to know exactly which claims are set.
+                        Map<String, String> fields = extractDomainFields(cls);
                         domainFieldsRef.set(fields);
                         log.debug("UserDetails entity found in package {}, domainFields={}", pkg, fields.keySet());
                     }
@@ -340,11 +333,10 @@ public class AuthPatternDetector {
     private String[] detectRegisterLinkedService(Path srcMain, String authPkg, String userPkg,
                                                   JavaParser parser) {
         if (authPkg == null) return null;
-        String authPkgPath = authPkg.replace('.', '/');
-        Path authDir = srcMain.resolve(authPkgPath);
-        if (!Files.isDirectory(authDir)) return null;
 
-        try (Stream<Path> files = Files.walk(authDir)) {
+        // Walk the entire source tree — the auth controller may live in a different
+        // package than the security configuration that triggered authPkg detection.
+        try (Stream<Path> files = Files.walk(srcMain)) {
             Optional<String[]> result = files
                     .filter(p -> p.toString().endsWith(".java"))
                     .flatMap(p -> {
@@ -458,6 +450,60 @@ public class AuthPatternDetector {
                 })
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * Extracts domain-specific fields from a UserDetails entity that should propagate as JWT claims.
+     *
+     * <p><b>Structural approach (graph available):</b> Queries the dependency graph for all
+     * {@code .claim("X", ...)} call-site arguments across classes that generate tokens. The
+     * returned fields are those entity fields whose names match actual claim names found in
+     * the monolith's token-generation code — no heuristic exclusion list needed.
+     *
+     * <p><b>Fallback (no graph):</b> Excludes {@link #STANDARD_USER_FIELDS} and JPA relationship
+     * fields, returning everything else as a domain field.
+     */
+    private Map<String, String> extractDomainFields(ClassOrInterfaceDeclaration cls) {
+        // Collect all declared fields on the entity (name → type)
+        Map<String, String> allFields = new LinkedHashMap<>();
+        for (FieldDeclaration f : cls.getFields()) {
+            if (f.getVariables().isEmpty()) continue;
+            String fieldName = f.getVariables().get(0).getNameAsString();
+            boolean hasRelationship = f.getAnnotations().stream()
+                    .anyMatch(a -> RELATIONSHIP_ANNOTATIONS.contains(a.getNameAsString()));
+            if (hasRelationship) continue;
+            allFields.put(fieldName, f.getElementType().asString());
+        }
+
+        if (graph != null) {
+            // Structural: find all .claim("X", ...) arguments from token-generation code
+            Set<String> claimNames = graph.callArgumentsFor(
+                    n -> n.methods().stream().anyMatch(m -> m.bodyMethodCalls().contains("claim")),
+                    "claim");
+
+            if (!claimNames.isEmpty()) {
+                // Return only fields whose names match actual claim names
+                Map<String, String> result = new LinkedHashMap<>();
+                for (Map.Entry<String, String> entry : allFields.entrySet()) {
+                    if (claimNames.contains(entry.getKey())) {
+                        result.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                log.debug("Structural claim extraction: claimNames={}, matched fields={}", claimNames, result.keySet());
+                return result;
+            }
+            // If no .claim() calls found in the graph, fall through to heuristic fallback
+            log.debug("No .claim() call sites found in graph — falling back to field exclusion");
+        }
+
+        // Fallback: exclude standard UserDetails fields
+        Map<String, String> result = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : allFields.entrySet()) {
+            if (!STANDARD_USER_FIELDS.contains(entry.getKey())) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return result;
     }
 
     /** Converts CamelCase to kebab-case: {@code CustomerAddress} → {@code customer-address}. */

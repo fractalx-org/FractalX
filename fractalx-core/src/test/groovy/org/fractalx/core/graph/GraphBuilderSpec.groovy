@@ -530,6 +530,67 @@ class GraphBuilderSpec extends Specification {
         method.parameterTypes() == ["Authentication", "String"]
     }
 
+    def "captures call-site argument literals for .claim() calls"() {
+        given:
+        writeJavaFile("com/example", "JwtUtil.java", """
+            package com.example;
+            public class JwtUtil {
+                public String generateToken(User user) {
+                    return Jwts.builder()
+                        .subject(user.getUsername())
+                        .claim("customerId", user.getCustomerId())
+                        .claim("roles", user.getRoles())
+                        .issuedAt(new java.util.Date())
+                        .compact();
+                }
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+        def node = graph.node("com.example.JwtUtil").get()
+        def method = node.methods().find { it.name() == "generateToken" }
+
+        then:
+        method.callArgumentLiterals().containsKey("claim")
+        method.callArgumentLiterals().get("claim").contains("customerId")
+        method.callArgumentLiterals().get("claim").contains("roles")
+        !method.callArgumentLiterals().get("claim").contains("subject")
+    }
+
+    def "callArgumentsFor extracts claims from token-generating classes"() {
+        given:
+        writeJavaFile("com/example", "JwtUtil.java", """
+            package com.example;
+            public class JwtUtil {
+                public String generateToken(User user) {
+                    return Jwts.builder()
+                        .claim("customerId", user.getCustomerId())
+                        .claim("email", user.getEmail())
+                        .compact();
+                }
+            }
+        """)
+        writeJavaFile("com/example", "Other.java", """
+            package com.example;
+            public class Other {
+                public void run() {}
+            }
+        """)
+
+        when:
+        def graph = new GraphBuilder().build(sourceRoot)
+        def claims = graph.callArgumentsFor(
+            { n -> n.methods().any { it.bodyMethodCalls().contains("claim") } },
+            "claim"
+        )
+
+        then:
+        claims.size() == 2
+        claims.contains("customerId")
+        claims.contains("email")
+    }
+
     def "nodesWithMethodAnnotation query works"() {
         given:
         writeJavaFile("com/example", "Config.java", """

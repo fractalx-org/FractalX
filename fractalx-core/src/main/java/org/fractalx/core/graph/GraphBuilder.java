@@ -178,13 +178,26 @@ public class GraphBuilder {
                     .collect(Collectors.toSet());
 
             // Collect method call names from method body
-            List<String> bodyMethodCalls = method.findAll(MethodCallExpr.class).stream()
+            List<MethodCallExpr> allCalls = method.findAll(MethodCallExpr.class);
+            List<String> bodyMethodCalls = allCalls.stream()
                     .map(MethodCallExpr::getNameAsString)
                     .distinct()
                     .toList();
 
+            // Collect call-site argument literals: method call name → string args
+            Map<String, Set<String>> callArgLiterals = new HashMap<>();
+            for (MethodCallExpr call : allCalls) {
+                String callName = call.getNameAsString();
+                call.getArguments().forEach(arg -> {
+                    if (arg instanceof StringLiteralExpr sle) {
+                        callArgLiterals.computeIfAbsent(callName, k -> new HashSet<>())
+                                .add(sle.asString());
+                    }
+                });
+            }
+
             methods.add(new MethodInfo(name, methodAnnotations, returnType,
-                    paramTypes, stringLiterals, bodyMethodCalls));
+                    paramTypes, stringLiterals, bodyMethodCalls, callArgLiterals));
         }
         return methods;
     }
