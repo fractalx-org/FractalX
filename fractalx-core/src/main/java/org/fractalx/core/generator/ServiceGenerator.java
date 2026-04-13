@@ -268,7 +268,7 @@ public class ServiceGenerator {
         SecurityProfile securityProfile = SecurityProfile.none();
         try {
             securityProfile = new SecurityAnalyzer().analyze(
-                    sourceRoot, sourceRoot.getParent().resolve("resources"));
+                    sourceRoot, sourceRoot.getParent().resolve("resources"), dependencyGraph);
             log.info("Monolith security profile detected: authType={}", securityProfile.authType());
         } catch (Exception e) {
             log.debug("SecurityAnalyzer could not scan monolith — treating as no-security: {}", e.getMessage());
@@ -292,7 +292,7 @@ public class ServiceGenerator {
         // Detect monolith auth pattern and optionally generate a standalone auth-service
         AuthPattern authPattern = AuthPattern.none();
         try {
-            authPattern = new AuthPatternDetector(projectRoot).detect();
+            authPattern = new AuthPatternDetector(projectRoot, dependencyGraph).detect();
             if (authPattern.detected()) {
                 log.info("Auth pattern detected — generating auth-service");
                 onStepStart.accept("auth-service");

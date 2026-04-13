@@ -10,6 +10,8 @@ import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import org.fractalx.core.graph.DependencyGraph;
+import org.fractalx.core.graph.GraphNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
@@ -52,9 +54,16 @@ public class AuthPatternDetector {
             "OneToMany", "ManyToOne", "OneToOne", "ManyToMany", "Embedded", "EmbeddedId");
 
     private final Path projectRoot;
+    private final DependencyGraph graph;
 
     public AuthPatternDetector(Path projectRoot) {
+        this(projectRoot, null);
+    }
+
+    /** Graph-aware constructor — uses structural queries for class-level checks. */
+    public AuthPatternDetector(Path projectRoot, DependencyGraph graph) {
         this.projectRoot = projectRoot;
+        this.graph = graph;
     }
 
     /**
@@ -140,7 +149,8 @@ public class AuthPatternDetector {
                     boolean isAuthClass = false;
 
                     // 1. @RestController with auth-related request mappings
-                    if (hasAnnotation(cls, "RestController")) {
+                    // Use graph for annotation check when available
+                    if (hasAnnotationStructural(cls, pkg, "RestController")) {
                         isAuthClass = cls.getAnnotations().stream()
                                 .anyMatch(this::isRequestMappingToAuth)
                                 || cls.getMethods().stream()
@@ -161,13 +171,12 @@ public class AuthPatternDetector {
 
                     // 2. @EnableWebSecurity configuration class
                     if (!isAuthClass) {
-                        isAuthClass = hasAnnotation(cls, "EnableWebSecurity");
+                        isAuthClass = hasAnnotationStructural(cls, pkg, "EnableWebSecurity");
                     }
 
-                    // 3. Class implements UserDetailsService
+                    // 3. Class implements UserDetailsService (structural check via graph or AST)
                     if (!isAuthClass) {
-                        isAuthClass = cls.getImplementedTypes().stream()
-                                .anyMatch(t -> t.getNameAsString().equals("UserDetailsService"));
+                        isAuthClass = implementsInterface(cls, pkg, "UserDetailsService");
                     }
 
                     // 4. Class has a method returning SecurityFilterChain
@@ -184,9 +193,8 @@ public class AuthPatternDetector {
 
                 // ── Detect UserDetails entity ───────────────────────────────
                 if (userDetailsPkg.get() == null) {
-                    boolean implementsUD = cls.getImplementedTypes().stream()
-                            .anyMatch(t -> t.getNameAsString().equals("UserDetails"));
-                    if (implementsUD && hasAnnotation(cls, "Entity")) {
+                    boolean implementsUD = implementsInterface(cls, pkg, "UserDetails");
+                    if (implementsUD && hasAnnotationStructural(cls, pkg, "Entity")) {
                         userDetailsPkg.set(pkg);
                         // Collect domain-specific fields that should propagate into JWT claims
                         Map<String, String> fields = new HashMap<>();
@@ -218,6 +226,33 @@ public class AuthPatternDetector {
                       // Match simple name or fully-qualified (e.g. @jakarta.persistence.Entity)
                       return n.equals(name) || n.endsWith("." + name);
                   });
+    }
+
+    /**
+     * Checks for an annotation using the DependencyGraph (structural) when available,
+     * falling back to AST-based name matching.
+     */
+    private boolean hasAnnotationStructural(ClassOrInterfaceDeclaration cls, String pkg, String annotationName) {
+        if (graph != null) {
+            String fqcn = pkg.isEmpty() ? cls.getNameAsString() : pkg + "." + cls.getNameAsString();
+            var node = graph.node(fqcn);
+            if (node.isPresent()) return node.get().annotations().contains(annotationName);
+        }
+        return hasAnnotation(cls, annotationName);
+    }
+
+    /**
+     * Checks if a class implements a given interface using the DependencyGraph (structural)
+     * when available, falling back to AST-based name matching.
+     */
+    private boolean implementsInterface(ClassOrInterfaceDeclaration cls, String pkg, String interfaceName) {
+        if (graph != null) {
+            String fqcn = pkg.isEmpty() ? cls.getNameAsString() : pkg + "." + cls.getNameAsString();
+            var node = graph.node(fqcn);
+            if (node.isPresent()) return node.get().implementedInterfaces().contains(interfaceName);
+        }
+        return cls.getImplementedTypes().stream()
+                .anyMatch(t -> t.getNameAsString().equals(interfaceName));
     }
 
     private static final Set<String> AUTH_PATH_FRAGMENTS = Set.of(
@@ -273,18 +308,18 @@ public class AuthPatternDetector {
                             for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
                                 if (!hasAnnotation(cls, "RestController")) continue;
 
-                                // Constructor parameters
+                                // Constructor parameters — identify service types structurally
                                 cls.getConstructors().forEach(ctor ->
                                         ctor.getParameters().forEach(param -> {
                                             String type = param.getTypeAsString();
-                                            if (type.endsWith("Service"))
+                                            if (isServiceType(type))
                                                 injectedServices.put(param.getNameAsString(), type);
                                         }));
-                                // Field injections
+                                // Field injections — identify service types structurally
                                 cls.getFields().forEach(field ->
                                         field.getVariables().forEach(v -> {
                                             String type = field.getElementType().asString();
-                                            if (type.endsWith("Service"))
+                                            if (isServiceType(type))
                                                 injectedServices.put(v.getNameAsString(), type);
                                         }));
 
@@ -344,6 +379,21 @@ public class AuthPatternDetector {
             log.debug("detectRegisterLinkedService: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Determines if a type is a service class. Uses the graph to check for @Service/@Component
+     * annotations (structural) when available; falls back to name suffix matching.
+     */
+    private boolean isServiceType(String simpleTypeName) {
+        if (graph != null) {
+            // Structural: check if any node with this simple name has a @Service or @Component annotation
+            return graph.nodesMatching(n -> n.simpleName().equals(simpleTypeName)
+                    && (n.annotations().contains("Service") || n.annotations().contains("Component")))
+                    .stream().findAny().isPresent();
+        }
+        // Name-based fallback
+        return simpleTypeName.endsWith("Service");
     }
 
     /** Returns the package of the first import matching the given simple type name, or null. */

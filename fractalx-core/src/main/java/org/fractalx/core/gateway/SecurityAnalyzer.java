@@ -9,6 +9,8 @@ import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import org.fractalx.core.gateway.SecurityProfile.AuthType;
 import org.fractalx.core.gateway.SecurityProfile.RouteSecurityRule;
+import org.fractalx.core.graph.DependencyGraph;
+import org.fractalx.core.graph.GraphNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
@@ -60,6 +62,9 @@ public class SecurityAnalyzer {
 
     private final JavaParser javaParser = new JavaParser();
 
+    /** Optional graph for structural queries — set via {@link #analyze(Path, Path, DependencyGraph)}. */
+    private DependencyGraph graph;
+
     /**
      * Analyzes the monolith project and returns a {@link SecurityProfile}.
      *
@@ -68,6 +73,19 @@ public class SecurityAnalyzer {
      * @param resourcesRoot  the monolith's {@code src/main/resources} directory
      */
     public SecurityProfile analyze(Path sourceRoot, Path resourcesRoot) {
+        return analyze(sourceRoot, resourcesRoot, null);
+    }
+
+    /**
+     * Graph-aware overload — uses the {@link DependencyGraph} for structural queries
+     * (extends, implements, annotations) instead of re-walking the AST for class-level checks.
+     */
+    public SecurityProfile analyze(Path sourceRoot, Path resourcesRoot, DependencyGraph dependencyGraph) {
+        this.graph = dependencyGraph;
+        return doAnalyze(sourceRoot, resourcesRoot);
+    }
+
+    private SecurityProfile doAnalyze(Path sourceRoot, Path resourcesRoot) {
         log.info("[SecurityAnalyzer] Scanning monolith security configuration...");
 
         // Resolve the java source directory — handle both project-root and src/main/java inputs
@@ -213,9 +231,16 @@ public class SecurityAnalyzer {
 
         // @EnableWebSecurity present but no specific type detected — assume Bearer JWT
         if (detected.isEmpty()) {
-            boolean hasWebSecurity = cus.stream().anyMatch(cu ->
-                    cu.findAll(ClassOrInterfaceDeclaration.class).stream()
-                            .anyMatch(c -> c.getAnnotationByName("EnableWebSecurity").isPresent()));
+            boolean hasWebSecurity;
+            if (graph != null) {
+                // Graph-based: structural annotation query
+                hasWebSecurity = !graph.nodesWithAnnotation("EnableWebSecurity").isEmpty();
+            } else {
+                // AST fallback
+                hasWebSecurity = cus.stream().anyMatch(cu ->
+                        cu.findAll(ClassOrInterfaceDeclaration.class).stream()
+                                .anyMatch(c -> c.getAnnotationByName("EnableWebSecurity").isPresent()));
+            }
             if (hasWebSecurity) {
                 log.info("[SecurityAnalyzer] @EnableWebSecurity detected but auth type unclear — assuming BEARER_JWT");
                 detected.add(AuthType.BEARER_JWT);
@@ -232,14 +257,31 @@ public class SecurityAnalyzer {
     }
 
     private boolean isBearerJwtFilter(CompilationUnit cu) {
-        return cu.findAll(ClassOrInterfaceDeclaration.class).stream().anyMatch(cls -> {
-            boolean extendsOncePerRequestFilter = cls.getExtendedTypes().stream()
-                    .anyMatch(t -> t.getNameAsString().equals("OncePerRequestFilter"));
-            boolean hasBearerLiteral = cu.findAll(StringLiteralExpr.class).stream()
-                    .anyMatch(s -> s.asString().toLowerCase().contains("bearer ")
-                               || s.asString().equalsIgnoreCase("authorization"));
-            return extendsOncePerRequestFilter && hasBearerLiteral;
-        });
+        // Structural check: use DependencyGraph when available to find filter subclasses
+        boolean hasFilterSubclass;
+        if (graph != null) {
+            // Graph-based: query for any class whose superclass is OncePerRequestFilter
+            hasFilterSubclass = graph.nodesMatching(n ->
+                    "OncePerRequestFilter".equals(n.superclass())).stream()
+                    .anyMatch(n -> cuContainsClass(cu, n.simpleName()));
+        } else {
+            // AST fallback: check extends clause by name
+            hasFilterSubclass = cu.findAll(ClassOrInterfaceDeclaration.class).stream()
+                    .anyMatch(cls -> cls.getExtendedTypes().stream()
+                            .anyMatch(t -> t.getNameAsString().equals("OncePerRequestFilter")));
+        }
+        if (!hasFilterSubclass) return false;
+
+        // String literal check: still requires AST — graph does not capture string constants
+        return cu.findAll(StringLiteralExpr.class).stream()
+                .anyMatch(s -> s.asString().toLowerCase().contains("bearer ")
+                           || s.asString().equalsIgnoreCase("authorization"));
+    }
+
+    /** Returns true if the compilation unit contains a class with the given simple name. */
+    private boolean cuContainsClass(CompilationUnit cu, String simpleName) {
+        return cu.findAll(ClassOrInterfaceDeclaration.class).stream()
+                .anyMatch(cls -> cls.getNameAsString().equals(simpleName));
     }
 
     // ── requestMatchers rule extraction ───────────────────────────────────────
@@ -335,8 +377,19 @@ public class SecurityAnalyzer {
 
         for (CompilationUnit cu : cus) {
             cu.findAll(ClassOrInterfaceDeclaration.class).forEach(cls -> {
-                boolean isController = cls.getAnnotationByName("RestController").isPresent()
-                        || cls.getAnnotationByName("Controller").isPresent();
+                boolean isController;
+                if (graph != null) {
+                    // Graph-based: structural annotation query
+                    String fqcn = cu.getPackageDeclaration()
+                            .map(pd -> pd.getNameAsString() + "." + cls.getNameAsString())
+                            .orElse(cls.getNameAsString());
+                    var node = graph.node(fqcn);
+                    isController = node.isPresent() && (node.get().annotations().contains("RestController")
+                            || node.get().annotations().contains("Controller"));
+                } else {
+                    isController = cls.getAnnotationByName("RestController").isPresent()
+                            || cls.getAnnotationByName("Controller").isPresent();
+                }
                 if (!isController) return;
 
                 String basePath = extractMappingPath(cls);
