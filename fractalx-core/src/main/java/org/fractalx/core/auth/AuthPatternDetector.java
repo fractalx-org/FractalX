@@ -432,14 +432,11 @@ public class AuthPatternDetector {
      * annotations (structural) when available; falls back to name suffix matching.
      */
     private boolean isServiceType(String simpleTypeName) {
-        if (graph != null) {
-            // Structural: check if any node with this simple name has a @Service or @Component annotation
-            return graph.nodesMatching(n -> n.simpleName().equals(simpleTypeName)
-                    && (n.annotations().contains("Service") || n.annotations().contains("Component")))
-                    .stream().findAny().isPresent();
-        }
-        // Name-based fallback
-        return simpleTypeName.endsWith("Service");
+        if (graph == null) return false;
+        // Structural: check if any node with this simple name has a @Service or @Component annotation
+        return graph.nodesMatching(n -> n.simpleName().equals(simpleTypeName)
+                && (n.annotations().contains("Service") || n.annotations().contains("Component")))
+                .stream().findAny().isPresent();
     }
 
     /**
