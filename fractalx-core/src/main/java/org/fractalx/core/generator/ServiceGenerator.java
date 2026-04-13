@@ -39,6 +39,8 @@ import org.fractalx.core.generator.transformation.ImportPreserver;
 import org.fractalx.core.generator.transformation.NetScopeClientWiringStep;
 import org.fractalx.core.generator.transformation.NetScopeServerAnnotationStep;
 import org.fractalx.core.generator.transformation.SagaMethodTransformer;
+import org.fractalx.core.graph.DependencyGraph;
+import org.fractalx.core.graph.GraphBuilder;
 import org.fractalx.core.model.FractalModule;
 import org.fractalx.core.model.SagaDefinition;
 import org.fractalx.core.naming.NameResolver;
@@ -254,6 +256,11 @@ public class ServiceGenerator {
         NameResolver nameResolver = new NameResolver(fractalxConfig.naming());
         new NamingValidator(nameResolver).validate(modules);
 
+        // Build the unified DependencyGraph from source (Phase 1 — deterministic, no heuristics)
+        DependencyGraph dependencyGraph = new GraphBuilder().build(sourceRoot);
+        log.info("DependencyGraph built: {} nodes, {} edges",
+                dependencyGraph.allNodes().size(), dependencyGraph.allEdges().size());
+
         // Detect @DistributedSaga definitions across all modules
         List<SagaDefinition> sagaDefinitions = sagaAnalyzer.analyzeSagas(sourceRoot, modules);
 
@@ -278,7 +285,7 @@ public class ServiceGenerator {
 
         for (FractalModule module : modules) {
             onStepStart.accept(module.getServiceName());
-            generateService(module, modules, fractalxConfig, sagaDefinitions, securityProfile, nameResolver);
+            generateService(module, modules, fractalxConfig, sagaDefinitions, securityProfile, nameResolver, dependencyGraph);
             onStepComplete.accept(module.getServiceName());
         }
 
@@ -352,7 +359,8 @@ public class ServiceGenerator {
                                   FractalxConfig fractalxConfig,
                                   List<SagaDefinition> sagaDefinitions,
                                   SecurityProfile securityProfile,
-                                  NameResolver nameResolver) throws IOException {
+                                  NameResolver nameResolver,
+                                  DependencyGraph dependencyGraph) throws IOException {
         log.debug("Generating service: {}", module.getServiceName());
 
         Path serviceRoot = outputRoot.resolve(module.getServiceName());
@@ -362,7 +370,7 @@ public class ServiceGenerator {
 
         GenerationContext context = new GenerationContext(
                 module, sourceRoot, serviceRoot, allModules, fractalxConfig, sagaDefinitions,
-                securityProfile, nameResolver);
+                securityProfile, nameResolver, dependencyGraph);
 
         for (ServiceFileGenerator step : pipeline) {
             step.generate(context);
